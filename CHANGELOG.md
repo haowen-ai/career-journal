@@ -8,7 +8,7 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Added
 
-- None
+- Published bilingual dogfood evidence for the `v0.1.0-alpha.3` public tag
 
 ### Changed
 
