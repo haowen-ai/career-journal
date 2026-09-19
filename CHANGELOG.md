@@ -22,6 +22,27 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.14] - 2026-09-19
+
+### Added
+
+- Added Agent-native mailbox onboarding that discovers signed-in host accounts and supports one or more user-selected job-search mailboxes
+- Added trusted-host mailbox verification and the credential-free `host-agent` semantic fallback
+
+### Changed
+
+- One `mail-sync` task now covers every selected mailbox while preserving legacy single-mailbox workspaces
+- Agent-managed onboarding no longer asks for IMAP settings or an external model Base URL and API key when the host already provides those capabilities
+
+### Fixed
+
+- Fixed first-run instructions that treated Agent-managed and standalone CLI/API setup as the same flow
+- Made `doctor` require fresh verification and a successful read-only sync for every selected mailbox
+
+### Security
+
+- Host mailbox proof stores only the connector, selected address, local account label, and verification time; credentials remain in the host mail integration
+
 ## [0.1.0-alpha.13] - 2026-09-19
 
 ### Added

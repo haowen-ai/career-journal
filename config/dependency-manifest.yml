@@ -26,7 +26,8 @@ dependencies:
       - daily-progress-review
     providers:
       verified: imap-tls
-      import_only: host-managed
+      verified_host: trusted-host
+      import_only_without_verification: host-managed
     access: read-only
     account_verification: live-required
     initial_sync: required
@@ -57,4 +58,5 @@ dependencies:
     api_docs: https://docs.typesafe.ai/api
     access_state: user-configured
     role: primary-semantic-decision-engine
-    fallback: deterministic-rules-then-structured-llm-then-manual-review
+    agent_fallback: deterministic-rules-then-current-agent-review
+    standalone_fallback: deterministic-rules-then-structured-llm-then-manual-review

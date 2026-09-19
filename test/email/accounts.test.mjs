@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openDatabase, migrate } from '../../src/storage/database.mjs';
-import { configureEmailAccount, disconnectEmailAccount, listEmailAccounts } from '../../src/email/accounts.mjs';
+import {
+  configureEmailAccount,
+  disconnectEmailAccount,
+  isLiveVerifiedEmailAccount,
+  listEmailAccounts,
+  recordTrustedHostVerification,
+} from '../../src/email/accounts.mjs';
 import { listTasks, markTaskRegistration, upsertTask } from '../../src/automation/registry.mjs';
 
 test('stores only explicitly configured read-only accounts', () => {
@@ -29,6 +35,25 @@ test('rejects writable email configuration and inline secrets', () => {
   assert.throws(() => configureEmailAccount(db, {
     provider: 'host', address: 'candidate@example.test', settings: { connector: 'gmail', extra: 'not-allowed' },
   }), /only stores the connector name/i);
+  db.close();
+});
+
+test('trusted host verification proves the selected account without storing mailbox credentials', () => {
+  const db = openDatabase(':memory:'); migrate(db);
+  const account = configureEmailAccount(db, {
+    provider: 'host', address: 'candidate@school.edu', settings: { connector: 'apple-mail' },
+  });
+  assert.equal(isLiveVerifiedEmailAccount(account, '2026-09-19T12:00:00.000Z'), false);
+  const verified = recordTrustedHostVerification(db, account.id, {
+    method: 'trusted-host', connector: 'apple-mail', address: 'candidate@school.edu',
+    externalId: 'mac-mail-account-1', verifiedAt: '2026-09-19T11:55:00.000Z',
+  });
+  assert.equal(isLiveVerifiedEmailAccount(verified, '2026-09-19T12:00:00.000Z'), true);
+  assert.equal(JSON.stringify(verified).includes('password'), false);
+  assert.throws(() => recordTrustedHostVerification(db, account.id, {
+    method: 'trusted-host', connector: 'gmail', address: 'candidate@school.edu',
+    externalId: 'wrong-connector', verifiedAt: '2026-09-19T11:55:00.000Z',
+  }), /does not match/i);
   db.close();
 });
 

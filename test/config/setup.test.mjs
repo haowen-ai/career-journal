@@ -100,6 +100,40 @@ test('a second setup preserves existing provider and account choices', async () 
   assert.equal(second.config.model.provider, 'openai-compatible');
 }));
 
+test('Agent-managed setup needs no separate model endpoint or key', async () => withHome(async (home) => {
+  const result = await setup(home, {
+    timezone: 'UTC',
+    email: { mode: 'skip' },
+    model: { provider: 'host-agent' },
+    jev: { accessState: 'unavailable' },
+  });
+  assert.deepEqual(result.config.model, {
+    provider: 'host-agent', baseUrl: null, model: null, secretRef: null, threshold: 0.8,
+  });
+}));
+
+test('setup binds one mail-sync task to every selected job-search mailbox', async () => withHome(async (home) => {
+  await setup(home, {
+    timezone: 'UTC',
+    email: { mode: 'configure', provider: 'host', address: 'personal@candidate.dev', settings: { connector: 'apple-mail' } },
+  });
+  await setup(home, {
+    timezone: 'UTC',
+    email: { mode: 'configure', provider: 'host', address: 'school@candidate.edu', settings: { connector: 'apple-mail' } },
+    provisionAutomations: true,
+    model: { provider: 'host-agent' },
+  });
+  const context = await openHomeDatabase(home);
+  try {
+    const mailTask = listTasks(context.db).find((task) => task.type === 'mail-sync');
+    assert.equal(mailTask.accountId, 'host:personal@candidate.dev');
+    assert.deepEqual(mailTask.config.accountIds, [
+      'host:personal@candidate.dev',
+      'host:school@candidate.edu',
+    ]);
+  } finally { context.db.close(); }
+}));
+
 test('rejects an invalid timezone', async () => withHome(async (home) => {
   await assert.rejects(() => setup(home, { timezone: 'Moon/Base' }), /Invalid IANA timezone/);
 }));
@@ -306,7 +340,7 @@ test('an explicit setup time override changes only that task and invalidates its
   } finally { context.db.close(); }
 }));
 
-test('setup refuses to guess among multiple host mailboxes without an existing binding', async () => withHome(async (home) => {
+test('setup includes every configured host mailbox in the daily selection', async () => withHome(async (home) => {
   await setup(home, {
     timezone: 'UTC',
     email: { mode: 'configure', provider: 'host', address: 'first@example.test', settings: { connector: 'gmail' } },
@@ -314,7 +348,12 @@ test('setup refuses to guess among multiple host mailboxes without an existing b
   await setup(home, {
     email: { mode: 'configure', provider: 'host', address: 'second@example.test', settings: { connector: 'outlook' } },
   });
-  await assert.rejects(() => setupCommand({ options: { home } }, memoryIO()), /multiple daily email accounts/i);
+  await setupCommand({ options: { home } }, memoryIO());
+  const context = await openHomeDatabase(home);
+  try {
+    const mailTask = listTasks(context.db).find((task) => task.type === 'mail-sync');
+    assert.deepEqual(mailTask.config.accountIds, ['host:first@example.test', 'host:second@example.test']);
+  } finally { context.db.close(); }
 }));
 
 test('host-managed setup rejects credential references because the connector owns authentication', async () => withHome(async (home) => {

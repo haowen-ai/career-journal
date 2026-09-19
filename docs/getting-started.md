@@ -6,9 +6,9 @@
 
 - Node.js 24 or newer
 - Git for installation and updates
-- A real read-only mailbox connection. The built-in, independently verifiable path uses IMAPS over TLS; a Codex or API host connector may also import mail, but its JSON alone is self-attested
-- An AI agent or scheduler that can create the two required jobs. The mail job must receive the IMAP environment variable securely
-- The exact email address chosen by the user; CAREER JOURNAL never guesses whether to use a school, work, or personal account
+- A real read-only mailbox connection. Agent-managed setup can use accounts already signed in to the host mail app; standalone setup can use IMAPS over TLS
+- An AI Agent or scheduler that can create the two required jobs
+- The user's choice of which discovered account or accounts are used for job search
 
 ## One-line Agent setup
 
@@ -18,13 +18,15 @@ Paste this one sentence into Codex, Claude Code, Cursor, or another repository-a
 Set up CAREER JOURNAL from https://github.com/haowenchen0811/career-journal by reading AGENTS.md and completing onboarding automatically.
 ```
 
-The Agent clones or opens the repository, reads [`AGENTS.md`](../AGENTS.md) and the repository Skill, detects the computer's IANA time zone, configures the selected read-only mailbox and decision provider, creates the two required schedules, verifies them, runs them once, and finishes with `doctor`. It then asks the user whether they want to import existing applications. The user only handles an unavoidable login, authorization, account choice, or confirmation of proposed history records. Passwords and API keys stay in environment variables or a secret store.
+The Agent clones or opens the repository, reads [`AGENTS.md`](../AGENTS.md) and the repository Skill, detects the computer's IANA time zone, configures the selected read-only mailboxes, creates the two required schedules, verifies them, runs them once, and finishes with `doctor`. It then asks the user whether they want to import existing applications. The user only handles an unavoidable login, authorization, account choice, or confirmation of proposed history records.
+
+On macOS, the Agent first discovers accessible Apple Mail or other host mail accounts and asks which one or more accounts the user uses for job search. If none are accessible, it asks the user to sign in to Apple Mail or another supported mail app and then resumes. When Jev is unavailable, the current coding Agent provides the semantic review. In Agent-managed mode, do not ask for a model Base URL, model name, or API key. IMAPS and external model credentials belong only to the standalone CLI/API path below.
 
 ### Optional history import
 
 After technical onboarding passes, the Agent asks the user whether they want to import existing applications. The user may choose a bounded read-only mailbox review, a file or spreadsheet, a short guided interview, or skip the step. The Agent prepares candidate records and asks the user to confirm them before writing. It does not infer missing dates, statuses, rejection reasons, or submitted materials, and it does not treat an old draft as the file actually submitted.
 
-## CLI and API-host setup
+## Standalone CLI and API-host setup
 
 Set the mailbox values to the real account you use for applications. Keep the app password or provider-issued credential in a protected environment or secret store; setup saves only its `env:VARIABLE` reference:
 
@@ -84,7 +86,7 @@ node ./bin/career-journal.mjs doctor --home "$CAREER_JOURNAL_HOME"
 node ./bin/career-journal.mjs start --home "$CAREER_JOURNAL_HOME"
 ```
 
-The IMAPS mail handler authenticates, opens the mailbox with `EXAMINE`, fetches with `BODY.PEEK[]`, and advances its UID cursor only after the local import commits. An empty mailbox is a valid successful run. Onboarding is complete only when `doctor` reports PASS for both email and automation. Email PASS requires a live IMAPS authentication plus a successful read-only sync within the last 36 hours. Automation PASS requires a live scheduler probe and one matching successful run from every verified task in the same window. Later setup runs preserve saved schedules, policies, task state, registrations, and time zone unless the user explicitly changes them.
+The IMAPS mail handler authenticates, opens the mailbox with `EXAMINE`, fetches with `BODY.PEEK[]`, and advances its UID cursor only after the local import commits. Agent-managed host accounts use trusted-host verification after the Agent has observed the matching signed-in account. An empty mailbox is a valid successful run. Onboarding is complete only when `doctor` reports PASS for every selected mailbox and both automations within the last 36 hours.
 
 Use `node ./bin/career-journal.mjs ...` or the included `./career-journal ...` launcher from the clone. To install the bare `career-journal` command globally, run `npm link` with a Node.js installation that includes npm.
 
@@ -108,11 +110,11 @@ $REPO/bin/career-journal.mjs application list --home $CAREER_JOURNAL_HOME --json
 
 ### Agent-managed onboarding
 
-Give the repository URL and one-line setup request to Codex, Claude Code, Cursor, or another repository-aware coding Agent. The Agent clones or opens the repository, discovers the repo-local `career-journal` Skill, asks only for information it cannot infer safely, configures live IMAPS, creates the two required ACTIVE scheduled jobs in the detected computer time zone, and binds every returned scheduler ID to its exact run command. It then reads the actual scheduler definitions, triggers each verified job once, and finishes technical setup only after `doctor` passes. Next it offers the optional review-before-write history import described above. The host must inject the named IMAP environment variable into the mail job without copying its value into the prompt. Host mailbox connectors may still supply read-only batches, but connector-authored JSON is not independent account proof. Resume and cover-letter work routes through the separate `careerops-materials` Skill.
+Give the repository URL and one-line setup request to Codex, Claude Code, Cursor, or another repository-aware coding Agent. The Agent discovers signed-in mail accounts, asks which one or more are used for job search, and configures those accounts without asking for IMAP details. It creates the two required ACTIVE jobs in the detected time zone, binds each scheduler ID to its exact command, reads the saved definitions, and runs both once. If Jev is unavailable, the current Agent reviews ambiguous candidates without another model credential. Resume and cover-letter work routes through the separate `careerops-materials` Skill.
 
 ### Local API and semantic decisions
 
-Run `career-journal start --home <data-directory>` for the loopback dashboard and JSON API. The generic path uses the built-in IMAPS client plus a scheduler that can securely expose the named IMAP and decision-provider environment variables to `mail-sync`. `automation install` can install and probe `deadline-review` on macOS, Linux, or Windows; the current alpha refuses native installation of `mail-sync` because those generated definitions do not yet have a safe cross-platform secret provider. API hosts may instead supply structured read-only batches, but need a separate live verifier adapter before mailbox health can PASS. Explicit deterministic rules run first at no model cost. The newly released Jev is the preferred semantic engine when configured. Without Jev, or when Jev is unavailable, in shadow mode, malformed, unknown, or below threshold, the router falls back to the configured structured LLM. If neither provider returns a valid, confident classification, the message becomes a manual-review candidate. Every provider result remains review evidence and never changes an application status by itself.
+Run `career-journal start --home <data-directory>` for the loopback dashboard and JSON API. The standalone path uses the built-in IMAPS client plus a scheduler that can securely expose named environment variables to `mail-sync`. `automation install` can install and probe `deadline-review` on macOS, Linux, or Windows; the current alpha refuses native installation of `mail-sync` because those generated definitions do not yet have a safe cross-platform secret provider. Explicit deterministic rules run first at no model cost. The newly released Jev is preferred when configured. Standalone deployments can fall back to a configured structured LLM; Agent-managed deployments use the current Agent. Every result remains review evidence and never changes an application status by itself.
 
 ## Email Integration
 
@@ -125,7 +127,13 @@ node ./bin/career-journal.mjs email sync-imap --home "$CAREER_JOURNAL_HOME" --ac
 
 The scheduled form uses the stable task ID: `automation run --id career-journal-mail-sync --home <absolute-home> --external-id <registered-id>`. It invokes the same direct IMAPS sync. Verification is refreshed on every real sync. The scheduler process must receive the environment variable named by `secret-ref`; the value remains outside CAREER JOURNAL and must never be placed in a heartbeat prompt or OS scheduler definition. Credentials are never returned by `email list`, written to batch files, or copied into a backup.
 
-`--email-provider host` means Codex, an API client, or another host owns mailbox authentication and read-only fetching. CAREER JOURNAL stores the provider name, address, connector label, cursors, and normalized evidence. It does not store the mailbox password, OAuth token, session cookie, or connector credential. A host batch remains **self-attested**: it can import messages, but cannot by itself prove that the stated mailbox exists or make `doctor` PASS. A host integration needs a separate live verifier adapter; the current alpha ships the IMAPS verifier as the generic verifier.
+`--email-provider host` means Codex, an API client, or another host owns mailbox authentication and read-only fetching. CAREER JOURNAL stores the provider name, address, connector label, cursors, and normalized evidence. It does not store the mailbox password, OAuth token, session cookie, or connector credential. A batch alone remains self-attested. After the Agent has actually observed the matching account through the host integration, it records a short-lived trusted-host proof:
+
+```sh
+career-journal email verify-host --home ~/job-search --account host:candidate@example.com --connector apple-mail --address candidate@example.com --external-id local-mail-account-id
+```
+
+The external ID is a stable local account label, not a credential. `doctor` requires this proof and a successful read-only sync for every selected mailbox within 36 hours.
 
 The host writes a bounded JSON batch and invokes the local importer:
 
@@ -202,8 +210,9 @@ The `careerops-materials` Skill loads the built-in defaults and every configured
 
 - **Deterministic rules:** handle explicit, reviewable cases first and avoid unnecessary API cost
 - **Jev:** the primary semantic classifier for ambiguous recruiting messages. TypeSafe AI released it in early access on September 15, 2026. Configure access with `--jev-secret-ref env:TYPESAFE_API_KEY`; the v1 adapter sends `state` plus one typed Choice question and validates the returned choice and confidence
-- **Structured LLM fallback:** the default semantic path when Jev is not configured and the automatic fallback when Jev cannot return a usable decision. Configure an OpenAI-compatible service with `--model-provider openai-compatible --model-base-url <url> --model-name <model> --model-secret-ref env:MODEL_API_KEY`
-- **Manual review:** receives decisions when neither Jev nor the configured structured LLM returns a valid, confident classification
+- **Current Agent:** the default Agent-managed fallback when Jev is unavailable; no additional endpoint or API key is needed
+- **Structured LLM fallback:** an optional standalone CLI/API path. Configure an OpenAI-compatible service with `--model-provider openai-compatible --model-base-url <url> --model-name <model> --model-secret-ref env:MODEL_API_KEY`
+- **Manual review:** receives decisions when no configured path returns a valid, confident classification
 
 After the key exists in the environment, run `npm run test:jev-live` for an explicit three-request contract and classification smoke test. It reports classifications, confidence, and token usage without printing the key. This live test is never part of the ordinary offline test suite or daily automation, so it cannot spend credit silently.
 
@@ -231,7 +240,7 @@ node ./bin/career-journal.mjs automation install --home "$CAREER_JOURNAL_HOME" -
 node ./bin/career-journal.mjs automation list --home "$CAREER_JOURNAL_HOME"
 ```
 
-Use the verified `registration.externalId` shown by `automation list` when triggering each task once. New installations use `io.career-journal.<task>` on macOS, `career-journal-<task>` on Linux, and `CareerJournal-<task>` on Windows. Native `mail-sync` installation is deliberately blocked in alpha.6: use Codex or another trusted external scheduler that can inject the configured environment secret without writing the secret into the job definition. A host-managed mailbox also needs an independent live verifier. Run `doctor` only after both required tasks have been probed and observed with their matching external IDs.
+Use the verified `registration.externalId` shown by `automation list` when triggering each task once. New installations use `io.career-journal.<task>` on macOS, `career-journal-<task>` on Linux, and `CareerJournal-<task>` on Windows. Native `mail-sync` installation is deliberately blocked for standalone credential-backed mail until a secure scheduler secret provider exists. Agent-managed host mail uses trusted-host verification after observing the real signed-in account. Run `doctor` only after every selected mailbox and both required tasks have current evidence.
 
 If you manually registered a definition, remove the OS registration before deleting its file:
 

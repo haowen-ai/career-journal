@@ -5,7 +5,7 @@ import { defaultConfig, validateTimezone } from '../config/defaults.mjs';
 import { loadConfig, saveConfig } from '../config/store.mjs';
 import { openDatabase, openReadOnlyDatabase, migrate, pendingMigrationError } from '../storage/database.mjs';
 import { assertPublicEmailAddress, configureEmailAccount, listEmailAccounts, emailSetupState } from '../email/accounts.mjs';
-import { upsertTask, listTasks, automationSetupState } from '../automation/registry.mjs';
+import { upsertTask, listTasks, automationSetupState, taskEmailAccountIds } from '../automation/registry.mjs';
 
 const DAILY_AUTOMATIONS = Object.freeze({
   'mail-sync': { time: '20:00', notificationPolicy: 'actionable' },
@@ -101,13 +101,13 @@ export async function setup(home, answers = {}) {
   }
   if (answers.model) {
     const provider = answers.model.provider ?? config.model.provider;
-    if (!['none', 'openai-compatible'].includes(provider)) throw new Error(`Unsupported model provider: ${provider}`);
+    if (!['none', 'host-agent', 'openai-compatible'].includes(provider)) throw new Error(`Unsupported model provider: ${provider}`);
     config.model = {
       ...config.model,
       provider,
-      baseUrl: answers.model.baseUrl === undefined ? config.model.baseUrl : cleanBaseUrl(answers.model.baseUrl),
-      model: answers.model.model ?? config.model.model,
-      secretRef: answers.model.secretRef === undefined ? config.model.secretRef : cleanModelSecretRef(answers.model.secretRef),
+      baseUrl: provider === 'host-agent' ? null : answers.model.baseUrl === undefined ? config.model.baseUrl : cleanBaseUrl(answers.model.baseUrl),
+      model: provider === 'host-agent' ? null : answers.model.model ?? config.model.model,
+      secretRef: provider === 'host-agent' ? null : answers.model.secretRef === undefined ? config.model.secretRef : cleanModelSecretRef(answers.model.secretRef),
       threshold: cleanThreshold(answers.model.threshold ?? config.model.threshold ?? 0.8, 'Model threshold'),
     };
   }
@@ -162,13 +162,8 @@ export async function setup(home, answers = {}) {
             (item.provider === 'host' && item.settings?.connector)
             || (item.provider === 'imap' && item.settings?.host && item.settings?.username)
           ));
-        const existingMailAccount = eligibleAccounts.find((item) => item.id === existingByType.get('mail-sync')?.accountId);
-        const configuredAccount = eligibleAccounts.find((item) => item.id === account?.id);
-        const selectedAccount = configuredAccount ?? existingMailAccount ?? (eligibleAccounts.length === 1 ? eligibleAccounts[0] : null);
-        if (!selectedAccount) {
-          if (eligibleAccounts.length > 1) {
-            throw new Error('Multiple daily email accounts are configured; select one by rerunning setup with --email-provider and --email-address');
-          }
+        const selectedAccounts = eligibleAccounts.sort((left, right) => left.id.localeCompare(right.id));
+        if (!selectedAccounts.length) {
           throw new Error('A host-managed or IMAPS read-only email account is required before automations can be provisioned');
         }
         for (const [type, defaults] of Object.entries(DAILY_AUTOMATIONS)) {
@@ -179,7 +174,8 @@ export async function setup(home, answers = {}) {
             enabled: existingTask?.enabled ?? true,
             timezone: answers.timezone !== undefined ? config.timezone : existingTask?.timezone ?? config.timezone,
             time: explicitTime ? answers.automationTimes[type] : existingTask?.schedule ?? defaults.time,
-            accountId: type === 'mail-sync' ? selectedAccount.id : existingTask?.accountId ?? null,
+            accountIds: type === 'mail-sync' ? selectedAccounts.map((item) => item.id) : undefined,
+            accountId: type === 'mail-sync' ? selectedAccounts[0].id : existingTask?.accountId ?? null,
             notificationPolicy: existingTask?.notificationPolicy ?? defaults.notificationPolicy,
             config: existingTask?.config ?? {},
           });
@@ -189,7 +185,7 @@ export async function setup(home, answers = {}) {
       const accounts = listEmailAccounts(db);
       const mailTask = listTasks(db).find((task) => task.type === 'mail-sync');
       config.email.accounts = accounts.map(({ id, provider, address, readOnly }) => ({ id, provider, address, readOnly }));
-      config.email.setupState = emailSetupState(accounts, mailTask?.accountId ?? null);
+      config.email.setupState = emailSetupState(accounts, mailTask ? taskEmailAccountIds(mailTask) : null);
     } finally { db.close(); }
   }
   await saveConfig(home, config);
@@ -288,12 +284,12 @@ export async function setupCommand(parsed, io, runtime) {
   io.out(`Timezone: ${result.config.timezone}`);
   io.out(`Email: ${result.config.email.setupState}`);
   io.out(`Automation: ${result.config.automation.setupState}`);
-  io.out(`Jev: ${result.config.jev.accessState === 'enabled' ? `${result.config.jev.model} active; key from ${result.config.jev.secretRef}` : `${result.config.jev.accessState}; ambiguous decisions use the configured LLM fallback, then manual review`}`);
-  io.out(`LLM fallback: ${result.config.model.provider === 'openai-compatible' ? `${result.config.model.model ?? 'model name missing'} via ${result.config.model.baseUrl ?? 'base URL missing'}` : 'not configured; unresolved decisions require manual review'}`);
+  io.out(`Jev: ${result.config.jev.accessState === 'enabled' ? `${result.config.jev.model} active; key from ${result.config.jev.secretRef}` : result.config.model.provider === 'host-agent' ? `${result.config.jev.accessState}; ambiguous candidates are reviewed by the current host Agent` : `${result.config.jev.accessState}; ambiguous decisions use the configured LLM fallback, then manual review`}`);
+  io.out(`Semantic fallback: ${result.config.model.provider === 'host-agent' ? 'current host Agent; no separate Base URL or API key required' : result.config.model.provider === 'openai-compatible' ? `${result.config.model.model ?? 'model name missing'} via ${result.config.model.baseUrl ?? 'base URL missing'}` : 'not configured; unresolved decisions require manual review'}`);
   if (result.config.email.setupState !== 'verified') {
     io.out(emailProvider === 'imap'
       ? 'Next: set the IMAP credential environment variable, run email verify-imap, then create and register the mail-sync job.'
-      : 'Next: connect a live verifier for the selected host mailbox; host batch JSON alone remains self-attested.');
+      : 'Next: verify every selected account observed in the host mail integration with email verify-host, then run the read-only host sync.');
   }
   if (result.config.automation.setupState !== 'registered') {
     io.out('Next: create the mail-sync and deadline-review schedules, register each returned ID, add the returned exact command to its scheduler job, run automation verify, trigger each verified job once, then run doctor.');

@@ -3,7 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { commitPreparedMessageImport, prepareMessageImport } from './eml.mjs';
 import { isLiveVerifiedEmailAccount, recordImapVerification } from './accounts.mjs';
 import { fetchImapMailbox } from './imap.mjs';
-import { isCurrentTaskRegistration } from '../automation/registry.mjs';
+import { isCurrentTaskRegistration, taskEmailAccountIds } from '../automation/registry.mjs';
 
 const MAX_BATCH_BYTES = 5 * 1024 * 1024;
 const MAX_MESSAGES = 200;
@@ -75,13 +75,14 @@ function hashBatch(batch) {
 function registeredMailTask(db, accountId, externalTaskId) {
   const tasks = db.prepare(`SELECT id, task_type type, enabled, timezone, schedule, account_id accountId,
     notification_policy notificationPolicy, cursor, config_json configJson FROM automations
-    WHERE task_type = 'mail-sync' AND account_id = ? ORDER BY id`).all(accountId)
+    WHERE task_type = 'mail-sync' ORDER BY id`).all()
     .map((task) => {
       let config;
       try { config = JSON.parse(task.configJson); }
       catch { config = {}; }
       return { ...task, enabled: Boolean(task.enabled), config };
-    });
+    })
+    .filter((task) => taskEmailAccountIds(task).includes(accountId));
   const matches = tasks.filter((task) => task.config.registration?.externalId === externalTaskId);
   if (matches.length !== 1) throw new Error('Batch externalTaskId does not match one registered mail-sync task for the account');
   const task = matches[0];
@@ -146,7 +147,9 @@ async function syncMailboxBatch(db, accountId, rawBatch, adapters, now, expected
   if (expectedConnector !== batch.connector) throw new Error('Batch connector must match the configured account connector');
   const task = registeredMailTask(db, accountId, batch.externalTaskId);
   const currentCursor = account.cursor ?? null;
-  if ((task.cursor ?? null) !== currentCursor) throw new Error('Mail-sync task cursor does not match the configured account cursor');
+  const selectedAccountIds = taskEmailAccountIds(task);
+  const singleAccount = selectedAccountIds.length === 1;
+  if (singleAccount && (task.cursor ?? null) !== currentCursor) throw new Error('Mail-sync task cursor does not match the configured account cursor');
 
   const batchHash = hashBatch(batch);
   if (account.lastRunId === batch.runId) {
@@ -172,8 +175,12 @@ async function syncMailboxBatch(db, accountId, rawBatch, adapters, now, expected
   const attempted = db.prepare(`UPDATE email_accounts SET last_attempt_at = ?, error = NULL
     WHERE id = ? AND revision = ? AND cursor IS ?`).run(now, accountId, account.revision, currentCursor);
   if (attempted.changes !== 1) throw new Error('Stale host sync cursor: account changed before processing');
-  db.prepare('UPDATE automations SET last_attempt_at = ?, error = NULL WHERE id = ? AND cursor IS ?')
-    .run(now, task.id, currentCursor);
+  if (singleAccount) {
+    db.prepare('UPDATE automations SET last_attempt_at = ?, error = NULL WHERE id = ? AND cursor IS ?')
+      .run(now, task.id, currentCursor);
+  } else {
+    db.prepare('UPDATE automations SET last_attempt_at = ?, error = NULL WHERE id = ?').run(now, task.id);
+  }
 
   let created = 0;
   try {
@@ -200,9 +207,13 @@ async function syncMailboxBatch(db, accountId, rawBatch, adapters, now, expected
         WHERE id = ? AND revision = ? AND cursor IS ?`)
         .run(batch.afterCursor, batch.runId, batchHash, batch.fetchedAt, now, accountId, account.revision, currentCursor);
       if (accountUpdate.changes !== 1) throw new Error('Stale host sync cursor: account changed during processing');
-      const taskUpdate = db.prepare(`UPDATE automations SET cursor = ?, last_attempt_at = ?,
-        last_success_at = ?, error = NULL, config_json = ? WHERE id = ? AND cursor IS ?`)
-        .run(batch.afterCursor, now, now, JSON.stringify(task.config), task.id, currentCursor);
+      const taskUpdate = singleAccount
+        ? db.prepare(`UPDATE automations SET cursor = ?, last_attempt_at = ?,
+          last_success_at = ?, error = NULL, config_json = ? WHERE id = ? AND cursor IS ?`)
+          .run(batch.afterCursor, now, now, JSON.stringify(task.config), task.id, currentCursor)
+        : db.prepare(`UPDATE automations SET last_attempt_at = ?, last_success_at = ?,
+          error = NULL, config_json = ? WHERE id = ?`)
+          .run(now, now, JSON.stringify(task.config), task.id);
       if (taskUpdate.changes !== 1) throw new Error('Stale host sync cursor: mail-sync task changed during processing');
       db.exec('COMMIT');
     } catch (error) {
@@ -223,8 +234,12 @@ async function syncMailboxBatch(db, accountId, rawBatch, adapters, now, expected
   } catch (error) {
     db.prepare(`UPDATE email_accounts SET error = ? WHERE id = ? AND revision = ? AND cursor IS ?`)
       .run(error.message, accountId, account.revision, currentCursor);
-    db.prepare(`UPDATE automations SET error = ?, last_attempt_at = ? WHERE id = ? AND cursor IS ?`)
-      .run(error.message, now, task.id, currentCursor);
+    if (singleAccount) {
+      db.prepare(`UPDATE automations SET error = ?, last_attempt_at = ? WHERE id = ? AND cursor IS ?`)
+        .run(error.message, now, task.id, currentCursor);
+    } else {
+      db.prepare('UPDATE automations SET error = ?, last_attempt_at = ? WHERE id = ?').run(error.message, now, task.id);
+    }
     throw error;
   }
 }

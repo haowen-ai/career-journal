@@ -85,6 +85,30 @@ test('the repository-driven first run offers a review-before-write history impor
   }
 });
 
+test('Agent onboarding discovers and selects one or more host mailboxes without extra model credentials', async () => {
+  const [agentInstructions, englishSkill, chineseSkill, englishGuide, chineseGuide] = await Promise.all([
+    readFile('AGENTS.md', 'utf8'),
+    readFile('.agents/skills/career-journal/SKILL.md', 'utf8'),
+    readFile('.agents/skills/career-journal/SKILL.zh-CN.md', 'utf8'),
+    readFile('docs/getting-started.md', 'utf8'),
+    readFile('docs/getting-started.zh-CN.md', 'utf8'),
+  ]);
+  for (const document of [agentInstructions, englishSkill, englishGuide]) {
+    assert.match(document, /discover[^\n]*(?:Apple Mail|host)[^\n]*accounts/i);
+    assert.match(document, /which (?:one or more|account or accounts)[^\n]*job search/i);
+    assert.match(document, /sign in[^\n]*(?:Apple Mail|mail app)/i);
+    assert.match(document, /current (?:coding )?Agent[^\n]*(?:Jev|semantic)/i);
+    assert.match(document, /do not ask[^\n]*(?:Base URL|API key)/i);
+  }
+  for (const document of [chineseSkill, chineseGuide]) {
+    assert.match(document, /识别[^\n]*(?:Apple Mail|宿主)[^\n]*邮箱账号/);
+    assert.match(document, /一个或多个[^\n]*求职/);
+    assert.match(document, /登录[^\n]*(?:Apple Mail|邮件应用)/);
+    assert.match(document, /当前[^\n]*Agent[^\n]*(?:Jev|语义)/);
+    assert.match(document, /不要询问[^\n]*(?:Base URL|API Key)/i);
+  }
+});
+
 test('English and Chinese landing pages use matching-language product previews', async () => {
   const [english, chinese] = await Promise.all([
     readFile('README.md', 'utf8'),
@@ -126,7 +150,7 @@ test('bilingual Getting Started guides retain the complete operating contract', 
   for (const phrase of ['Codex', 'Claude Code', '每日自动化', '数据与隐私', '更新、迁移、备份与卸载', 'CareerOps', 'Jev', '新发布', '大语言模型']) {
     assert.match(chinese, new RegExp(phrase, 'i'));
   }
-  assert.match(english, /without Jev[^\n]*(?:structured LLM|OpenAI-compatible)/i);
+  assert.match(english, /(?:without Jev|Jev is unavailable)[^\n]*(?:current Agent|current coding Agent)/i);
   assert.match(chinese, /Jev[^\n]*2026 年 9 月 15 日/);
 });
 

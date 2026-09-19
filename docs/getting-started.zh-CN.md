@@ -6,9 +6,9 @@
 
 - Node.js 24 或更新版本
 - Git，用于安装和更新
-- 一个由用户选择、能够实际完成只读连接的求职邮箱。内置验证方式使用 TLS 加密的 IMAPS；Codex 或 API 连接器也可以导入邮件，但单独一份 JSON 不能证明邮箱已经连接成功
-- 一个能够按时执行命令的调度器。Codex 能安全提供 IMAP 环境变量时可以运行两个必需任务；当前版本的本机操作系统安装支持 `deadline-review`
-- 准确的邮箱地址。CAREER JOURNAL 不会替用户猜测应该使用学校邮箱、工作邮箱还是个人邮箱
+- 一个真实、只读的邮箱连接。Agent 模式可以使用宿主邮件应用中已经登录的账号；独立模式可以使用 TLS IMAPS
+- 一个能够按时执行两个必需任务的 Agent 或调度器
+- 用户明确选择哪些已识别账号用于求职，可以选择一个或多个
 
 ## 一句话安装
 
@@ -18,13 +18,15 @@
 请从 https://github.com/haowenchen0811/career-journal 安装并配置 CAREER JOURNAL，读取 AGENTS.md 后自动完成首次配置。
 ```
 
-Agent 会自动克隆或打开仓库，读取 [`AGENTS.md`](../AGENTS.md) 和仓库 Skill，检测电脑的 IANA 时区，配置用户选择的只读邮箱和判断服务，创建并验证两个必需的定时任务，各运行一次，最后执行 `doctor`。技术配置通过后，Agent 会询问用户是否需要导入历史投递。用户只需处理无法代办的登录、授权、账号选择，以及确认待导入的历史记录。密码和 API Key 只保存在环境变量或密钥管理工具中。
+Agent 会自动克隆或打开仓库，读取 [`AGENTS.md`](../AGENTS.md) 和仓库 Skill，检测电脑的 IANA 时区，配置用户选择的只读邮箱，创建并验证两个必需的定时任务，各运行一次，最后执行 `doctor`。技术配置通过后，Agent 会询问用户是否需要导入历史投递。用户只需处理无法代办的登录、授权、账号选择，以及确认待导入的历史记录。
+
+在 macOS 上，Agent 会先识别 Apple Mail 或其他宿主集成中已经登录、可以访问的邮箱账号，再询问其中哪一个或多个用于求职。如果没有可访问账号，Agent 会请用户登录 Apple Mail 或其他受支持的邮件应用，然后继续配置。没有 Jev 时，由当前编程 Agent 复核语义模糊的候选内容；Agent 模式不要询问模型 Base URL、模型名或 API Key。IMAPS 和外部模型凭据只属于后面的独立 CLI/API 配置。
 
 ### 可选的历史投递导入
 
 技术配置通过后，Agent 会询问用户是否需要导入历史投递。用户可以选择限定范围的只读邮箱检查、文件或表格导入、简短问答，也可以跳过。Agent 会先整理候选记录，得到用户确认后再写入；不得推测缺失的日期、状态、拒绝原因或实际提交材料，也不能把旧的简历草稿当成实际提交版本。
 
-## 使用 CLI 或 API 配置
+## 独立使用 CLI 或 API 配置
 
 把下面的邮箱信息替换成实际用于求职的账号。应用专用密码或服务凭据应放在受保护的环境变量或密钥管理工具中；`setup` 只保存 `env:VARIABLE` 形式的引用，不保存凭据本身：
 
@@ -96,15 +98,15 @@ IMAPS 邮件处理器会先完成账号认证，再用 `EXAMINE` 以只读方式
 
 ### Agent 自动配置
 
-把仓库地址和一句话安装要求交给 Codex、Claude Code、Cursor 或其他能够读取仓库的编程 Agent。Agent 会自动克隆或打开仓库，读取 `career-journal` Skill，只询问无法安全推断的信息，配置 IMAPS 只读连接，按照电脑检测到的时区创建两个必需的 `ACTIVE` heartbeat，并把每个 automation ID 与对应的完整命令绑定。
+把仓库地址和一句话安装要求交给 Codex、Claude Code、Cursor 或其他能够读取仓库的编程 Agent。Agent 会先识别已经登录的邮箱账号，只询问哪一个或多个用于求职，不会要求用户填写 IMAP 技术参数。随后按照电脑检测到的时区创建两个必需的 `ACTIVE` heartbeat，并把每个 automation ID 与对应的完整命令绑定。
 
-完成后，Agent 会重新读取实际保存的自动化定义，检查时间、时区和命令，再分别运行一次。只有 `doctor` 通过后，技术配置才会结束；随后 Agent 会提供上面所述、先确认再写入的可选历史投递导入。Agent 的运行环境必须安全提供指定的 IMAP 环境变量，不能把密码复制进 prompt。宿主邮箱连接器仍可导入只读邮件批次，但连接器生成的 JSON 不能单独证明邮箱账号已经验证。简历和求职信任务由独立的 `careerops-materials` Skill 处理。
+完成后，Agent 会重新读取实际保存的自动化定义，检查时间、时区和命令，再分别运行一次。只有每个选中邮箱和两个任务都通过 `doctor`，技术配置才会结束；随后 Agent 会提供先确认再写入的可选历史投递导入。宿主邮箱批次本身不能证明账号身份，Agent 必须在实际看到已登录账号后记录可信宿主验证。简历和求职信任务由独立的 `careerops-materials` Skill 处理。
 
 ### 本地 API 与语义判断
 
 运行 `career-journal start --home <data-directory>` 可以启动本地看板和 JSON API。通用方案使用内置 IMAPS 客户端，并要求调度器能把指定的 IMAP 和决策服务环境变量安全提供给 `mail-sync`。
 
-在 macOS、Linux 或 Windows 上，`automation install` 目前可以安装并检查 `deadline-review`。当前 alpha 版本会拒绝直接安装 `mail-sync`，因为自动生成的系统任务还没有安全、跨平台的凭据注入方式。API 客户端可以提交结构化的只读邮件批次，但要让邮箱健康检查通过，仍需单独连接并验证邮箱。含义明确的邮件先走固定规则。配置 Jev 后，模糊邮件优先交给 Jev；没有 Jev，或者 Jev 无法给出可用结果时，系统自动改用已配置的大语言模型。两者都无法可靠判断时，邮件进入人工复核。模型输出只生成待审核记录，不会直接改变申请状态。
+在 macOS、Linux 或 Windows 上，`automation install` 目前可以安装并检查 `deadline-review`。独立模式会拒绝直接安装需要凭据的 `mail-sync`，因为自动生成的系统任务还没有安全、跨平台的凭据注入方式。含义明确的邮件先走固定规则；配置 Jev 后优先使用 Jev。Agent 模式没有 Jev 时由当前 Agent 复核，独立模式可以使用已配置的大语言模型。所有结果只生成待审核记录，不会直接改变申请状态。
 
 ## 邮箱集成
 
@@ -117,9 +119,13 @@ node ./bin/career-journal.mjs email sync-imap --home "$CAREER_JOURNAL_HOME" --ac
 
 定时任务使用稳定的任务 ID：`automation run --id career-journal-mail-sync --home <absolute-home> --external-id <registered-id>`。它调用的仍是同一套直接 IMAPS 同步逻辑，每次成功连接真实邮箱都会刷新验证状态。调度进程必须能读取 `secret-ref` 指向的环境变量；变量值始终保留在 CAREER JOURNAL 之外，不能写入 heartbeat prompt 或操作系统任务定义。`email list` 不会返回凭据，批次文件和备份中也不会复制凭据。
 
-`--email-provider host` 表示由 Codex、API 客户端或其他运行环境负责登录邮箱并进行只读获取。CAREER JOURNAL 只保存服务名称、邮箱地址、连接器标签、同步位置和整理后的邮件证据，不保存邮箱密码、OAuth Token、会话 Cookie 或连接器凭据。
+`--email-provider host` 表示由 Codex、API 客户端或其他运行环境负责登录邮箱并进行只读获取。CAREER JOURNAL 只保存服务名称、邮箱地址、连接器标签、同步位置和整理后的邮件证据，不保存邮箱密码、OAuth Token、会话 Cookie 或连接器凭据。导入批次本身仍属于自我声明；Agent 必须先通过宿主集成实际看到对应账号，再记录短期有效的可信宿主验证：
 
-这类导入批次可以写入邮件，但它本身只能说明发送方声称数据来自该邮箱，不能证明账号确实存在或当前仍可访问，也不能单独让 `doctor` 通过。运行环境还要提供独立的真实邮箱验证方式；当前 alpha 版本内置的通用验证方式是 IMAPS。
+```sh
+career-journal email verify-host --home ~/job-search --account host:candidate@example.com --connector apple-mail --address candidate@example.com --external-id local-mail-account-id
+```
+
+这里的 external ID 是稳定的本地账号标识，不是凭据。`doctor` 要求每个选中邮箱在最近 36 小时内同时存在可信验证和成功的只读同步。
 
 运行环境先把有大小限制的 JSON 批次写入私有临时文件，再调用本地导入命令：
 
@@ -198,8 +204,9 @@ career-journal setup --home ~/job-search --material-rules /path/to/personal-resu
 
 - **固定规则：** 先处理含义明确、可以直接检查的场景，避免产生不必要的 API 费用
 - **新发布的 Jev：** TypeSafe AI 于 2026 年 9 月 15 日开放 early access。CAREER JOURNAL 已完成适配，并在用户配置后把 Jev 作为首选语义判断引擎。使用 `--jev-secret-ref env:TYPESAFE_API_KEY` 配置；v1 适配器会发送 `state` 和一个选项固定的 Choice 问题，并检查返回选项与置信度
-- **大语言模型回退：** 没有 Jev 时默认使用用户配置的 OpenAI-compatible 服务；Jev 不可用、处于 `shadow` 模式、返回格式错误、结果未知或置信度不足时，也会自动改用该服务。配置命令为 `--model-provider openai-compatible --model-base-url <url> --model-name <model> --model-secret-ref env:MODEL_API_KEY`
-- **人工复核：** Jev 和大语言模型都无法给出格式正确、置信度达标的判断时，由用户复核
+- **当前 Agent：** Agent 模式没有 Jev 时的默认处理方式，不需要额外的模型地址或 API Key
+- **大语言模型回退：** 独立 CLI/API 模式的可选能力。配置命令为 `--model-provider openai-compatible --model-base-url <url> --model-name <model> --model-secret-ref env:MODEL_API_KEY`
+- **人工复核：** 没有任何已配置路径能给出格式正确、置信度达标的判断时，由用户复核
 
 在环境变量中提供 Key 后，可以手动运行 `npm run test:jev-live`，用三次真实请求检查 API 格式和分类结果。命令只输出分类、置信度和 token 用量，不会打印 Key。这个测试不会加入普通离线测试或每日自动任务，因此不会在后台自动消耗额度。
 

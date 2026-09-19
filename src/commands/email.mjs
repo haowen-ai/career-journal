@@ -6,6 +6,7 @@ import {
   disconnectEmailAccount,
   emailSetupState,
   verifyImapEmailAccount,
+  recordTrustedHostVerification,
 } from '../email/accounts.mjs';
 import { importEml } from '../email/eml.mjs';
 import { saveConfig } from '../config/store.mjs';
@@ -13,7 +14,7 @@ import { createJevAdapter } from '../decision/jev.mjs';
 import { classifyWithStructuredLlm } from '../decision/structured-llm.mjs';
 import { createProvider } from '../providers/interface.mjs';
 import { loadHostBatch, syncHostBatch } from '../email/host-sync.mjs';
-import { automationSetupState, listTasks } from '../automation/registry.mjs';
+import { automationSetupState, listTasks, taskEmailAccountIds } from '../automation/registry.mjs';
 import { syncImapEmailAccount } from '../email/imap-sync.mjs';
 
 export function configuredDecisionAdapters(config, fetchImpl = globalThis.fetch, env = process.env) {
@@ -34,7 +35,7 @@ async function persistEmailState(context) {
   const tasks = listTasks(context.db);
   const mailTask = tasks.find((task) => task.type === 'mail-sync');
   context.config.email.accounts = accounts.map(({ id, provider, address, readOnly }) => ({ id, provider, address, readOnly }));
-  context.config.email.setupState = emailSetupState(accounts, mailTask?.accountId ?? null);
+  context.config.email.setupState = emailSetupState(accounts, mailTask ? taskEmailAccountIds(mailTask) : null);
   context.config.automation = { ...context.config.automation, setupState: automationSetupState(tasks) };
   context.config.updatedAt = new Date().toISOString();
   await saveConfig(context.root, context.config);
@@ -103,6 +104,18 @@ export async function emailCommand(parsed, io, runtime = {}) {
     }
     if (parsed.subcommand === 'verify-imap') {
       const account = await verifyImapEmailAccount(context.db, parsed.options.account, runtime.emailCapabilities ?? {});
+      await persistEmailState(context);
+      io.out(JSON.stringify(account, null, 2));
+      return 0;
+    }
+    if (parsed.subcommand === 'verify-host') {
+      const account = recordTrustedHostVerification(context.db, parsed.options.account, {
+        method: 'trusted-host',
+        connector: parsed.options.connector,
+        address: parsed.options.address,
+        externalId: parsed.options['external-id'],
+        verifiedAt: parsed.options['verified-at'] ?? new Date().toISOString(),
+      });
       await persistEmailState(context);
       io.out(JSON.stringify(account, null, 2));
       return 0;

@@ -6,7 +6,7 @@ import { loadConfig, workspaceDirectory } from '../config/store.mjs';
 import { detectCareerOps } from '../integrations/careerops.mjs';
 import { openReadOnlyDatabase, migrate } from '../storage/database.mjs';
 import { isLiveVerifiedEmailAccount, listEmailAccounts } from '../email/accounts.mjs';
-import { isCurrentTaskRegistration, listTasks, REQUIRED_TASK_TYPES } from '../automation/registry.mjs';
+import { isCurrentTaskRegistration, listTasks, REQUIRED_TASK_TYPES, taskEmailAccountIds } from '../automation/registry.mjs';
 import { probeTaskRegistration } from '../automation/probe.mjs';
 
 const major = (version) => Number(String(version).replace(/^v/, '').split('.')[0]);
@@ -98,13 +98,16 @@ export async function doctor(home, capabilities = {}) {
   } else {
     const hostAccounts = accounts.filter((item) => item.provider === 'host' && item.readOnly && item.settings?.connector);
     const imapAccounts = accounts.filter((item) => item.provider === 'imap' && item.readOnly && item.settings?.host);
-    const verifiedImapAccounts = imapAccounts.filter((item) => isLiveVerifiedEmailAccount(item, new Date(now).toISOString())
+    const configuredMailTask = tasks.find((task) => task.type === 'mail-sync' && task.enabled);
+    const selectedIds = taskEmailAccountIds(configuredMailTask);
+    const healthyAccounts = accounts.filter((item) => selectedIds.includes(item.id)
+      && isLiveVerifiedEmailAccount(item, new Date(now).toISOString())
       && item.lastSuccessAt
       && item.lastFetchedAt
       && !item.error
       && recent(item.lastSuccessAt, now)
       && recent(item.lastFetchedAt, now));
-    const emailUsable = verifiedImapAccounts.length > 0;
+    const emailUsable = selectedIds.length > 0 && healthyAccounts.length === selectedIds.length;
     const freshHostBatch = hostAccounts.some((item) => item.lastSuccessAt
       && item.lastFetchedAt
       && !item.error
@@ -114,13 +117,13 @@ export async function doctor(home, capabilities = {}) {
       id: 'email',
       severity: emailUsable ? 'pass' : 'fail',
       detail: emailUsable
-        ? `${verifiedImapAccounts.length} live-verified read-only IMAPS mailbox${verifiedImapAccounts.length === 1 ? '' : 'es'} synced in the last 36 hours`
+        ? `${healthyAccounts.length} selected read-only mailbox${healthyAccounts.length === 1 ? '' : 'es'} live-verified and synced in the last 36 hours (${[...new Set(healthyAccounts.map((account) => account.provider === 'imap' ? 'IMAPS' : 'trusted host'))].join(', ')})`
         : freshHostBatch
           ? 'host connector batch is self-attested; caller JSON cannot prove mailbox identity. Pair the connector with a live verifier adapter or configure IMAPS'
           : hostAccounts.length
             ? 'host mailbox is configured but remains self-attested; connect a live verifier adapter or configure IMAPS'
             : imapAccounts.length
-              ? 'IMAPS mailbox needs a successful live verification and read-only sync in the last 36 hours'
+              ? 'every selected mailbox needs a successful live verification and read-only sync in the last 36 hours'
           : accounts.length ? 'manual or unsupported email account cannot provide daily sync' : 'no job-search email account configured',
     });
   }
@@ -145,14 +148,15 @@ export async function doctor(home, capabilities = {}) {
       && schedulerProbes.get(task.id)?.ok === true)
     .map((task) => [task.type, task]));
   const mailTask = registeredTasks.get('mail-sync');
-  const accountIds = new Set(accounts
+  const healthyAccountIds = new Set(accounts
     .filter((account) => isLiveVerifiedEmailAccount(account, new Date(now).toISOString())
       && !account.error
       && recent(account.lastSuccessAt, now)
       && recent(account.lastFetchedAt, now))
     .map((account) => account.id));
   const automationUsable = requiredTasks.every((type) => registeredTasks.has(type))
-    && Boolean(mailTask?.accountId && accountIds.has(mailTask.accountId));
+    && taskEmailAccountIds(mailTask).length > 0
+    && taskEmailAccountIds(mailTask).every((id) => healthyAccountIds.has(id));
   const failedSchedulerProbes = tasks
     .filter((task) => requiredTasks.includes(task.type) && task.enabled && schedulerProbes.get(task.id)?.ok !== true)
     .map((task) => `${task.type}: ${schedulerProbes.get(task.id)?.detail ?? 'not probed'}`);
@@ -172,6 +176,8 @@ export async function doctor(home, capabilities = {}) {
   if (model.provider === 'openai-compatible') {
     const credential = envReferenceState(model.secretRef, env);
     modelState = { ok: Boolean(model.baseUrl && model.model && credential.ok), detail: !model.baseUrl || !model.model ? 'configure model baseUrl and model name' : credential.detail };
+  } else if (model.provider === 'host-agent') {
+    modelState = { ok: true, detail: 'current host Agent reviews ambiguous candidates; no separate endpoint or API key required' };
   } else if (model.provider !== 'none') modelState = { ok: false, detail: `unsupported provider ${model.provider}` };
   checks.push({ id: 'model', severity: modelState.ok ? 'pass' : 'warn', detail: modelState.detail });
 

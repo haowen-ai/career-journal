@@ -18,6 +18,17 @@ export { BUILT_IN_TASKS };
 
 export const REQUIRED_TASK_TYPES = Object.freeze(['mail-sync', 'deadline-review']);
 
+function normalizeAccountIds(values) {
+  return [...new Set((values ?? [])
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean))].sort();
+}
+
+export function taskEmailAccountIds(task) {
+  const configured = normalizeAccountIds(task?.config?.accountIds);
+  return configured.length ? configured : normalizeAccountIds([task?.accountId]);
+}
+
 export function taskBindingRevision(task) {
   return createHash('sha256').update(JSON.stringify({
     id: task.id,
@@ -25,7 +36,7 @@ export function taskBindingRevision(task) {
     enabled: task.enabled,
     timezone: task.timezone,
     schedule: task.schedule,
-    accountId: task.accountId ?? null,
+    accountIds: taskEmailAccountIds(task),
     notificationPolicy: task.notificationPolicy,
   })).digest('hex');
 }
@@ -78,23 +89,31 @@ export function upsertTask(db, input) {
   const id = existingTask?.id ?? primaryId;
   const timezone = validateTimezone(input.timezone);
   const schedule = validateTime(input.time);
-  const accountId = input.accountId ?? null;
+  const previousConfig = existingTask ? JSON.parse(existingTask.config_json) : {};
+  const accountIds = input.type === 'mail-sync'
+    ? normalizeAccountIds(input.accountIds ?? (input.accountId != null ? [input.accountId] : previousConfig.accountIds ?? []))
+    : [];
+  const accountId = input.type === 'mail-sync' ? accountIds[0] ?? null : input.accountId ?? null;
   const notificationPolicy = input.notificationPolicy ?? 'actionable';
+  const previousAccountIds = input.type === 'mail-sync'
+    ? taskEmailAccountIds({ accountId: existingTask?.account_id ?? null, config: previousConfig })
+    : [];
   const mailAccountChanged = Boolean(existingTask)
     && input.type === 'mail-sync'
-    && (existingTask.account_id ?? null) !== accountId;
+    && JSON.stringify(previousAccountIds) !== JSON.stringify(accountIds);
   const cursor = mailAccountChanged ? null : input.cursor ?? existingTask?.cursor ?? null;
   const lastAttemptAt = mailAccountChanged ? null : existingTask?.last_attempt_at ?? null;
   const lastSuccessAt = mailAccountChanged ? null : existingTask?.last_success_at ?? null;
   const error = mailAccountChanged ? null : existingTask?.error ?? null;
-  const previousConfig = existingTask ? JSON.parse(existingTask.config_json) : {};
   const registrationStillMatches = Boolean(existingTask)
     && Boolean(existingTask.enabled) === input.enabled
     && existingTask.timezone === timezone
     && existingTask.schedule === schedule
-    && (existingTask.account_id ?? null) === accountId
+    && (input.type !== 'mail-sync' || JSON.stringify(previousAccountIds) === JSON.stringify(accountIds))
+    && (input.type === 'mail-sync' || (existingTask.account_id ?? null) === accountId)
     && existingTask.notification_policy === notificationPolicy;
   const config = { ...(input.config ?? previousConfig) };
+  if (input.type === 'mail-sync') config.accountIds = accountIds;
   if (!registrationStillMatches) delete config.registration;
   db.prepare(`INSERT INTO automations
     (id, task_type, enabled, timezone, schedule, account_id, notification_policy, cursor,
@@ -179,6 +198,7 @@ export function markTaskRegistration(db, id, registration) {
       timezone: task.timezone,
       schedule: task.schedule,
       accountId: task.accountId ?? null,
+      accountIds: taskEmailAccountIds(task),
       notificationPolicy: task.notificationPolicy,
       bindingRevision: revision,
       execution: requestedExecution ?? (sameVerifiedClaim ? previous.execution ?? null : null),

@@ -13,6 +13,7 @@ import {
   isCurrentTaskClaim,
   isCurrentTaskRegistration,
   verifyTaskRegistration,
+  taskEmailAccountIds,
 } from '../../src/automation/registry.mjs';
 import { runDeadlineReview, runDailyConsolidation } from '../../src/automation/tasks.mjs';
 import { automationCommand } from '../../src/commands/automation.mjs';
@@ -51,6 +52,29 @@ test('repeated configuration updates one stable task', () => {
   assert.equal(listTasks(db).length, 1);
   assert.equal(listTasks(db)[0].schedule, '21:30');
   assert.equal(listTasks(db)[0].timezone, 'America/Chicago');
+  db.close();
+});
+
+test('mail-sync stores a normalized mailbox selection and binds registration to the full set', () => {
+  const db = openDatabase(':memory:'); migrate(db);
+  const first = upsertTask(db, {
+    type: 'mail-sync', enabled: true, timezone: 'UTC', time: '20:00',
+    accountIds: ['host:school@example.test', 'host:personal@example.test', 'host:school@example.test'],
+    notificationPolicy: 'actionable',
+  });
+  assert.equal(first.accountId, 'host:personal@example.test');
+  assert.deepEqual(taskEmailAccountIds(first), ['host:personal@example.test', 'host:school@example.test']);
+  markTaskRegistration(db, first.id, { driver: 'codex', externalId: 'mail-job' });
+  const registered = listTasks(db)[0];
+  assert.equal(isCurrentTaskClaim(registered), true);
+
+  const changed = upsertTask(db, {
+    type: 'mail-sync', enabled: true, timezone: 'UTC', time: '20:00',
+    accountIds: ['host:personal@example.test'], notificationPolicy: 'actionable',
+    config: registered.config,
+  });
+  assert.deepEqual(taskEmailAccountIds(changed), ['host:personal@example.test']);
+  assert.equal(changed.config.registration, undefined);
   db.close();
 });
 
@@ -112,13 +136,13 @@ test('local-backup and deadline-review handlers run while host mail-sync require
     await automationCommand({ subcommand: 'configure', options: { home, task: 'deadline-review', time: '20:00', enabled: true } }, io, runtime);
     await automationCommand({ subcommand: 'run', options: { home, task: 'deadline-review' } }, io, runtime);
     await automationCommand({ subcommand: 'configure', options: { home, task: 'mail-sync', time: '20:05', enabled: true } }, io, runtime);
-    await assert.rejects(() => automationCommand({ subcommand: 'run', options: { home, task: 'mail-sync' } }, io, runtime), /host-managed/);
+    await assert.rejects(() => automationCommand({ subcommand: 'run', options: { home, task: 'mail-sync' } }, io, runtime), /selected job-search mailbox|host-managed/);
     const context = await import('../../src/runtime/home.mjs').then(({ openHomeDatabase }) => openHomeDatabase(home));
     const deadline = listTasks(context.db).find((item) => item.type === 'deadline-review');
     const mail = listTasks(context.db).find((item) => item.type === 'mail-sync');
     assert.ok(deadline.lastSuccessAt);
     assert.equal(deadline.error, null);
-    assert.match(mail.error, /host-managed/);
+    assert.match(mail.error, /selected job-search mailbox|host-managed/);
     context.db.close();
   } finally { await rm(home, { recursive: true, force: true }); }
 });

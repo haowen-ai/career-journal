@@ -11,6 +11,7 @@ import {
   clearTaskRegistration,
   automationSetupState,
   verifyTaskRegistration,
+  taskEmailAccountIds,
 } from '../automation/registry.mjs';
 import { runDeadlineReview, runDailyConsolidation } from '../automation/tasks.mjs';
 import { nativeSchedulerRegistration } from '../automation/platform.mjs';
@@ -20,6 +21,7 @@ import { createBackup } from './backup.mjs';
 import { randomUUID } from 'node:crypto';
 import { saveConfig, workspaceDirectory } from '../config/store.mjs';
 import { syncImapEmailAccount } from '../email/imap-sync.mjs';
+import { isLiveVerifiedEmailAccount, listEmailAccounts } from '../email/accounts.mjs';
 import { configuredDecisionAdapters } from './email.mjs';
 
 const automationId = (parsed, tasks = []) => parsed.options.id
@@ -114,16 +116,37 @@ export async function automationCommand(parsed, io, runtime) {
     if (parsed.subcommand === 'run') {
       const handlers = {
         'mail-sync': async (task) => {
-          const account = context.db.prepare('SELECT provider FROM email_accounts WHERE id = ?').get(task.accountId);
-          if (account?.provider !== 'imap') {
-            throw new Error('mail-sync requires a verified external host scheduler for host-managed connectors');
-          }
           const sync = runtime.email?.syncImap ?? syncImapEmailAccount;
-          const result = await sync(context.db, task.accountId, {
-            externalTaskId: task.config.registration.externalId,
-            ...(runtime.emailCapabilities ?? {}),
-          }, configuredDecisionAdapters(context.config));
-          return { ...result, changed: result.changed ?? result.created ?? 0, cursor: result.cursor ?? task.cursor };
+          const accountIds = taskEmailAccountIds(task);
+          if (!accountIds.length) throw new Error('mail-sync has no selected job-search mailbox');
+          const accounts = new Map(listEmailAccounts(context.db).map((account) => [account.id, account]));
+          const results = [];
+          for (const accountId of accountIds) {
+            const account = accounts.get(accountId);
+            if (!account) throw new Error(`Selected email account is missing: ${accountId}`);
+            if (account.provider === 'imap') {
+              results.push(await sync(context.db, accountId, {
+                externalTaskId: task.config.registration.externalId,
+                ...(runtime.emailCapabilities ?? {}),
+              }, configuredDecisionAdapters(context.config)));
+            } else if (account.provider === 'host') {
+              const reference = Date.now();
+              const successfulAt = Date.parse(account.lastSuccessAt ?? '');
+              const fetchedAt = Date.parse(account.lastFetchedAt ?? '');
+              const recent = [successfulAt, fetchedAt].every((value) => !Number.isNaN(value)
+                && value <= reference + 5 * 60 * 1000
+                && reference - value <= 36 * 60 * 60 * 1000);
+              if (!isLiveVerifiedEmailAccount(account) || !recent || account.error) {
+                throw new Error(`Host mailbox ${account.address} needs a fresh trusted-host verification and read-only sync`);
+              }
+              results.push({ accountId, changed: 0, created: 0, cursor: account.cursor });
+            } else {
+              throw new Error(`Unsupported daily email provider for ${accountId}`);
+            }
+          }
+          const changed = results.reduce((total, result) => total + (result.changed ?? result.created ?? 0), 0);
+          const cursor = accountIds.length === 1 ? results[0].cursor ?? task.cursor : JSON.stringify(results.map((result) => [result.accountId, result.cursor ?? null]));
+          return { accounts: results, changed, cursor };
         },
         'deadline-review': async (task) => runDeadlineReview(context.db, task),
         'daily-consolidation': async (task) => runDailyConsolidation(context.db, task, { home: context.root }),

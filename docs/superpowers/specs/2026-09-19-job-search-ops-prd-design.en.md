@@ -3,23 +3,25 @@
 [English](2026-09-19-job-search-ops-prd-design.en.md) | [简体中文](2026-09-19-job-search-ops-prd-design.md)
 
 **Status:** Review Draft
-**Version:** 0.17
+**Version:** 0.18
 **Date:** 2026-09-19
 **Product:** CAREER JOURNAL
 **Delivery:** Open-source GitHub project with an Agent-managed edition and a provider-neutral LLM API edition
 
-**Revision focus:** Configuration claims and verified external capability are separate. The selected mailbox must pass a live read-only IMAPS verification, or an equivalent independently verifiable adapter, and both required daily jobs must pass a live Codex or operating-system scheduler probe plus one successful run with the matching external ID before `career-journal doctor` can pass. Placeholder IDs, direct manual invocations, screenshots, and host-authored JSON cannot satisfy those gates on their own.
+**Revision focus:** Agent-managed onboarding discovers mail accounts already signed in on the computer and asks only which one or more are used for job search. If no account is available, the user signs in to a mail app and the Agent resumes. Without Jev, the current Agent reviews ambiguous candidates; it does not request a model Base URL or another API key. Standalone CLI/API mode continues to support IMAPS and OpenAI-compatible services.
 
 ## 1. Product overview
 
 CAREER JOURNAL is a local-first, evidence-driven job-search operating system. It connects job analysis, application-material generation, application tracking, recruiting-email review, interview preparation, and retrospectives in one traceable workflow while retaining the source, date, and artifact version behind every fact.
 
-The product serves different countries, industries, roles, and career stages. It must not assume a school, work, or personal email account, a fixed resume format, a particular job site, or a single model provider. Before onboarding is complete, the user must explicitly select one read-only job-search mailbox, complete live verification and an initial read-only sync, and register and probe two required daily jobs. The built-in portable path obtains IMAPS credentials through an environment-variable reference. Host connectors may import mail, but their batches remain self-attested until an independent live verifier confirms the account. CAREER JOURNAL never stores passwords, tokens, or cookies.
+The product serves different countries, industries, roles, and career stages. It must not assume a school, work, or personal email account, a fixed resume format, a particular job site, or a single model provider. Before onboarding is complete, the user must explicitly select one or more read-only job-search mailboxes, complete trusted verification and an initial read-only sync for each, and register and probe two required daily jobs. Agent mode can record short-lived trusted-host evidence for an account actually observed through the host integration. Standalone mode obtains IMAPS credentials through an environment-variable reference. CAREER JOURNAL never stores passwords, tokens, or cookies.
 
 Two runtime editions share the same domain model, state machine, evidence rules, storage, CareerOps interface, and test fixtures:
 
 1. **Agent-managed edition:** Codex, Claude Code, Cursor, or another repository-aware coding Agent reads the repository instructions and Skills after clone, checks the environment, initializes the workspace, discovers dependencies, and operates the daily workflow
 2. **General API edition:** A local CLI and Web UI support replaceable hosted, OpenAI-compatible, local, or self-managed model providers
+
+The Agent-managed edition reuses the current Agent's mailbox and reasoning capabilities. It discovers host accounts before asking the user to select them, and it uses the current Agent when Jev is unavailable. Only the general API edition asks for IMAPS or external-model connection details.
 
 ## 2. Problem definition
 

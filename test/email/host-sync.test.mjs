@@ -11,6 +11,8 @@ import { syncHostBatch, validateHostBatch } from '../../src/email/host-sync.mjs'
 import { markTaskRegistration, verifyTaskRegistration } from '../../src/automation/registry.mjs';
 import { memoryIO } from '../../test-utils/helpers.mjs';
 import { loadConfig } from '../../src/config/store.mjs';
+import { automationCommand } from '../../src/commands/automation.mjs';
+import { recordTrustedHostVerification } from '../../src/email/accounts.mjs';
 
 const ACCOUNT_ID = 'host:candidate@example.test';
 const EXTERNAL_TASK_ID = 'smoke-mail-sync';
@@ -98,6 +100,71 @@ test('host mailbox sync validates its envelope, imports once, and records replay
       assert.equal(task.cursor, 'gmail-history-101');
       assert.equal(JSON.parse(task.configJson).registration.lastExternalRunAt, null);
     } finally { inspect.db.close(); }
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test('Agent-managed host verification lets the registered mail task finish without IMAP or a model key', async () => {
+  const { home, context } = await createHostHome();
+  try {
+    const clock = Date.now();
+    const verifiedAt = new Date(clock - 2 * 60_000).toISOString();
+    const fetchedAt = new Date(clock - 60_000).toISOString();
+    recordTrustedHostVerification(context.db, ACCOUNT_ID, {
+      method: 'trusted-host', connector: 'gmail', address: 'candidate@example.test',
+      externalId: 'host-account-1', verifiedAt,
+    });
+    await syncHostBatch(context.db, ACCOUNT_ID, validateHostBatch(batch({
+      messages: [], fetchedAt, runId: 'agent-host-run', afterCursor: 'agent-host-cursor',
+    })), {}, new Date(clock - 30_000).toISOString());
+    context.db.close();
+
+    const io = memoryIO();
+    await automationCommand({
+      subcommand: 'run', options: { home, task: 'mail-sync', 'external-id': EXTERNAL_TASK_ID },
+    }, io, { root: process.cwd(), version: 'test' });
+    const inspect = await openHomeDatabase(home);
+    try {
+      const registration = JSON.parse(inspect.db.prepare("SELECT config_json configJson FROM automations WHERE task_type = 'mail-sync'").get().configJson).registration;
+      assert.ok(registration.lastExternalRunAt);
+      assert.equal(io.stderr, '');
+    } finally { inspect.db.close(); }
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test('one registered mail-sync task accepts independent cursors for multiple selected mailboxes', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-host-multi-'));
+  try {
+    await setup(home, {
+      timezone: 'UTC',
+      email: { mode: 'configure', provider: 'host', address: 'personal@candidate.dev', settings: { connector: 'apple-mail' } },
+    });
+    await setup(home, {
+      timezone: 'UTC',
+      email: { mode: 'configure', provider: 'host', address: 'school@candidate.edu', settings: { connector: 'apple-mail' } },
+      provisionAutomations: true,
+    });
+    const context = await openHomeDatabase(home);
+    try {
+      markTaskRegistration(context.db, 'career-journal-mail-sync', { driver: 'test', externalId: EXTERNAL_TASK_ID });
+      verifyTaskRegistration(context.db, 'career-journal-mail-sync', { method: 'trusted-host', verifiedAt: '2026-09-19T00:00:00Z' });
+      for (const [address, cursor, runId] of [
+        ['personal@candidate.dev', 'personal-1', 'personal-run-1'],
+        ['school@candidate.edu', 'school-1', 'school-run-1'],
+      ]) {
+        await syncHostBatch(context.db, `host:${address}`, validateHostBatch({
+          ...batch({ messages: [] }),
+          accountId: `host:${address}`,
+          connector: 'apple-mail',
+          afterCursor: cursor,
+          runId,
+        }), {}, '2026-09-19T01:31:00Z');
+      }
+      const cursors = context.db.prepare('SELECT id, cursor FROM email_accounts ORDER BY id').all().map((row) => ({ ...row }));
+      assert.deepEqual(cursors, [
+        { id: 'host:personal@candidate.dev', cursor: 'personal-1' },
+        { id: 'host:school@candidate.edu', cursor: 'school-1' },
+      ]);
+    } finally { context.db.close(); }
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 

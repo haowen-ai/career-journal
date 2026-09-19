@@ -1,4 +1,5 @@
 import { probeImapConnection } from './imap.mjs';
+import { taskEmailAccountIds } from '../automation/registry.mjs';
 
 const LIVE_VERIFICATION_WINDOW_MS = 36 * 60 * 60 * 1000;
 
@@ -73,8 +74,10 @@ export function configureEmailAccount(db, input) {
     db.prepare(`INSERT INTO email_accounts (id, provider, address, read_only, secret_ref, config_json)
       VALUES (?, ?, ?, 1, ?, ?)`).run(id, provider, address, secretRef, serializedSettings);
   } else if ((existing.secretRef ?? null) !== secretRef || JSON.stringify(baseSettings(JSON.parse(existing.settings))) !== serializedSettings) {
-    const linkedTasks = db.prepare(`SELECT id, config_json configJson FROM automations
-      WHERE task_type = 'mail-sync' AND account_id = ?`).all(id).map((task) => {
+    const linkedTasks = db.prepare(`SELECT id, account_id accountId, config_json configJson FROM automations
+      WHERE task_type = 'mail-sync'`).all().filter((task) => taskEmailAccountIds({
+      accountId: task.accountId, config: JSON.parse(task.configJson),
+    }).includes(id)).map((task) => {
       const config = JSON.parse(task.configJson);
       delete config.registration;
       return { id: task.id, config };
@@ -99,13 +102,16 @@ export function listEmailAccounts(db) {
     FROM email_accounts ORDER BY id`).all().map((item) => ({ ...item, readOnly: Boolean(item.readOnly), settings: JSON.parse(item.settings) }));
 }
 
-export function emailSetupState(accounts, boundAccountId = null) {
-  const selectedAccounts = boundAccountId == null
+export function emailSetupState(accounts, boundAccountIds = null) {
+  const selectedIds = Array.isArray(boundAccountIds) ? new Set(boundAccountIds) : boundAccountIds == null ? null : new Set([boundAccountIds]);
+  const selectedAccounts = selectedIds == null
     ? accounts
-    : accounts.filter((account) => account.id === boundAccountId);
+    : accounts.filter((account) => selectedIds.has(account.id));
   const liveAccounts = selectedAccounts.filter((account) => isLiveVerifiedEmailAccount(account));
-  if (liveAccounts.some((account) => account.lastSuccessAt && !account.error)) return 'verified';
-  if (liveAccounts.length) return 'connected-pending-sync';
+  if (selectedAccounts.length > 0
+    && liveAccounts.length === selectedAccounts.length
+    && liveAccounts.every((account) => account.lastSuccessAt && !account.error)) return 'verified';
+  if (selectedAccounts.length > 0 && liveAccounts.length === selectedAccounts.length) return 'connected-pending-sync';
   const hostAccounts = selectedAccounts.filter((account) => account.provider === 'host' && account.readOnly && account.settings?.connector);
   if (hostAccounts.some((account) => account.lastSuccessAt && !account.error)) return 'host-attested';
   if (hostAccounts.length || selectedAccounts.some((account) => account.provider === 'imap')) return 'pending-verification';
@@ -113,15 +119,46 @@ export function emailSetupState(accounts, boundAccountId = null) {
 }
 
 export function isLiveVerifiedEmailAccount(account, now = new Date().toISOString()) {
-  if (account?.provider !== 'imap' || !account.readOnly) return false;
+  if (!account?.readOnly || !['imap', 'host'].includes(account.provider)) return false;
   const verification = account.settings?.verification;
-  if (verification?.method !== 'imap-tls' || verification.address !== account.address) return false;
+  const validImap = account.provider === 'imap'
+    && verification?.method === 'imap-tls'
+    && verification.address === account.address;
+  const validHost = account.provider === 'host'
+    && verification?.method === 'trusted-host'
+    && verification.address === account.address
+    && verification.connector === account.settings?.connector
+    && typeof verification.externalId === 'string'
+    && verification.externalId.length > 0;
+  if (!validImap && !validHost) return false;
   const verifiedAt = Date.parse(verification.verifiedAt ?? '');
   const reference = Date.parse(now);
   return !Number.isNaN(verifiedAt)
     && !Number.isNaN(reference)
     && verifiedAt <= reference + 5 * 60 * 1000
     && reference - verifiedAt <= LIVE_VERIFICATION_WINDOW_MS;
+}
+
+export function recordTrustedHostVerification(db, id, proof) {
+  const row = db.prepare('SELECT provider, address, config_json settings FROM email_accounts WHERE id = ?').get(id);
+  if (!row || row.provider !== 'host') throw new Error(`Unknown host email account: ${id}`);
+  const settings = JSON.parse(row.settings);
+  const externalId = String(proof?.externalId ?? '').trim();
+  if (!externalId || /[\u0000\r\n]/.test(externalId) || externalId.length > 512) {
+    throw new Error('Trusted host verification requires a valid external account id');
+  }
+  if (proof?.method !== 'trusted-host'
+    || proof.connector !== settings.connector
+    || String(proof.address ?? '').trim().toLowerCase() !== row.address) {
+    throw new Error('Trusted host verification proof does not match the configured account');
+  }
+  const verifiedAt = new Date(proof.verifiedAt ?? '').toISOString();
+  const verification = {
+    method: 'trusted-host', connector: settings.connector, address: row.address, externalId, verifiedAt,
+  };
+  db.prepare('UPDATE email_accounts SET config_json = ?, error = NULL WHERE id = ?')
+    .run(JSON.stringify({ ...baseSettings(settings), verification }), id);
+  return listEmailAccounts(db).find((account) => account.id === id);
 }
 
 export async function verifyImapEmailAccount(db, id, capabilities = {}) {
@@ -167,8 +204,10 @@ export function recordImapVerification(db, id, proof) {
 }
 
 export function disconnectEmailAccount(db, id) {
-  const linkedTasks = db.prepare(`SELECT id, config_json configJson FROM automations
-    WHERE task_type = 'mail-sync' AND account_id = ?`).all(id);
+  const linkedTasks = db.prepare(`SELECT id, account_id accountId, config_json configJson FROM automations
+    WHERE task_type = 'mail-sync'`).all().filter((task) => taskEmailAccountIds({
+    accountId: task.accountId, config: JSON.parse(task.configJson),
+  }).includes(id));
   const resetTask = db.prepare(`UPDATE automations SET cursor = NULL, last_attempt_at = NULL,
     last_success_at = NULL, error = NULL, config_json = ? WHERE id = ?`);
   for (const task of linkedTasks) {

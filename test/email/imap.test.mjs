@@ -251,7 +251,7 @@ test('direct IMAPS sync proves the mailbox, fetches read-only, imports, and adva
   } finally { db.close(); }
 });
 
-test('switching mailboxes clears old task health so the new IMAPS account starts from a null cursor', async () => {
+test('adding a mailbox clears aggregate task health and keeps independent IMAPS cursors', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-imap-switch-'));
   try {
     const firstAddress = 'first@school.edu';
@@ -305,7 +305,8 @@ test('switching mailboxes clears old task health so the new IMAPS account starts
     context = await openHomeDatabase(home);
     try {
       task = listTasks(context.db).find((item) => item.type === 'mail-sync');
-      assert.equal(task.accountId, `imap:${secondAddress}`);
+      assert.equal(task.accountId, `imap:${firstAddress}`);
+      assert.deepEqual(task.config.accountIds, [`imap:${firstAddress}`, `imap:${secondAddress}`]);
       assert.equal(task.cursor, null);
       assert.equal(task.lastAttemptAt, null);
       assert.equal(task.lastSuccessAt, null);

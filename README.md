@@ -24,10 +24,10 @@ The Agent handles cloning, setup, mailbox configuration, local time-zone detecti
 
 - Tracks each application, status change, deadline, interview, and next action
 - Imports existing applications from a bounded mailbox review, files, spreadsheets, or a guided interview after the user confirms the proposed records
-- Reads a user-selected recruiting mailbox in read-only mode and turns messages into reviewable evidence
+- Discovers signed-in mail accounts, then reads the one or more accounts the user selects in read-only mode
 - Keeps generated drafts, verified files, and the exact submitted resume or cover letter distinct
 - Runs locally with SQLite and a browser dashboard at `http://career-journal.localhost:<port>`
-- Uses deterministic rules first, newly released **Jev** when available, and a configured structured LLM as fallback
+- Uses deterministic rules first, newly released **Jev** when available, and the current Agent for ambiguous cases without another model key
 
 ## Built for Agent workflows
 

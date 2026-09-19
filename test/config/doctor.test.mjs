@@ -12,7 +12,7 @@ import { listTasks, markTaskRegistration, runTask, verifyTaskRegistration } from
 import { syncHostBatch } from '../../src/email/host-sync.mjs';
 import { syncImapEmailAccount } from '../../src/email/imap-sync.mjs';
 import { openDatabase, migrate, schemaMigrations } from '../../src/storage/database.mjs';
-import { verifyImapEmailAccount } from '../../src/email/accounts.mjs';
+import { recordTrustedHostVerification, verifyImapEmailAccount } from '../../src/email/accounts.mjs';
 
 class DoctorImapSocket extends Duplex {
   constructor() {
@@ -167,6 +167,63 @@ test('host connector JSON remains self-attested and cannot make onboarding healt
     assert.equal(complete.checks.find((item) => item.id === 'email').severity, 'fail');
     assert.match(complete.checks.find((item) => item.id === 'email').detail, /self-attested|cannot prove/i);
     assert.equal(complete.checks.find((item) => item.id === 'automation').severity, 'fail');
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test('doctor requires fresh trusted-host evidence for every selected mailbox', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-doctor-host-multi-'));
+  const clock = Date.now();
+  const now = new Date(clock + 60_000).toISOString();
+  const registeredAt = new Date(clock - 5 * 60_000).toISOString();
+  const schedulerVerifiedAt = new Date(clock - 4 * 60_000).toISOString();
+  const mailboxVerifiedAt = new Date(clock - 3 * 60_000).toISOString();
+  const fetchedAt = new Date(clock - 2 * 60_000).toISOString();
+  const syncedAt = new Date(clock - 60_000).toISOString();
+  try {
+    await setup(home, {
+      timezone: 'UTC',
+      email: { mode: 'configure', provider: 'host', address: 'personal@candidate.dev', settings: { connector: 'apple-mail' } },
+    });
+    await setup(home, {
+      timezone: 'UTC',
+      email: { mode: 'configure', provider: 'host', address: 'school@candidate.edu', settings: { connector: 'apple-mail' } },
+      provisionAutomations: true,
+      model: { provider: 'host-agent' },
+    });
+    const context = await openHomeDatabase(home);
+    for (const task of listTasks(context.db)) {
+      markTaskRegistration(context.db, task.id, {
+        driver: 'codex', externalId: `external-${task.type}`, registeredAt,
+      });
+      verifyTaskRegistration(context.db, task.id, { method: 'trusted-host', verifiedAt: schedulerVerifiedAt });
+    }
+    for (const [address, suffix] of [['personal@candidate.dev', 'personal'], ['school@candidate.edu', 'school']]) {
+      const accountId = `host:${address}`;
+      recordTrustedHostVerification(context.db, accountId, {
+        method: 'trusted-host', connector: 'apple-mail', address,
+        externalId: `apple-mail-${suffix}`, verifiedAt: mailboxVerifiedAt,
+      });
+      await syncHostBatch(context.db, accountId, {
+        accountId, connector: 'apple-mail', readOnly: true,
+        beforeCursor: null, afterCursor: `${suffix}-cursor`, runId: `${suffix}-run`,
+        fetchedAt, externalTaskId: 'external-mail-sync', messages: [],
+      }, {}, syncedAt);
+    }
+    for (const task of listTasks(context.db)) {
+      await runTask(context.db, task.id, {
+        externalId: `external-${task.type}`,
+        handler: async () => ({ changed: 0, cursor: task.cursor }),
+      });
+    }
+    context.db.close();
+    const report = await doctor(home, {
+      now, nodeVersion: '24.19.0', storage: async () => ({ ok: true }),
+      careerOps: async () => ({ ok: false, detail: 'optional' }),
+      schedulerProbe: async () => ({ ok: true, detail: 'trusted host verifier' }),
+    });
+    assert.equal(report.ok, true);
+    assert.match(report.checks.find((item) => item.id === 'email').detail, /2 selected.*trusted host/i);
+    assert.equal(report.checks.find((item) => item.id === 'model').severity, 'pass');
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
