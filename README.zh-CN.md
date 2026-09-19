@@ -4,7 +4,7 @@
 
 CAREER JOURNAL 是一个本地优先、证据驱动的求职进度管理工具，同时面向求职者和 AI Agent。它用一个 SQLite 数据库统一保存岗位、状态事件、招聘邮件证据、下一步行动和实际使用的申请材料。生成的简历会一直保持为草稿，直到用户明确确认已上传的准确文件。
 
-当前是 alpha 版本。一个完整的工作区必须有用户明确选择的一个只读求职邮箱，以及真实注册的四个每日任务。模型密钥、CareerOps 和 Jev 只在使用对应功能时才需要。
+当前是 alpha 版本。一个完整的工作区必须有用户明确选择的一个只读求职邮箱，以及真实注册的四个每日任务。配置后，Jev 是主要语义决策引擎；明确场景先走确定性规则，Jev 不可用或结果不确定时进入人工复核，不再回退通用大模型。只有生成申请材料时才需要 CareerOps。
 
 ## 它能做什么
 
@@ -52,7 +52,7 @@ flowchart LR
 ## 适合谁
 
 - **Codex 用户：** 希望通过能读取仓库的 Skill 完成配置和日常操作
-- **API 与 CLI 用户：** 希望使用确定性的本地流程，并可选择 OpenAI-compatible 模型
+- **API 与 CLI 用户：** 希望使用确定性本地流程与 Jev 类型化决策，避免用通用大模型做 prompt-and-parse 路由
 - **求职者：** 希望把申请记录、材料和证据放在一起，又不想把数据库交给托管服务
 
 ## 安装
@@ -76,8 +76,16 @@ git clone https://github.com/haowenchen0811/career-journal.git
 cd career-journal
 ```
 
+如需使用 TypeSafe 权限，先把 TypeSafe AI 独立维护、使用 MIT 许可证的 Agent Skill 安装到当前克隆目录，并在提示中选择 Codex：
+
+```sh
+npx skills add typesafe-ai/skills --skill typesafe-ai
+```
+
+本仓库没有复制上游 Skill 源码；最新来源和许可证见 [`THIRD_PARTY_NOTICES.zh-CN.md`](THIRD_PARTY_NOTICES.zh-CN.md)。
+
 ```text
-请初始化这个克隆目录中的 CAREER JOURNAL，数据目录使用 $HOME/job-search。请向我询问实际用于求职的邮箱地址、IMAPS 主机和用户名，以及保存 app password 或 provider credential 的环境变量名称。不要让我把真实密钥粘贴到 prompt 或配置文件中。检测当前电脑的 IANA 时区，并在该时区创建四个 ACTIVE 的每日 Codex heartbeat：20:00 mail-sync、20:15 deadline-review、22:00 daily-consolidation、23:00 local-backup。每个 heartbeat 返回真实 ID 后，先登记该 ID 取得 codexCommandLine，再更新同一个 heartbeat，把返回命令原样单独放在 prompt 的一行中，然后进行实时验证。分别触发一次已验证任务，再运行 doctor。只有邮箱和自动化检查都通过时，才能报告 onboarding 完成。
+请初始化这个克隆目录中的 CAREER JOURNAL，数据目录使用 $HOME/job-search。请向我询问实际用于求职的邮箱地址、IMAPS 主机和用户名，以及保存 app password 或 provider credential 的环境变量名称。如果我已经获得 TypeSafe 权限，只询问保存 Jev API Key 的环境变量名称，并通过 --jev-secret-ref 配置；不要让我把任何真实密钥粘贴到 prompt 或配置文件中。修改 Jev 问题前先安装或读取官方 TypeSafe Agent Skill。检测当前电脑的 IANA 时区，并在该时区创建四个 ACTIVE 的每日 Codex heartbeat：20:00 mail-sync、20:15 deadline-review、22:00 daily-consolidation、23:00 local-backup。每个 heartbeat 返回真实 ID 后，先登记该 ID 取得 codexCommandLine，再更新同一个 heartbeat，把返回命令原样单独放在 prompt 的一行中，然后进行实时验证。分别触发一次已验证任务，再运行 doctor。只有邮箱和自动化检查都通过时，才能报告 onboarding 完成。
 ```
 
 邮件 heartbeat 必须由 Codex 宿主的安全环境提供已配置的 IMAP 环境变量。变量值不得出现在 heartbeat prompt、`automation.toml`、CAREER JOURNAL 配置或 Git 中。如果宿主无法安全提供该变量，应停止并报告邮件调度和 onboarding 仍未完成。
@@ -91,14 +99,16 @@ export CAREER_JOURNAL_HOME="$HOME/job-search"
 export JOB_EMAIL="你的真实邮箱"
 export IMAP_HOST="邮箱服务商的 IMAPS 主机"
 export IMAP_USER="$JOB_EMAIL"
-# 让 CAREER_JOURNAL_IMAP_PASSWORD 在当前进程环境中可用，但不要提交或写入配置。
+# 通过受保护环境或 secret store 提供 CAREER_JOURNAL_IMAP_PASSWORD 和 TYPESAFE_API_KEY。
+# Setup 只保存 env: 引用。
 node ./bin/career-journal.mjs setup \
   --home "$CAREER_JOURNAL_HOME" \
   --email-provider imap \
   --email-address "$JOB_EMAIL" \
   --imap-host "$IMAP_HOST" \
   --imap-user "$IMAP_USER" \
-  --secret-ref env:CAREER_JOURNAL_IMAP_PASSWORD
+  --secret-ref env:CAREER_JOURNAL_IMAP_PASSWORD \
+  --jev-secret-ref env:TYPESAFE_API_KEY
 node ./bin/career-journal.mjs email verify-imap \
   --home "$CAREER_JOURNAL_HOME" \
   --account "imap:$JOB_EMAIL"
@@ -149,9 +159,9 @@ IMAPS 邮件处理器会真实认证、用 `EXAMINE` 只读打开邮箱、通过
 
 在 Codex 中打开克隆后的仓库，并使用快速开始中的初始化提示。Codex 会发现仓库内的 `career-journal` Skill，询问准确邮箱而不是自行猜测，配置实时 IMAPS，在电脑检测到的时区创建四个真实 ACTIVE heartbeat，并把每个返回的 automation ID 绑定到准确运行命令。然后它会回读实际 Codex 自动化定义，分别触发一次已验证任务，只在 `doctor` 通过后结束配置。宿主必须把命名的 IMAP 环境变量安全注入邮件任务，不能把变量值复制进 prompt。Codex 邮箱连接器仍可提供只读批次，但连接器自行编写的 JSON 不是独立账户证明。简历和求职信任务会路由到独立的 `careerops-materials` Skill。
 
-### 本地 API 与 OpenAI-compatible 模型
+### 本地 API 与 Jev 决策
 
-运行 `career-journal start --home <data-directory>` 启动本地看板和 JSON API。通用路径使用内置 IMAPS 客户端，以及能够把命名的 IMAP 环境变量安全提供给 `mail-sync` 的调度器。macOS、Linux 或 Windows 上的 `automation install` 可以安装并探测另外三项任务；alpha.6 会明确拒绝原生安装 `mail-sync`，因为当前生成定义尚未提供安全且跨平台的 secret provider。API 宿主也可以提交结构化只读批次，但在邮箱健康检查通过前，还需要单独的实时验证适配器。确定性规则不需要模型。可选的 OpenAI-compatible Provider 可以通过 `.career-journal/config.json` 指向托管、本地或自管端点；凭据必须使用 `env:MODEL_API_KEY` 这类环境变量引用，不能写入真实密钥。
+运行 `career-journal start --home <data-directory>` 启动本地看板和 JSON API。通用路径使用内置 IMAPS 客户端，以及能够把命名的 IMAP 和 Jev 环境变量安全提供给 `mail-sync` 的调度器。macOS、Linux 或 Windows 上的 `automation install` 可以安装并探测另外三项任务；当前 alpha 会明确拒绝原生安装 `mail-sync`，因为生成定义尚未提供安全且跨平台的 secret provider。API 宿主也可以提交结构化只读批次，但在邮箱健康检查通过前，还需要单独的实时验证适配器。明确场景先走免费的确定性规则，模糊邮件交给 Jev；返回格式错误或置信度不足时进入人工复核。招聘决策不会再回退已配置的 OpenAI-compatible Provider。
 
 ## 邮箱集成
 
@@ -239,9 +249,11 @@ career-journal setup --home ~/job-search --material-rules /path/to/personal-resu
 
 ## 决策 Provider
 
-- **确定性规则：** 始终可用于基础分类
-- **OpenAI-compatible Provider：** 可选的结构化降级方案，通过 base URL、模型名和环境变量密钥引用配置
-- **Jev：** 可选的 TypeSafe 决策适配器。真正获得访问权限之前，必须保持 `accessState: waitlisted` 或 `unavailable`，不应填写尚未拥有的密钥。shadow 模式中的决策只会被记录，不会被应用
+- **确定性规则：** 先处理明确且可审查的场景，避免不必要的 API 费用
+- **Jev：** 模糊招聘邮件的主要语义分类器。使用 `--jev-secret-ref env:TYPESAFE_API_KEY` 配置；v1 适配器发送 `state` 与一个类型化 Choice 问题，并验证返回选项和置信度
+- **人工复核：** 接收 Jev 不可用、格式错误、shadow 或低于阈值的结果。招聘决策链不会调用通用大模型
+
+环境中存在 Key 后，可以显式运行 `npm run test:jev-live`，执行三次请求的契约与分类 smoke test。它只输出分类、置信度和 token 用量，不会打印 Key。该真实测试不会加入普通离线测试或每日自动化，因此不会在后台静默消耗额度。
 
 ## 每日自动化
 

@@ -22,6 +22,31 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.7] - 2026-09-19
+
+### Added
+
+- Added `--jev-secret-ref env:VARIABLE` setup support so Jev access can be enabled without storing a literal API key
+- Added contract tests for the TypeSafe v1 request and Choice response, malformed output, low confidence, missing credentials, transient overloads, and untrusted endpoints
+- Added bilingual Jev onboarding and architecture guidance based on the official TypeSafe Agent Skill and current API documentation
+
+### Changed
+
+- Made Jev the primary semantic classifier for ambiguous recruiting messages while retaining deterministic rules for explicit cases
+- Routed unavailable, shadow, malformed, or below-threshold Jev results to manual review instead of a generic LLM
+- Centralized the recruiting-email Choice question and its criteria for review and calibration
+
+### Fixed
+
+- Replaced the obsolete `question` and `choices` payload with the v1 `state`, `model`, and `questions` contract
+- Parsed `answers.classification.choice` and `confidence` instead of treating the answer object as a classification
+- Added bounded retries for documented HTTP 429 and 529 responses while leaving authentication failures non-retriable
+
+### Security
+
+- Restricted Jev credentials to `env:VARIABLE` references and pinned credential-bearing requests to `https://api.typesafe.ai/v1/systemone`
+- Kept literal API keys out of configuration, logs, examples, exports, backups, and Git
+
 ## [0.1.0-alpha.6] - 2026-09-19
 
 ### Added
@@ -208,7 +233,8 @@ All notable changes are documented here. This project follows Semantic Versionin
 - Credentials are referenced through environment variables and excluded from exports
 - Submitted artifacts require explicit confirmation
 
-[Unreleased]: https://github.com/haowenchen0811/career-journal/compare/v0.1.0-alpha.6...HEAD
+[Unreleased]: https://github.com/haowenchen0811/career-journal/compare/v0.1.0-alpha.7...HEAD
+[0.1.0-alpha.7]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.7
 [0.1.0-alpha.6]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.6
 [0.1.0-alpha.5]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.5
 [0.1.0-alpha.4]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.4

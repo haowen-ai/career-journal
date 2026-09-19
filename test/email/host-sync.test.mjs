@@ -175,8 +175,8 @@ test('a failed host batch preserves cursor metadata and writes no partial messag
     }));
 
     await assert.rejects(() => syncHostBatch(context.db, ACCOUNT_ID, retryBatch, {
-      structuredLlm: async () => { throw new Error('temporary model outage'); },
-    }, '2026-09-19T02:01:00Z'), /temporary model outage/);
+      jev: { accessState: 'enabled', mode: 'active', threshold: 0.8, decide: async () => { throw new Error('temporary Jev outage'); } },
+    }, '2026-09-19T02:01:00Z'), /temporary Jev outage/);
     assert.equal(context.db.prepare('SELECT COUNT(*) count FROM decision_traces').get().count, 0);
     const failed = context.db.prepare(`SELECT cursor, revision, last_run_id lastRunId, last_batch_hash lastBatchHash,
       last_fetched_at lastFetchedAt FROM email_accounts WHERE id = ?`).get(ACCOUNT_ID);
@@ -184,7 +184,7 @@ test('a failed host batch preserves cursor metadata and writes no partial messag
     assert.equal(context.db.prepare("SELECT cursor FROM automations WHERE task_type = 'mail-sync'").get().cursor, 'gmail-history-100');
 
     const retried = await syncHostBatch(context.db, ACCOUNT_ID, retryBatch, {
-      structuredLlm: async () => ({ classification: 'assessment', confidence: 0.9 }),
+      jev: { accessState: 'enabled', mode: 'active', threshold: 0.8, decide: async () => ({ classification: 'assessment', confidence: 0.9 }) },
     }, '2026-09-19T02:05:00Z');
     assert.equal(retried.created, 2);
     assert.equal(context.db.prepare('SELECT COUNT(*) count FROM decision_traces').get().count, 2);
@@ -216,8 +216,8 @@ test('competing same-cursor batches commit only the winner evidence and cursor',
     }));
 
     const results = await Promise.allSettled([
-      syncHostBatch(context.db, ACCOUNT_ID, left, { structuredLlm: classify }, '2026-09-19T02:01:00Z'),
-      syncHostBatch(context.db, ACCOUNT_ID, right, { structuredLlm: classify }, '2026-09-19T02:01:01Z'),
+      syncHostBatch(context.db, ACCOUNT_ID, left, { jev: { accessState: 'enabled', mode: 'active', threshold: 0.8, decide: classify } }, '2026-09-19T02:01:00Z'),
+      syncHostBatch(context.db, ACCOUNT_ID, right, { jev: { accessState: 'enabled', mode: 'active', threshold: 0.8, decide: classify } }, '2026-09-19T02:01:01Z'),
     ]);
     assert.equal(results.filter((item) => item.status === 'fulfilled').length, 1);
     assert.equal(results.filter((item) => item.status === 'rejected').length, 1);

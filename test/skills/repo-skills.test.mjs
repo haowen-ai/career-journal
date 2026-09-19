@@ -47,7 +47,9 @@ test('career-journal skill has paired English and Simplified Chinese contracts',
     assert.match(text, /IMAPS/i);
     assert.match(text, /careerops-materials/i);
     assert.match(text, /career-ops-hq\/career-ops|Santiago Fernández de Valderrama/i);
-    assert.match(text, /Jev[^\n]*(?:optional|可选)|(?:optional|可选)[^\n]*Jev/i);
+    assert.match(text, /Jev[^\n]*(?:primary semantic|主要语义)/i);
+    assert.match(text, /manual review|人工复核/i);
+    assert.match(text, /generic LLM|通用大模型/i);
     assert.match(text, /Semantic Versioning|SemVer|语义化版本/i);
     assert.match(text, /Git tag/i);
     assert.match(text, /GitHub Release/i);
@@ -74,11 +76,13 @@ test('CareerOps routing skill keeps facts and submitted evidence gated', async (
   assert.match(text, /us-resume-default\.md/);
 });
 
-test('dependency manifest pins CareerOps and keeps Jev optional', async () => {
+test('dependency manifest pins CareerOps and makes Jev primary for semantic decisions', async () => {
   const text = await readFile('config/dependency-manifest.yml', 'utf8');
   assert.match(text, /career-ops[^]*version: "1\.32\.0"/);
   assert.match(text, /jev[^]*required: false/);
-  assert.match(text, /access_state: waitlisted/);
+  assert.match(text, /access_state: user-configured/);
+  assert.match(text, /role: primary-semantic-decision-engine/);
+  assert.match(text, /fallback: deterministic-rules-then-manual-review/);
   assert.match(text, /  email:\n    required: true/);
   assert.match(text, /  automation:\n    required: true/);
 });

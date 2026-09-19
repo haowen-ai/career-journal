@@ -95,7 +95,7 @@ test('fails health when Node is below version 24', async () => {
 test('reports configured versus usable provider, Jev, and email capabilities without exposing secrets', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'jobops-doctor-capabilities-'));
   try {
-    const result = await setup(home, { timezone: 'UTC', email: { mode: 'skip' }, model: { provider: 'openai-compatible', baseUrl: 'https://example.test/v1', model: 'model', secretRef: 'env:MISSING_MODEL_KEY' }, jev: { accessState: 'enabled' } });
+    const result = await setup(home, { timezone: 'UTC', email: { mode: 'skip' }, model: { provider: 'openai-compatible', baseUrl: 'https://example.test/v1', model: 'model', secretRef: 'env:MISSING_MODEL_KEY' }, jev: { accessState: 'enabled', secretRef: 'env:MISSING_JEV_KEY' } });
     result.config.email = { setupState: 'configured', accounts: [{ id: 'unknown:a@example.test', provider: 'unknown', address: 'a@example.test', readOnly: true }] };
     result.config.jev.secretRef = 'env:MISSING_JEV_KEY';
     const { saveConfig } = await import('../../src/config/store.mjs');

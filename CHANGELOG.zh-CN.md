@@ -22,6 +22,31 @@
 
 - 无
 
+## [0.1.0-alpha.7] - 2026-09-19
+
+### 新增
+
+- 增加 `--jev-secret-ref env:VARIABLE` 配置方式，不保存字面 API Key 即可启用 Jev
+- 增加 TypeSafe v1 请求、Choice 响应、格式错误、低置信度、凭据缺失、临时过载和非可信端点的契约测试
+- 根据官方 TypeSafe Agent Skill 与最新 API 文档，增加中英文 Jev 配置和架构说明
+
+### 变更
+
+- Jev 成为模糊招聘邮件的主要语义分类器；明确场景继续先走确定性规则
+- Jev 不可用、shadow、格式错误或低于阈值时进入人工复核，不再回退通用大模型
+- 将招聘邮件的 Choice 问题和 criteria 集中到一个位置，便于审核与校准
+
+### 修复
+
+- 用 v1 `state`、`model`、`questions` 契约替换过期的 `question` 与 `choices` 请求结构
+- 正确读取 `answers.classification.choice` 和 `confidence`，不再把整个回答对象误当分类结果
+- 对官方说明的 HTTP 429 与 529 增加有限重试，认证失败不重试
+
+### 安全
+
+- Jev 凭据仅允许 `env:VARIABLE` 引用，并将携带凭据的请求固定到 `https://api.typesafe.ai/v1/systemone`
+- 字面 API Key 不进入配置、日志、示例、导出、备份或 Git
+
 ## [0.1.0-alpha.6] - 2026-09-19
 
 ### 新增
@@ -208,7 +233,8 @@
 - 凭据通过环境变量引用，不会进入导出文件
 - 标记已提交材料时需要用户明确确认
 
-[尚未发布]: https://github.com/haowenchen0811/career-journal/compare/v0.1.0-alpha.6...HEAD
+[尚未发布]: https://github.com/haowenchen0811/career-journal/compare/v0.1.0-alpha.7...HEAD
+[0.1.0-alpha.7]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.7
 [0.1.0-alpha.6]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.6
 [0.1.0-alpha.5]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.5
 [0.1.0-alpha.4]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.4

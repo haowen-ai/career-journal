@@ -11,21 +11,20 @@ export async function decide(input, adapters = {}) {
   let shadow;
   const jev = adapters.jev;
   if (jev?.accessState === 'enabled' && typeof jev.decide === 'function') {
-    let candidate;
+    const rawCandidate = await jev.decide(input);
+    let candidate = null;
     try {
-      candidate = validateEmailDecision(await jev.decide(input));
+      candidate = validateEmailDecision(rawCandidate);
     } catch {
       candidate = null;
     }
     if (candidate && jev.mode === 'shadow') shadow = candidate;
-    if (candidate && jev.mode === 'active' && (candidate.confidence ?? 0) >= (jev.threshold ?? 0.8)) {
+    if (candidate && jev.mode === 'active'
+      && candidate.classification !== 'unknown'
+      && (candidate.confidence ?? 0) >= (jev.threshold ?? 0.8)) {
       return { decision: candidate, engine: 'jev', applied: true };
     }
+    if (candidate && jev.mode === 'active') shadow = candidate;
   }
-
-  if (typeof adapters.structuredLlm === 'function') {
-    const decision = validateEmailDecision(await adapters.structuredLlm(input));
-    return { decision, engine: 'structured-llm', applied: shadow ? false : true, ...(shadow ? { shadow } : {}) };
-  }
-  return { decision: ruleDecision, engine: 'rules', applied: true, ...(shadow ? { shadow } : {}) };
+  return { decision: ruleDecision, engine: 'manual-review', applied: false, ...(shadow ? { shadow } : {}) };
 }

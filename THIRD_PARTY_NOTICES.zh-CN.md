@@ -19,9 +19,9 @@ CAREER JOURNAL 会对它所集成的独立开源成果保留完整署名。在�
 - 项目：[typesafe-ai/skills](https://github.com/typesafe-ai/skills)
 - 作者：TypeSafe AI
 - 许可证：MIT；原文保存于 `LICENSES/typesafe-ai-skills-MIT.txt`
-- 在本项目中的用途：可选决策适配器设计与明确的 Skill 依赖；项目不会假设用户已经获得访问权限
+- 在本项目中的用途：用户配置权限后，用该 Agent Skill 指导主要 Jev 语义决策适配器；项目不会假设用户已经获得访问权限
 
-本仓库没有复制 TypeSafe Agent Skill 的源代码。Jev 保持为可选能力；尚未获得访问权限、仍在 waitlist 中或选择不配置 Jev 的用户，仍然可以使用本项目。
+本仓库没有复制 TypeSafe Agent Skill 的源代码。未配置 Jev 时仍可使用记录功能；模糊语义决策会进入人工复核，不会回退通用大模型。
 
 ## Tabler Icons
 

@@ -341,3 +341,44 @@ test('stores explicit personal material-rule files without replacing built-in de
   const untouched = await setup(path.join(home, 'other'), { timezone: 'UTC' });
   assert.deepEqual(untouched.config.materials.ruleFiles, []);
 }));
+
+test('CLI setup enables Jev with an environment-only key reference and active mode', async () => withHome(async (home) => {
+  await setupCommand({ options: {
+    home,
+    'email-provider': 'host',
+    'email-address': 'candidate@school.edu',
+    'email-connector': 'gmail',
+    'jev-secret-ref': 'env:TYPESAFE_API_KEY',
+  } }, memoryIO());
+  const config = await loadConfig(home);
+  assert.deepEqual(config.jev, {
+    accessState: 'enabled',
+    baseUrl: 'https://api.typesafe.ai/v1/systemone',
+    model: 'jev-latest',
+    secretRef: 'env:TYPESAFE_API_KEY',
+    mode: 'active',
+    threshold: 0.8,
+  });
+  assert.equal(config.model.provider, 'none');
+}));
+
+test('CLI setup rejects a literal Jev key', async () => withHome(async (home) => {
+  await assert.rejects(() => setupCommand({ options: {
+    home,
+    'email-provider': 'host',
+    'email-address': 'candidate@school.edu',
+    'email-connector': 'gmail',
+    'jev-secret-ref': 'secret-value',
+  } }, memoryIO()), /jev-secret-ref.*env:VARIABLE/i);
+}));
+
+test('CLI setup refuses a Jev endpoint outside the TypeSafe API origin', async () => withHome(async (home) => {
+  await assert.rejects(() => setupCommand({ options: {
+    home,
+    'email-provider': 'host',
+    'email-address': 'candidate@school.edu',
+    'email-connector': 'gmail',
+    'jev-secret-ref': 'env:TYPESAFE_API_KEY',
+    'jev-base-url': 'https://attacker.example/v1/systemone',
+  } }, memoryIO()), /api\.typesafe\.ai/);
+}));

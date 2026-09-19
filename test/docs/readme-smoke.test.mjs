@@ -33,9 +33,10 @@ test('Quick Start smoke block executes against a clean home', async () => {
 
 test('README documents both modes and every lifecycle command', async () => {
   const readme = await readFile('README.md', 'utf8');
-  for (const phrase of ['Codex-native', 'OpenAI-compatible', 'career-journal start', 'career-journal automation', 'career-journal update', 'career-journal migrate', 'career-journal backup', 'Uninstall', 'CareerOps', 'Jev', 'read-only email', 'THIRD_PARTY_NOTICES.md']) {
+  for (const phrase of ['Codex-native', 'Jev decisions', 'manual review', 'TYPESAFE_API_KEY', 'career-journal start', 'career-journal automation', 'career-journal update', 'career-journal migrate', 'career-journal backup', 'Uninstall', 'CareerOps', 'Jev', 'read-only email', 'THIRD_PARTY_NOTICES.md']) {
     assert.match(readme, new RegExp(phrase, 'i'));
   }
+  assert.doesNotMatch(readme, /OpenAI-compatible provider:\*\* optional structured fallback/i);
 });
 
 test('English and Simplified Chinese READMEs cross-link and cover onboarding', async () => {

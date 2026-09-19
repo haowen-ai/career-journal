@@ -10,6 +10,11 @@ export function validateEmailDecision(value) {
   return {
     classification: value.classification,
     ...(value.confidence === undefined ? {} : { confidence: value.confidence }),
+    ...(value.usage
+      && Number.isInteger(value.usage.input_tokens) && value.usage.input_tokens >= 0
+      && Number.isInteger(value.usage.output_tokens) && value.usage.output_tokens >= 0
+      ? { usage: { input_tokens: value.usage.input_tokens, output_tokens: value.usage.output_tokens } }
+      : {}),
   };
 }
 

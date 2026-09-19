@@ -21,6 +21,32 @@ function cleanBaseUrl(value) {
   return url.href.replace(/\/$/, '');
 }
 
+function cleanJevBaseUrl(value) {
+  if (value == null || value === '') return 'https://api.typesafe.ai/v1/systemone';
+  const url = new URL(value);
+  if (url.origin !== 'https://api.typesafe.ai' || url.pathname.replace(/\/$/, '') !== '/v1/systemone' || url.search || url.hash) {
+    throw new Error('Jev endpoint must be https://api.typesafe.ai/v1/systemone');
+  }
+  return 'https://api.typesafe.ai/v1/systemone';
+}
+
+function jevSettings(input, current) {
+  const secretRef = input.secretRef ?? current.secretRef;
+  if (!/^env:[A-Za-z_][A-Za-z0-9_]*$/.test(String(secretRef ?? ''))) {
+    throw new Error('--jev-secret-ref env:VARIABLE is required; do not put the API key in config');
+  }
+  const threshold = input.threshold === undefined ? Number(current.threshold ?? 0.8) : Number(input.threshold);
+  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) throw new Error('Jev threshold must be between 0 and 1');
+  return {
+    accessState: 'enabled',
+    baseUrl: cleanJevBaseUrl(input.baseUrl ?? current.baseUrl),
+    model: String(input.model ?? current.model ?? 'jev-latest'),
+    secretRef,
+    mode: 'active',
+    threshold,
+  };
+}
+
 function emailAccount(input) {
   if (!input?.provider || !input?.address) throw new Error('Email provider and address are required');
   const address = String(input.address).trim().toLowerCase();
@@ -74,7 +100,9 @@ export async function setup(home, answers = {}) {
   if (answers.jev?.accessState) {
     const allowed = new Set(['unavailable', 'waitlisted', 'enabled', 'disabled']);
     if (!allowed.has(answers.jev.accessState)) throw new Error('Invalid Jev access state');
-    config.jev.accessState = answers.jev.accessState;
+    config.jev = answers.jev.accessState === 'enabled'
+      ? jevSettings(answers.jev, config.jev)
+      : { ...config.jev, accessState: answers.jev.accessState, mode: 'off' };
   }
   if (answers.careerOps?.root !== undefined) {
     config.careerOps ??= { root: null, pinnedVersion: '1.32.0', entrypoint: 'career-journal-adapter.mjs' };
@@ -222,12 +250,22 @@ export async function setupCommand(parsed, io, runtime) {
     },
     careerOps: parsed.options['careerops-root'] !== undefined ? { root: parsed.options['careerops-root'] } : undefined,
     materialRules: parsed.options['material-rules'] !== undefined ? [parsed.options['material-rules']] : undefined,
+    jev: parsed.options['jev-secret-ref'] !== undefined
+      ? {
+        accessState: 'enabled',
+        secretRef: parsed.options['jev-secret-ref'],
+        baseUrl: parsed.options['jev-base-url'],
+        model: parsed.options['jev-model'],
+        threshold: parsed.options['jev-threshold'],
+      }
+      : undefined,
   };
   const result = await setup(home, answers);
   io.out(result.created ? 'Configuration created.' : 'Configuration updated.');
   io.out(`Timezone: ${result.config.timezone}`);
   io.out(`Email: ${result.config.email.setupState}`);
   io.out(`Automation: ${result.config.automation.setupState}`);
+  io.out(`Jev: ${result.config.jev.accessState === 'enabled' ? `${result.config.jev.model} active; key from ${result.config.jev.secretRef}` : `${result.config.jev.accessState}; ambiguous decisions require manual review`}`);
   if (result.config.email.setupState !== 'verified') {
     io.out(emailProvider === 'imap'
       ? 'Next: set the IMAP credential environment variable, run email verify-imap, then create and register the mail-sync job.'

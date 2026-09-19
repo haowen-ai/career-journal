@@ -24,9 +24,11 @@
   },
   "jev": {
     "accessState": "unavailable",
+    "baseUrl": "https://api.typesafe.ai/v1/systemone",
     "model": "jev-latest",
     "secretRef": null,
-    "mode": "off"
+    "mode": "off",
+    "threshold": 0.8
   },
   "careerOps": {
     "root": null,

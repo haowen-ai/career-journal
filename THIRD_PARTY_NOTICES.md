@@ -19,9 +19,9 @@ No career-ops source code is copied into this repository. Users install it separ
 - Project: [typesafe-ai/skills](https://github.com/typesafe-ai/skills)
 - Author: TypeSafe AI
 - License: MIT; preserved in `LICENSES/typesafe-ai-skills-MIT.txt`
-- Use here: optional decision-adapter design and explicit Skill dependency; no access is assumed
+- Use here: agent guidance for the primary Jev semantic decision adapter when a user configures access; no access is assumed
 
-No TypeSafe Agent Skill source code is copied into this repository. Jev remains optional and the product continues to work for users who are unavailable, waitlisted, or choose not to configure it.
+No TypeSafe Agent Skill source code is copied into this repository. The tracker continues to work without Jev, while ambiguous semantic decisions are queued for manual review instead of falling back to a generic LLM.
 
 ## Tabler Icons
 

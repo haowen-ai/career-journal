@@ -63,7 +63,7 @@ test('same Message-ID with changed content is a conflict and decision plus event
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
-test('ambiguous email uses the configured decision router and persists its engine', async () => {
+test('ambiguous email uses Jev and persists its engine without calling a generic LLM', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'jobops-eml-router-'));
   try {
     await setup(home, { timezone: 'UTC', email: { mode: 'skip' } });
@@ -71,11 +71,14 @@ test('ambiguous email uses the configured decision router and persists its engin
     configureEmailAccount(context.db, { provider: 'manual-eml', address: 'candidate@example.test' });
     const file = path.join(home, 'ambiguous.eml');
     await writeFile(file, 'Message-ID: <router@example.test>\nSubject: Update\n\nThere is an update');
+    let llmCalls = 0;
     const result = await importEml(context.db, file, { accountId: 'manual-eml:candidate@example.test' }, {
-      structuredLlm: async () => ({ classification: 'assessment', confidence: 0.9 }),
+      jev: { accessState: 'enabled', mode: 'active', threshold: 0.8, decide: async () => ({ classification: 'assessment', confidence: 0.9 }) },
+      structuredLlm: async () => { llmCalls += 1; return { classification: 'offer', confidence: 1 }; },
     });
     assert.equal(result.classification, 'assessment');
-    assert.equal(context.db.prepare('SELECT engine FROM decision_traces').get().engine, 'structured-llm');
+    assert.equal(context.db.prepare('SELECT engine FROM decision_traces').get().engine, 'jev');
+    assert.equal(llmCalls, 0);
     context.db.close();
   } finally { await rm(home, { recursive: true, force: true }); }
 });

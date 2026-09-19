@@ -55,7 +55,7 @@ Job seekers commonly split their work across documents, email, recruiting sites,
 - Inferring rejection from prolonged silence
 - Treating a generated artifact as submitted
 - A hosted multi-user ATS, agency CRM, or candidate marketplace
-- Mandatory Jev, one LLM, one mailbox provider, or one operating system
+- Mandatory access to Jev, one mailbox provider, or one operating system for basic tracking
 
 ## 4. Target users
 
@@ -102,9 +102,9 @@ flowchart TB
     O --> EM[Email adapters]
     O --> DOC[PDF / Documents]
     O --> DE[Decision engine]
-    DE --> J[Optional Jev adapter]
-    DE --> R[Rules fallback]
-    DE --> L[Structured LLM fallback]
+    DE --> R[Explicit deterministic rules]
+    DE --> J[Jev semantic decisions]
+    DE --> M[Manual review]
     C --> DB[(Local fact store)]
     CO --> AR[(Versioned artifacts and validation reports)]
     EM --> C
@@ -163,7 +163,7 @@ It must not duplicate all CareerOps writing and review rules, claim a missing de
 | DOCX creation and review | Documents Skill / adapter | Optional | DOCX requested | Offer an available format or enablement guidance |
 | Mail reading | Built-in read-only IMAPS; host connectors import only unless separately verified | Onboarding required | Mailbox selection and first sync | Keep setup incomplete; manual EML and host-authored JSON cannot replace live proof |
 | Scheduling | Codex Automation, probeable OS scheduler, or equivalent host | Onboarding required | Four daily jobs | `register-external` creates only a pending claim; failed probe blocks setup |
-| Jev decisions | TypeSafe adapter / `typesafe-ai` Skill | Experimental and optional | User has access and enables it | Rules and structured-LLM fallback |
+| Jev decisions | TypeSafe adapter / `typesafe-ai` Skill | Primary semantic engine when configured | User has access and enables it | Explicit rules, then manual review |
 | Wiki / durable knowledge | Wiki adapter | Optional | User enables cross-task knowledge | Project-local config and evidence store |
 
 Authoring tools such as Skill Creator, Skill Installer, or host product documentation Skills are development dependencies, not end-user runtime requirements. The installer must still record which runtime components it generated or installed.
@@ -210,7 +210,7 @@ Manual EML is a one-message fallback only. Mailbox integrations are read-only: t
 
 The README must let a new user install without author explanation. Copyable instructions cover requirements, clone and dependency commands, Codex versus API choice, setup, profile import or blank start, provider configuration, live read-only mailbox verification and first sync, creation and probing of all four jobs in the detected time zone, one run per job, `doctor`, dashboard start, first application, update, uninstall, backup, and local-data removal.
 
-It must explain which functions are fully local, what minimal information optional external APIs receive, each Skill's responsibility, credential ownership, why completed onboarding requires live mailbox and scheduler proof, the independence of model and Jev configuration, Jev's possible waitlist state, and how to inspect versions and third-party licenses.
+It must explain which functions are fully local, what minimal information optional external APIs receive, each Skill's responsibility, credential ownership, why completed onboarding requires live mailbox and scheduler proof, how Jev is configured without storing its key, and how to inspect versions and third-party licenses.
 
 ### 9.5 Daily automation contract
 
@@ -319,21 +319,19 @@ SQLite is the default fact store, with structured CLI/API access and optional JS
 - `Interview`: stage, time, preparation, questions, and retrospective
 - `EmailAccount`: provider, authorization status, and cursor, without literal credentials
 - `Automation`: schedule, time zone, external identity, probe, last matching success, and failure state
-- `DecisionTrace`: rules, Jev, or LLM result, confidence, and final handling
+- `DecisionTrace`: rule or Jev result, confidence, manual-review state, and final handling
 
 Attachments use SHA-256 content-addressed references. Secrets remain outside the business database. Backups include an artifact metadata index by default rather than copying artifact payloads.
 
-## 13. Optional Jev integration
+## 13. Jev integration
 
-Jev is an experimental, optional decision engine for closed-choice classification, scoring, routing, and confidence gates. It does not replace a generative model for resumes, cover letters, or interview materials.
+Jev is the primary semantic decision engine after a user configures access. Deterministic rules run first for explicit, reviewable cases; Jev handles ambiguous cases that need semantic judgment. Recruiting decisions do not use a generic LLM prompt-and-parse fallback. Jev does not replace generative models used to draft resumes, cover letters, or interview materials.
 
-Useful cases include email-type classification, matching a message to an Application, choosing a Skill, requesting review, and detecting defined CareerOps risk categories.
+Setup never assumes that a user has an API key. It asks for access state and, when access exists, stores only an environment reference such as `env:TYPESAFE_API_KEY`. Literal keys never enter config, prompts, logs, or Git. Before questions, criteria, or thresholds change, the implementation reads the official TypeSafe Agent Skill and current API documentation.
 
-Jev may still be early access or waitlisted. Setup must first record one of: not applied, waitlisted, access granted, or disabled. Only access-granted users configure `TYPESAFE_API_KEY` and run a health check. Everyone else uses deterministic rules and structured-LLM fallback. No Jev key is required for core functionality.
+The v1 request uses `state`, `model`, and `questions`. Email classification uses one Choice question and reads `answers.classification.choice` plus `confidence`. Explicit rules avoid unnecessary API cost. Ambiguous messages go to Jev; unavailable service, exhausted quota, malformed output, shadow mode, or low confidence goes to manual review. HTTP 429 and 529 receive bounded backoff retries; 401 does not retry. The routing path never calls a generic LLM as Jev fallback.
 
-Jev failures, timeouts, quota limits, or low confidence trigger fallback. Output remains a proposed decision until schema and state validation. Consequential events require original evidence or user confirmation. Shadow mode may record decisions without changing state.
-
-Any displayed Jev pricing or availability must be refreshed from current official information. A dated PRD figure is historical context, not a permanent product promise.
+Jev output remains a proposed decision until schema and state validation. Consequential events require original evidence or user confirmation. Thresholds live in one reviewable configuration and must be evaluated against representative messages before limited automation. Pricing, credits, purchase requirements, and access state are not hard-coded because they can change. Release validation covers the v1 contract, low confidence, malformed output, 401, 429/529, missing credentials, rule bypass, manual review, and one controlled live API smoke test.
 
 ## 14. Privacy and security
 
@@ -367,7 +365,7 @@ Any displayed Jev pricing or availability must be refreshed from current officia
 8. One mailbox failure does not advance its cursor or damage successful accounts
 9. Draft artifacts never become submitted without explicit evidence
 10. Rejection, interview, and offer states require original evidence or user confirmation
-11. Missing Jev access automatically uses fallback and does not block core workflows
+11. Missing Jev access keeps basic tracking available and routes ambiguous semantic decisions to manual review
 12. Consequential external writes require an explicit user action and post-action verification
 13. A clean environment passes the documented Quick Start smoke test
 14. README and third-party notices fully credit CareerOps, TypeSafe's Agent Skill, and every actual dependency
@@ -442,7 +440,7 @@ Each run records version, commit, system, runtime mode, fresh-install or upgrade
 | Misclassified email changes state | Read-only access, retained evidence, confidence gates, and pending review |
 | Generated material is mistaken for submitted | Separate draft/submitted lifecycle and exact-artifact confirmation |
 | Personal data leaks to GitHub | Ignore secrets, scan releases, and use synthetic fixtures |
-| Jev stays waitlisted or changes API | Optional adapter, shadow mode, and dual fallback |
+| Jev access is unavailable or its API changes | Versioned contract tests, manual review, and a controlled live smoke test |
 | Generalization weakens customization | Profile and policy overlays plus importable personal rules |
 | Upstream credit or license is missed | Manifest, notices, license files, and a release gate |
 | README commands drift | Clean-environment smoke tests and versioned docs |

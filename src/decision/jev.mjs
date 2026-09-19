@@ -1,4 +1,18 @@
-import { EMAIL_CLASSIFICATIONS, classifyEmailWithRules } from './rules.mjs';
+import { EMAIL_CLASSIFICATIONS } from './rules.mjs';
+
+export const JEV_EMAIL_QUESTION = Object.freeze({
+  type: 'choice',
+  instructions: 'Choose the single recruiting workflow outcome best supported by this email. Choose unknown when the message does not provide enough evidence.',
+  criteria: Object.freeze({
+    application_confirmation: 'Confirms that a specific application was submitted or received, without requiring another hiring step',
+    assessment: 'Requires or invites an online assessment, coding challenge, take-home exercise, questionnaire, or similar evaluation',
+    interview: 'Invites or schedules an interview, recruiter screen, hiring-manager conversation, or recorded video response',
+    rejection: 'States that the candidate will not move forward for the specific application',
+    offer: 'Communicates an employment or internship offer for the specific application',
+    marketing: 'A newsletter, job alert, talent-community message, or other promotional content without an application-specific status update',
+    unknown: 'The message is ambiguous, administrative, or does not support any other outcome',
+  }),
+});
 
 function resolveSecret(secretRef, env) {
   const match = /^env:([A-Za-z_][A-Za-z0-9_]*)$/.exec(String(secretRef ?? ''));
@@ -6,6 +20,14 @@ function resolveSecret(secretRef, env) {
   const value = env[match[1]];
   if (!value) throw new Error(`Jev credential environment variable is unavailable: ${match[1]}`);
   return value;
+}
+
+function apiEndpoint(value) {
+  const url = new URL(value ?? 'https://api.typesafe.ai/v1/systemone');
+  if (url.origin !== 'https://api.typesafe.ai' || url.pathname.replace(/\/$/, '') !== '/v1/systemone' || url.search || url.hash) {
+    throw new Error('Jev endpoint must be https://api.typesafe.ai/v1/systemone');
+  }
+  return 'https://api.typesafe.ai/v1/systemone';
 }
 
 export function createJevAdapter(config, fetchImpl = globalThis.fetch, env = process.env) {
@@ -20,19 +42,42 @@ export function createJevAdapter(config, fetchImpl = globalThis.fetch, env = pro
     mode,
     threshold,
     async decide(input) {
+      const endpoint = apiEndpoint(config.baseUrl);
       const secret = resolveSecret(config.secretRef, env);
-      const response = await fetchImpl(config.baseUrl ?? 'https://api.typesafe.ai/v1/systemone', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
-        body: JSON.stringify({
-          model: config.model ?? 'jev-latest',
-          question: `Classify this recruiting email: ${input.text}`,
-          choices: EMAIL_CLASSIFICATIONS,
-        }),
-      });
+      const retryDelaysMs = Array.isArray(config.retryDelaysMs) ? config.retryDelaysMs : [250, 750];
+      let response;
+      for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
+        response = await fetchImpl(endpoint, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+          body: JSON.stringify({
+            state: String(input?.text ?? ''),
+            model: config.model ?? 'jev-latest',
+            questions: { classification: JEV_EMAIL_QUESTION },
+          }),
+        });
+        if (response.ok || ![429, 529].includes(response.status) || attempt === retryDelaysMs.length) break;
+        await new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(retryDelaysMs[attempt]) || 0)));
+      }
       if (!response.ok) throw new Error(`Jev request failed with HTTP ${response.status}`);
       const payload = await response.json();
-      return payload?.answers?.classification ?? payload?.classification ?? classifyEmailWithRules('');
+      const answer = payload?.answers?.classification;
+      if (answer?.type !== 'choice'
+        || !EMAIL_CLASSIFICATIONS.includes(answer.choice)
+        || !Number.isFinite(answer.confidence)
+        || answer.confidence < 0
+        || answer.confidence > 1) {
+        throw new Error('Invalid Jev classification response');
+      }
+      const usage = payload?.usage;
+      const validUsage = usage
+        && Number.isInteger(usage.input_tokens) && usage.input_tokens >= 0
+        && Number.isInteger(usage.output_tokens) && usage.output_tokens >= 0;
+      return {
+        classification: answer.choice,
+        confidence: answer.confidence,
+        ...(validUsage ? { usage: { input_tokens: usage.input_tokens, output_tokens: usage.output_tokens } } : {}),
+      };
     },
   };
 }

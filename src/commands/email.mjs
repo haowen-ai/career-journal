@@ -9,19 +9,13 @@ import {
 } from '../email/accounts.mjs';
 import { importEml } from '../email/eml.mjs';
 import { saveConfig } from '../config/store.mjs';
-import { createProvider } from '../providers/interface.mjs';
 import { createJevAdapter } from '../decision/jev.mjs';
-import { classifyWithStructuredLlm } from '../decision/structured-llm.mjs';
 import { loadHostBatch, syncHostBatch } from '../email/host-sync.mjs';
 import { automationSetupState, listTasks } from '../automation/registry.mjs';
 import { syncImapEmailAccount } from '../email/imap-sync.mjs';
 
 export function configuredDecisionAdapters(config, fetchImpl = globalThis.fetch, env = process.env) {
   const adapters = {};
-  if (config.model?.provider && config.model.provider !== 'none') {
-    const provider = createProvider(config.model, fetchImpl, env);
-    adapters.structuredLlm = (input) => classifyWithStructuredLlm(provider, input.text);
-  }
   if (config.jev?.accessState) adapters.jev = createJevAdapter(config.jev, fetchImpl, env);
   return adapters;
 }
