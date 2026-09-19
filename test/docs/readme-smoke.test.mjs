@@ -91,8 +91,8 @@ test('README leads with the product, interface, and workflows before installatio
   assert.deepEqual(previewManifest.companies, ['Apple · Demo', 'Google · Demo', 'Microsoft · Demo', 'NVIDIA · Demo', 'Amazon · Demo', 'Meta · Demo', 'Tesla · Demo']);
   assert.match(english, /synthetic big-company examples/i);
   assert.match(english, /do not represent real applications, outcomes, affiliations, or endorsements/i);
-  assert.match(chinese, /大厂名称作为合成演示数据/);
-  assert.match(chinese, /不代表真实投递、结果、关联或背书/);
+  assert.match(chinese, /虚构的演示数据/);
+  assert.match(chinese, /不代表真实投递、求职结果、合作关系或官方背书/);
 });
 
 test('public onboarding uses the friendly localhost dashboard URL', async () => {
@@ -130,13 +130,13 @@ test('public onboarding requires a mailbox and verified daily scheduler registra
     }
   }
   assert.match(english, /manual EML[^\n]*(fallback|one-off)/i);
-  assert.match(chinese, /手动 EML[^\n]*(备用|临时|单次)/i);
+  assert.match(chinese, /手动(?:导入 )?EML[^\n]*(备用|临时|单次)/i);
   assert.match(english, /doctor[^\n]*pass/i);
   assert.match(chinese, /doctor[^\n]*通过/i);
   assert.match(english, /36 hours/i);
   assert.match(chinese, /36 小时/i);
   assert.match(english, /native `mail-sync` installation is deliberately blocked/i);
-  assert.match(chinese, /主动阻止原生安装 `mail-sync`/);
+  assert.match(chinese, /(阻止操作系统直接安装|主动阻止原生安装) `mail-sync`/);
   assert.doesNotMatch(english, /`mail-sync` is supported when its selected account uses IMAPS/i);
   assert.doesNotMatch(chinese, /当所选邮箱是 IMAPS 时，`mail-sync` 也受支持/);
 });

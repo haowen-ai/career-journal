@@ -22,6 +22,27 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.9] - 2026-09-19
+
+### Added
+
+- None
+
+### Changed
+
+- Rewrote the Simplified Chinese README in natural mainland Chinese while preserving the documented commands, links, product behavior, and third-party attribution
+- Replaced the opaque wording around the four daily jobs with their exact purposes, default times, and the external schedulers that actually execute them
+
+### Fixed
+
+- Clarified that setup stores task configuration only and that completed onboarding requires real scheduler definitions plus matching successful runs
+- Replaced literal technical translations with plain explanations for mailbox evidence, external imports, Jev decisions, and CareerOps material validation
+- Updated documentation tests to validate the required safety meaning without forcing the previous literal Chinese wording
+
+### Security
+
+- Kept passwords and API keys represented only by environment-variable names or placeholder references in public documentation
+
 ## [0.1.0-alpha.8] - 2026-09-19
 
 ### Added
