@@ -6,6 +6,7 @@ import { artifactCommand } from '../commands/artifact.mjs';
 import { exportCommand } from '../commands/export.mjs';
 import { startCommand } from '../commands/start.mjs';
 import { automationCommand } from '../commands/automation.mjs';
+import { emailCommand } from '../commands/email.mjs';
 
 export function createRuntime({ root, version }) {
   return {
@@ -20,6 +21,7 @@ export function createRuntime({ root, version }) {
       ['export', exportCommand],
       ['start', startCommand],
       ['automation', automationCommand],
+      ['email', emailCommand],
     ]),
   };
 }
