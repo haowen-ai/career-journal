@@ -52,3 +52,22 @@ test('CLI setup without timezone preserves an existing timezone', async () => wi
   await setupCommand({ options: { home, 'careerops-root': '/tmp/career-ops' } }, memoryIO());
   assert.equal((await loadConfig(home)).timezone, 'Asia/Tokyo');
 }));
+
+test('first CLI setup without timezone uses the computer IANA timezone', async () => withHome(async (home) => {
+  await setupCommand({ options: { home, 'skip-email': true } }, memoryIO());
+  assert.equal((await loadConfig(home)).timezone, Intl.DateTimeFormat().resolvedOptions().timeZone);
+}));
+
+test('programmatic setup also defaults to the computer IANA timezone', async () => withHome(async (home) => {
+  const configured = await setup(home, { email: { mode: 'skip' } });
+  assert.equal(configured.config.timezone, Intl.DateTimeFormat().resolvedOptions().timeZone);
+}));
+
+test('stores explicit personal material-rule files without replacing built-in defaults', async () => withHome(async (home) => {
+  const rules = path.join(home, 'resume-rules.md');
+  await import('node:fs/promises').then(({ writeFile }) => writeFile(rules, '# Personal rules\n'));
+  const configured = await setup(home, { timezone: 'UTC', materialRules: [rules] });
+  assert.deepEqual(configured.config.materials.ruleFiles, [rules]);
+  const untouched = await setup(path.join(home, 'other'), { timezone: 'UTC' });
+  assert.deepEqual(untouched.config.materials.ruleFiles, []);
+}));

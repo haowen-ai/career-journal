@@ -1,15 +1,33 @@
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { openHomeDatabase } from '../runtime/home.mjs';
 import { runCareerOps } from '../integrations/careerops.mjs';
 import { archiveArtifact } from '../domain/artifacts.mjs';
 
-export async function materialCommand(parsed, io) {
+async function resolveRuleFiles(request, config, runtimeRoot, requestFile) {
+  const builtIn = path.join(runtimeRoot, 'config', 'material-rules', 'us-resume-default.md');
+  const requested = Array.isArray(request.ruleFiles)
+    ? request.ruleFiles.map((file) => path.resolve(path.dirname(requestFile), String(file)))
+    : [];
+  const configured = Array.isArray(config.materials?.ruleFiles) ? config.materials.ruleFiles : [];
+  const builtInFiles = request.materialKind === 'resume' ? [builtIn] : [];
+  const files = [...new Set([...builtInFiles, ...configured.map((file) => path.resolve(file)), ...requested])];
+  for (const file of files) {
+    try { await access(file); }
+    catch { throw new Error(`Material rules file is not readable: ${file}`); }
+  }
+  return files;
+}
+
+export async function materialCommand(parsed, io, runtime = {}) {
   const context = await openHomeDatabase(parsed.options.home ?? process.cwd());
   try {
     if (['prepare', 'verify'].includes(parsed.subcommand)) {
       if (!parsed.options.request) throw new Error('Usage: jobops material prepare|verify --request <json-file>');
-      const request = JSON.parse(await readFile(parsed.options.request, 'utf8'));
+      const requestFile = path.resolve(parsed.options.request);
+      const request = JSON.parse(await readFile(requestFile, 'utf8'));
       request.action = parsed.subcommand;
+      request.ruleFiles = await resolveRuleFiles(request, context.config, runtime.root ?? process.cwd(), requestFile);
       const configured = context.config.careerOps ?? {};
       const result = await runCareerOps(request, {
         root: parsed.options['careerops-root'] ?? configured.root ?? process.env.CAREER_OPS_ROOT,

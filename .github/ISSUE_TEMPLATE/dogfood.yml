@@ -1,29 +1,29 @@
-name: Fresh-clone dogfood report
-description: Report onboarding or upgrade friction from a clean checkout
+name: Fresh-clone dogfood report / 全新克隆试用报告
+description: Report onboarding or upgrade friction from a clean checkout / 报告全新 checkout 的入门或升级问题
 title: "[Dogfood] "
 labels: [dogfood]
 body:
   - type: dropdown
     id: path
     attributes:
-      label: Path tested
-      options: [Fresh clone, Upgrade]
+      label: Path tested / 测试路径
+      options: [Fresh clone / 全新克隆, Upgrade / 升级]
     validations:
       required: true
   - type: input
     id: versions
     attributes:
-      label: From and to versions
+      label: From and to versions / 起始与目标版本
   - type: textarea
     id: commands
     attributes:
-      label: Commands and first failing step
-      description: Redact private paths, personal data, and credentials
+      label: Commands and first failing step / 命令与首个失败步骤
+      description: Redact private paths, personal data, and credentials / 请脱敏私有路径、个人数据和凭据
     validations:
       required: true
   - type: textarea
     id: result
     attributes:
-      label: Result and suggested fix
+      label: Result and suggested fix / 结果与建议修复
     validations:
       required: true

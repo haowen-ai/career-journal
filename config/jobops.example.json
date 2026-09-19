@@ -16,6 +16,8 @@
     "model": "jev-latest",
     "secretRef": null,
     "mode": "off"
+  },
+  "materials": {
+    "ruleFiles": []
   }
 }
-

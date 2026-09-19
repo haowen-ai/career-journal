@@ -1,5 +1,7 @@
 # Job Search Ops
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 Job Search Ops is a local-first, evidence-driven application tracker for people and AI agents. It keeps roles, status events, recruiting email evidence, deadlines, and the exact material lifecycle in one SQLite database. A generated resume remains a draft until the exact uploaded file is confirmed.
 
 This is an alpha release. Core tracking is usable without an email account, model key, CareerOps, or Jev access.
@@ -17,12 +19,20 @@ Clone and initialize a private local data directory:
 ```sh
 git clone https://github.com/haowenchen0811/job-search-ops.git
 cd job-search-ops
-node ./bin/jobops.mjs setup --home "$HOME/job-search" --timezone America/Chicago --skip-email
+node ./bin/jobops.mjs setup --home "$HOME/job-search" --skip-email
 node ./bin/jobops.mjs doctor --home "$HOME/job-search"
 node ./bin/jobops.mjs start --home "$HOME/job-search"
 ```
 
 Use `node ./bin/jobops.mjs ...` or the included `./jobops ...` launcher from the clone. To install the bare `jobops` command globally, run `npm link` with a Node.js installation that includes npm.
+
+On first setup, Job Search Ops detects the computer's IANA time zone. Later setup runs preserve the saved value unless the user explicitly passes `--timezone <IANA-zone>`.
+
+`--skip-email` is useful for a first trial. To use email evidence, configure an account explicitly; setup never assumes a school, work, or personal address:
+
+```sh
+node ./bin/jobops.mjs email configure --home "$HOME/job-search" --provider manual-eml --address candidate@example.com
+```
 
 The commands below are executed by the documentation test against a new temporary home:
 
@@ -71,6 +81,18 @@ Email access is optional and read-only. Setup never invents or defaults to a per
 
 The alpha child-process adapter expects the configured CareerOps installation to expose the documented `jobops-adapter.mjs` JSON bridge. If the bridge or pinned version is missing, material verification stays unavailable and any fallback must remain an **Unverified Draft**.
 
+### Built-in and personal resume rules
+
+Job Search Ops ships the project author's reusable resume rules in [`config/material-rules/us-resume-default.md`](config/material-rules/us-resume-default.md). They add opinionated defaults that CareerOps does not impose: Education → Experience → Skills only, three bullets per employer, 11 point body text, no Projects or Summary, certification under Skills, concise achievement bullets, and a rule-by-rule final-PDF audit.
+
+The built-in rules apply to U.S. English resumes and can be overridden by a user's explicit instruction. A user can also add a personal Skill or rule file without editing the repository:
+
+```sh
+jobops setup --home ~/job-search --material-rules /path/to/personal-resume-skill/SKILL.md
+```
+
+The `careerops-materials` Skill loads the built-in defaults and every configured personal rule file, then records any overrides in the artifact audit. Resume-only rules never apply automatically to cover-letter prose.
+
 ## Email and Decision Providers
 
 - **No email configured:** tracking, dashboard, exports, and manual updates still work
@@ -83,14 +105,14 @@ The alpha child-process adapter expects the configured CareerOps installation to
 Four portable tasks are included: `mail-sync`, `deadline-review`, `daily-consolidation`, and `local-backup`.
 
 ```sh
-jobops automation configure --home ~/job-search --task deadline-review --time 20:00 --timezone America/Chicago --enabled
-jobops automation configure --home ~/job-search --task daily-consolidation --time 22:00 --timezone America/Chicago --enabled
+jobops automation configure --home ~/job-search --task deadline-review --time 20:00 --enabled
+jobops automation configure --home ~/job-search --task daily-consolidation --time 22:00 --enabled
 jobops automation list --home ~/job-search
 jobops automation run --home ~/job-search --task deadline-review --dry-run
 jobops automation install --home ~/job-search --task deadline-review
 ```
 
-`install` prepares a platform-specific scheduler definition under `.jobops/schedulers/`; it does not register it with the operating system. Review it, then load it with `launchctl` on macOS, `crontab` on Linux, or `schtasks` on Windows. Each task keeps its own cursor, advances it only after success, and stays quiet when nothing actionable changed. In this alpha, `local-backup` has an executable handler; tasks whose adapters are unavailable fail visibly and do not record a successful run.
+When `--timezone` is omitted, automation uses the workspace time zone detected during setup. `install` prepares a platform-specific scheduler definition under `.jobops/schedulers/`; it does not register it with the operating system. Review it, then load it with `launchctl` on macOS, `crontab` on Linux, or `schtasks` on Windows. Each task keeps its own cursor, advances it only after success, and stays quiet when nothing actionable changed. In this alpha, `local-backup` has an executable handler; tasks whose adapters are unavailable fail visibly and do not record a successful run.
 
 If you manually registered a definition, remove the OS registration before deleting its file:
 
@@ -137,6 +159,8 @@ node scripts/check-release.mjs
 ```
 
 Versions follow SemVer. Every release updates `VERSION`, `package.json`, and `CHANGELOG.md`; alpha tags use `v0.1.0-alpha.N`. Fresh-clone and previous-version upgrade smoke tests are release gates.
+
+Public user documentation must ship in both English and Simplified Chinese. The release checker fails when the paired onboarding, attribution, or integration documentation is missing.
 
 ## Acknowledgements
 

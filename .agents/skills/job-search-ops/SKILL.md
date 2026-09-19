@@ -10,7 +10,7 @@ Keep job-search facts, evidence, and artifacts auditable. Run `jobops doctor` be
 ## Route the request
 
 - Application, event, deadline, status, or dashboard: use the `jobops` CLI
-- Resume or cover letter: read `careerops-materials`; CareerOps is required for verified generation
+- Resume or cover letter: read `careerops-materials`; CareerOps is required for verified generation, and the built-in plus configured personal material rules must be loaded
 - Rendered PDF inspection: use the host PDF capability when available
 - DOCX work: use the host Documents capability when available
 - Recruiting email: use only a configured read-only email adapter; manual EML remains valid

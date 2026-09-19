@@ -19,8 +19,10 @@ test('material prepare validates, hashes, and archives the generated draft', asy
     await writeFile(path.join(careerOps, 'jobops-adapter.mjs'), `import { readFile, writeFile } from 'node:fs/promises';
 let text=''; for await (const chunk of process.stdin) text += chunk; const request=JSON.parse(text);
 await writeFile(request.requestedOutput, '%PDF generated');
-console.log(JSON.stringify({ok:true, applicationId:request.applicationId, lifecycle:'draft', outputPath:request.requestedOutput, verification:'passed', verificationEvidence:{factGate:'passed'}}));`);
-    await setup(home, { timezone: 'UTC', email: { mode: 'skip' }, careerOps: { root: careerOps } });
+console.log(JSON.stringify({ok:true, applicationId:request.applicationId, lifecycle:'draft', outputPath:request.requestedOutput, verification:'passed', verificationEvidence:{factGate:'passed',ruleFiles:request.ruleFiles}}));`);
+    const rules = path.join(root, 'personal-rules.md');
+    await writeFile(rules, '# Personal material rules\n');
+    await setup(home, { timezone: 'UTC', email: { mode: 'skip' }, careerOps: { root: careerOps }, materialRules: [rules] });
     const context = await openHomeDatabase(home);
     createApplication(context.db, { company: 'Acme', role: 'Architect' });
     context.db.close();
@@ -32,6 +34,10 @@ console.log(JSON.stringify({ok:true, applicationId:request.applicationId, lifecy
     const result = JSON.parse(io.stdout);
     assert.equal(result.artifact.lifecycle, 'draft');
     assert.equal(result.artifact.verification, 'passed');
+    assert.deepEqual(result.verificationEvidence.ruleFiles, [
+      path.join(process.cwd(), 'config', 'material-rules', 'us-resume-default.md'),
+      rules,
+    ]);
     assert.equal(await readFile(result.artifact.storagePath, 'utf8'), '%PDF generated');
     const inspect = await openHomeDatabase(home);
     assert.equal(inspect.db.prepare('SELECT COUNT(*) count FROM artifacts').get().count, 1);

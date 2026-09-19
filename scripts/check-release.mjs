@@ -47,6 +47,35 @@ export async function checkRelease(root) {
   check('licenses', licenses.every(Boolean), licenseFiles.join(', '));
   check('changelog', /### Added/.test(changelog) && /### Changed/.test(changelog) && /### Fixed/.test(changelog) && /### Security/.test(changelog), 'required changelog sections');
 
+  try {
+    const [englishReadme, chineseReadme, chineseNotices, chineseBridge, englishResumeRules, chineseResumeRules, chineseChangelog, bugTemplate, dogfoodTemplate, pullRequestTemplate] = await Promise.all([
+      read('README.md'),
+      read('README.zh-CN.md'),
+      read('THIRD_PARTY_NOTICES.zh-CN.md'),
+      read('docs/integrations/careerops-bridge.zh-CN.md'),
+      read('config/material-rules/us-resume-default.md'),
+      read('config/material-rules/us-resume-default.zh-CN.md'),
+      read('CHANGELOG.zh-CN.md'),
+      read('.github/ISSUE_TEMPLATE/bug.yml'),
+      read('.github/ISSUE_TEMPLATE/dogfood.yml'),
+      read('.github/pull_request_template.md'),
+    ]);
+    const bilingual = /\[简体中文\]\(README\.zh-CN\.md\)/.test(englishReadme)
+      && /\[English\]\(README\.md\)/.test(chineseReadme)
+      && /## 快速开始/.test(chineseReadme)
+      && /## 每日自动化/.test(chineseReadme)
+      && /## 数据与隐私/.test(chineseReadme)
+      && /career-ops-hq\/career-ops/.test(chineseNotices)
+      && /CareerOps JSON 桥接契约/.test(chineseBridge)
+      && /\[简体中文\]\(us-resume-default\.zh-CN\.md\)/.test(englishResumeRules)
+      && /\[English\]\(us-resume-default\.md\)/.test(chineseResumeRules)
+      && chineseChangelog.includes(`## [${version}]`)
+      && /缺陷报告/.test(bugTemplate)
+      && /全新克隆/.test(dogfoodTemplate)
+      && /问题与最终行为/.test(pullRequestTemplate);
+    check('bilingual-docs', bilingual, 'English and Simplified Chinese onboarding, changelog, notices, integration docs, resume rules, and contribution templates');
+  } catch (error) { check('bilingual-docs', false, error.message); }
+
   const files = await candidateFiles(root);
   const textFiles = files.filter((file) => /\.(?:mjs|js|json|md|yml|yaml|txt|html|css)$/.test(file));
   const secretPatterns = [

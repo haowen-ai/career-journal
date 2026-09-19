@@ -1,5 +1,7 @@
 # CareerOps JSON Bridge Contract
 
+[English](careerops-bridge.md) | [简体中文](careerops-bridge.zh-CN.md)
+
 The API-mode CareerOps adapter invokes a separately installed, pinned `career-ops` checkout. Job Search Ops does not copy CareerOps source code or claim its work as its own.
 
 ## Availability
@@ -24,9 +26,15 @@ It sends one JSON object on standard input. Required fields are:
   "lifecycle": "draft",
   "jdPath": "/path/to/jd.txt",
   "evidencePath": "/path/to/profile.md",
+  "ruleFiles": [
+    "/path/to/job-search-ops/config/material-rules/us-resume-default.md",
+    "/path/to/personal-resume-skill/SKILL.md"
+  ],
   "requestedOutput": "/path/to/output.pdf"
 }
 ```
+
+For resume requests, `ruleFiles` starts with the built-in Job Search Ops resume defaults and then includes configured personal rule files. Cover-letter requests omit the resume-default file. The bridge must apply files in order, with later files taking precedence; current explicit user instructions remain the highest authority. Resume-only rules must not be applied to cover-letter prose.
 
 The bridge must emit one JSON object on standard output:
 

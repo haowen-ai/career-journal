@@ -1,3 +1,5 @@
+import { access } from 'node:fs/promises';
+import path from 'node:path';
 import { defaultConfig, validateTimezone } from '../config/defaults.mjs';
 import { loadConfig, saveConfig } from '../config/store.mjs';
 
@@ -51,6 +53,16 @@ export async function setup(home, answers = {}) {
     config.careerOps ??= { root: null, pinnedVersion: '1.32.0', entrypoint: 'jobops-adapter.mjs' };
     config.careerOps.root = answers.careerOps.root ? String(answers.careerOps.root) : null;
   }
+  config.materials ??= { ruleFiles: [] };
+  if (answers.materialRules !== undefined) {
+    if (!Array.isArray(answers.materialRules)) throw new Error('Material rules must be a list of file paths');
+    const ruleFiles = [...new Set(answers.materialRules.map((file) => path.resolve(String(file))))];
+    for (const file of ruleFiles) {
+      try { await access(file); }
+      catch { throw new Error(`Material rules file is not readable: ${file}`); }
+    }
+    config.materials.ruleFiles = ruleFiles;
+  }
   config.updatedAt = new Date().toISOString();
   await saveConfig(home, config);
   return { created, config };
@@ -70,6 +82,7 @@ export async function setupCommand(parsed, io, runtime) {
     timezone,
     email: parsed.options['skip-email'] ? { mode: 'skip' } : undefined,
     careerOps: parsed.options['careerops-root'] !== undefined ? { root: parsed.options['careerops-root'] } : undefined,
+    materialRules: parsed.options['material-rules'] !== undefined ? [parsed.options['material-rules']] : undefined,
   };
   const result = await setup(home, answers);
   io.out(result.created ? 'Configuration created.' : 'Configuration updated.');

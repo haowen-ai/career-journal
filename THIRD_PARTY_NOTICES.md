@@ -1,5 +1,7 @@
 # Third-Party Notices
 
+[English](THIRD_PARTY_NOTICES.md) | [简体中文](THIRD_PARTY_NOTICES.zh-CN.md)
+
 Job Search Ops preserves credit for the independent work it integrates with. Inclusion here does not imply endorsement by either project.
 
 ## career-ops

@@ -1,29 +1,29 @@
-name: Bug report
-description: Report reproducible incorrect behavior
+name: Bug report / 缺陷报告
+description: Report reproducible incorrect behavior / 报告可复现的错误行为
 title: "[Bug] "
 labels: [bug]
 body:
   - type: input
     id: version
     attributes:
-      label: Version
-      placeholder: 0.1.0-alpha.1
+      label: Version / 版本
+      placeholder: 0.1.0-alpha.2
     validations:
       required: true
   - type: textarea
     id: steps
     attributes:
-      label: Reproduction steps
-      description: Remove email bodies, credentials, authentication links, and personal application data
+      label: Reproduction steps / 复现步骤
+      description: Remove email bodies, credentials, authentication links, and personal application data / 请删除邮件正文、凭据、身份验证链接和个人申请数据
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: Expected and actual behavior
+      label: Expected and actual behavior / 预期与实际行为
     validations:
       required: true
   - type: textarea
     id: doctor
     attributes:
-      label: Redacted doctor output
+      label: Redacted doctor output / 已脱敏的 doctor 输出

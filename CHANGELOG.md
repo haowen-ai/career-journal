@@ -1,12 +1,14 @@
 # Changelog
 
+[English](CHANGELOG.md) | [简体中文](CHANGELOG.zh-CN.md)
+
 All notable changes are documented here. This project follows Semantic Versioning.
 
 ## [Unreleased]
 
 ### Added
 
-- Published dogfood evidence for the `v0.1.0-alpha.1` public tag, including fresh-clone, upgrade, review-fix, and release-gate results
+- None
 
 ### Changed
 
@@ -19,6 +21,30 @@ All notable changes are documented here. This project follows Semantic Versionin
 ### Security
 
 - None
+
+## [0.1.0-alpha.2] - 2026-09-19
+
+### Added
+
+- Complete Simplified Chinese onboarding, attribution, CareerOps bridge, and built-in resume-rule documentation with English/Chinese navigation
+- Opinionated reusable U.S. resume defaults derived from the project author's workflow, including the Education → Experience → Skills structure and final-PDF audit
+- Configurable personal Skill or rule-file layering through `--material-rules`
+- Published dogfood evidence for the `v0.1.0-alpha.1` public tag
+
+### Changed
+
+- First setup now documents and verifies computer time-zone detection; daily automations inherit the saved workspace time zone when no override is supplied
+- CareerOps material requests now receive the built-in defaults followed by configured personal rule files
+- Public contribution templates now provide English and Simplified Chinese prompts
+
+### Fixed
+
+- Removed the developer-specific Chicago time zone from new-user setup and automation examples
+- Release checks now fail when paired bilingual public documentation or resume rules are missing
+
+### Security
+
+- Personal rules are stored as explicit file references; the public default contains no candidate contact details, education facts, or credentials
 
 ## [0.1.0-alpha.1] - 2026-09-19
 
@@ -54,5 +80,6 @@ All notable changes are documented here. This project follows Semantic Versionin
 - Credentials are referenced through environment variables and excluded from exports
 - Submitted artifacts require explicit confirmation
 
-[Unreleased]: https://github.com/haowenchen0811/job-search-ops/compare/v0.1.0-alpha.1...HEAD
+[Unreleased]: https://github.com/haowenchen0811/job-search-ops/compare/v0.1.0-alpha.2...HEAD
+[0.1.0-alpha.2]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.1

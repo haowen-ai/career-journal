@@ -32,6 +32,9 @@ test('CareerOps routing skill keeps facts and submitted evidence gated', async (
   assert.match(text, /prototype.*production/i);
   assert.match(text, /jobops material (prepare|verify)/i);
   assert.match(text, /exact.*artifact/i);
+  assert.match(text, /personal.*(?:skill|rule)/i);
+  assert.match(text, /materialRules|ruleFiles|material-rules/i);
+  assert.match(text, /us-resume-default\.md/);
 });
 
 test('dependency manifest pins CareerOps and keeps Jev optional', async () => {
