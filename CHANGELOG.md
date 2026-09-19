@@ -22,6 +22,26 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.8] - 2026-09-19
+
+### Added
+
+- None
+
+### Changed
+
+- Updated the previous-version upgrade smoke to create a valid synthetic read-only mailbox configuration for alpha.6 and newer workspaces
+- Made the upgrade gate discover and preserve either the current CAREER JOURNAL identity or a legacy Job Search Ops identity
+
+### Fixed
+
+- Fixed the alpha.6-to-current upgrade gate, which still passed the removed `--skip-email` option and failed before testing any migration
+- Removed hard-coded `.jobops`, `jobops-local-backup`, and `jobops.db` assumptions from the cross-version smoke test
+
+### Security
+
+- The synthetic upgrade fixture stores only environment-variable references and never connects to a mailbox
+
 ## [0.1.0-alpha.7] - 2026-09-19
 
 ### Added
@@ -233,7 +253,8 @@ All notable changes are documented here. This project follows Semantic Versionin
 - Credentials are referenced through environment variables and excluded from exports
 - Submitted artifacts require explicit confirmation
 
-[Unreleased]: https://github.com/haowenchen0811/career-journal/compare/v0.1.0-alpha.7...HEAD
+[Unreleased]: https://github.com/haowenchen0811/career-journal/compare/v0.1.0-alpha.8...HEAD
+[0.1.0-alpha.8]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.8
 [0.1.0-alpha.7]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.7
 [0.1.0-alpha.6]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.6
 [0.1.0-alpha.5]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.5

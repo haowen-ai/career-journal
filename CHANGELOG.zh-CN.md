@@ -22,6 +22,26 @@
 
 - 无
 
+## [0.1.0-alpha.8] - 2026-09-19
+
+### 新增
+
+- 无
+
+### 变更
+
+- 上一版本升级 smoke 在 alpha.6 及更新工作区中改为创建合法的合成只读邮箱配置
+- 升级门禁会自动识别并保留当前 CAREER JOURNAL 标识或旧 Job Search Ops 标识
+
+### 修复
+
+- 修复 alpha.6 升级到当前版本时仍传入已删除的 `--skip-email` 选项，导致尚未测试迁移就立即失败的问题
+- 去除跨版本 smoke 中对 `.jobops`、`jobops-local-backup` 和 `jobops.db` 的硬编码假设
+
+### 安全
+
+- 合成升级测试数据只保存环境变量引用，不会连接任何邮箱
+
 ## [0.1.0-alpha.7] - 2026-09-19
 
 ### 新增
@@ -233,7 +253,8 @@
 - 凭据通过环境变量引用，不会进入导出文件
 - 标记已提交材料时需要用户明确确认
 
-[尚未发布]: https://github.com/haowenchen0811/career-journal/compare/v0.1.0-alpha.7...HEAD
+[尚未发布]: https://github.com/haowenchen0811/career-journal/compare/v0.1.0-alpha.8...HEAD
+[0.1.0-alpha.8]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.8
 [0.1.0-alpha.7]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.7
 [0.1.0-alpha.6]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.6
 [0.1.0-alpha.5]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.5
