@@ -8,7 +8,7 @@ CAREER JOURNAL 是一款在本地运行的求职申请管理工具，既可以�
 
 这里的“实际创建”指调度器真的会在指定时间执行命令。`setup` 写入数据库的只是任务设置，不会自己在晚上唤醒程序；真正负责定时运行的是 Codex heartbeat、macOS `launchd`、Linux `cron`、Windows Task Scheduler，或其他外部调度服务。
 
-配置完成后，含义明确的招聘邮件先由固定规则判断，模糊内容再交给 Jev。Jev 是 TypeSafe 提供的语义决策服务，在本项目中只用于分类难以判断的招聘邮件；如果服务不可用、返回格式不正确或置信度不足，邮件会进入人工复核，不会改用通用大模型。CareerOps 只在生成或检查简历、求职信时使用。
+CAREER JOURNAL 已经支持 TypeSafe AI 于 2026 年 9 月 15 日开放 early access 的新产品 Jev。系统先用固定规则处理含义明确的邮件；配置 Jev 后，Jev 是首选语义判断引擎。没有 Jev，或者 Jev 不可用、处于 `shadow` 模式、返回格式错误、结果未知或置信度不足时，系统会自动改用用户配置的 OpenAI-compatible 大语言模型。两者都无法给出可靠判断时，邮件才进入人工复核。所有模型输出都只是待审核候选，不会直接修改申请状态。详情见 [TypeSafe AI 的 Jev 发布说明](https://typesafe.ai/blog/introducing-system-one-models-and-jev)。CareerOps 只在生成或检查简历、求职信时使用。
 
 ## 它能做什么
 
@@ -58,7 +58,7 @@ flowchart LR
 ## 适合谁
 
 - **Codex 用户：** 希望让仓库内的 Skill 协助完成初始化和日常维护
-- **API 与 CLI 用户：** 希望使用可检查的本地流程，并用 Jev 处理少量语义模糊的邮件，而不是依赖通用大模型解析自由文本
+- **API 与 CLI 用户：** 希望使用可检查的本地流程，同时获得新发布的 Jev 支持；没有 Jev 账户时，也可以使用自己配置的大语言模型
 - **求职者：** 希望把申请记录、材料和邮件证据放在一起，同时把数据库留在自己的电脑上
 
 ## 安装
@@ -93,7 +93,7 @@ npx skills add typesafe-ai/skills --skill typesafe-ai
 ```text
 请初始化当前克隆目录中的 CAREER JOURNAL，数据目录使用 $HOME/job-search。
 
-请先询问我实际用于求职的邮箱地址、IMAPS 主机、用户名，以及保存应用专用密码或服务凭据的环境变量名称。如果我已经可以使用 TypeSafe，只询问保存 Jev API Key 的环境变量名称，并通过 --jev-secret-ref 配置。不要让我把任何真实密码或 Key 粘贴到 prompt 或配置文件中。修改 Jev 问题前，先安装或读取 TypeSafe 官方 Agent Skill。
+请先询问我实际用于求职的邮箱地址、IMAPS 主机、用户名，以及保存应用专用密码或服务凭据的环境变量名称。再询问我是否已有 TypeSafe Jev 权限。如果有，只询问保存 Jev API Key 的环境变量名称，并通过 --jev-secret-ref 配置。如果没有，询问 OpenAI-compatible 服务的 base URL、模型名和保存 API Key 的环境变量名称，再配置 --model-provider openai-compatible、--model-base-url、--model-name 和 --model-secret-ref。不要让我把任何真实密码或 Key 粘贴到 prompt 或配置文件中。修改 Jev 问题前，先安装或读取 TypeSafe 官方 Agent Skill。
 
 请检测当前电脑的 IANA 时区，并按该时区创建四个处于 ACTIVE 状态的每日 Codex heartbeat：20:00 mail-sync、20:15 deadline-review、22:00 daily-consolidation、23:00 local-backup。每个 heartbeat 返回 automation ID 后，先登记该 ID 并取得 codexCommandLine；再更新同一个 heartbeat，把返回的完整命令单独放在 prompt 的一行中，然后检查实际保存的任务定义。
 
@@ -124,6 +124,17 @@ node ./bin/career-journal.mjs setup \
 node ./bin/career-journal.mjs email verify-imap \
   --home "$CAREER_JOURNAL_HOME" \
   --account "imap:$JOB_EMAIL"
+```
+
+如果没有 Jev 权限，去掉 `--jev-secret-ref`，改为配置默认的大语言模型判断路径。API Key 仍只保存在环境变量中：
+
+```sh
+node ./bin/career-journal.mjs setup \
+  --home "$CAREER_JOURNAL_HOME" \
+  --model-provider openai-compatible \
+  --model-base-url "$MODEL_BASE_URL" \
+  --model-name "$MODEL_NAME" \
+  --model-secret-ref env:MODEL_API_KEY
 ```
 
 `setup` 会读取当前电脑的 IANA 时区，并在数据库中写入以下四项已启用的任务设置：
@@ -175,11 +186,11 @@ IMAPS 邮件处理器会先完成账号认证，再用 `EXAMINE` 以只读方式
 
 完成后，Codex 会重新读取它实际保存的自动化定义，检查时间、时区和命令，再分别运行一次。只有 `doctor` 通过后，初始化才会结束。Codex 的运行环境必须安全提供指定的 IMAP 环境变量，不能把密码复制进 prompt。Codex 邮箱连接器仍可导入只读邮件批次，但连接器生成的 JSON 不能单独证明邮箱账号已经验证。简历和求职信任务由独立的 `careerops-materials` Skill 处理。
 
-### 本地 API 与 Jev 决策
+### 本地 API 与语义判断
 
-运行 `career-journal start --home <data-directory>` 可以启动本地看板和 JSON API。通用方案使用内置 IMAPS 客户端，并要求调度器能把指定的 IMAP 和 Jev 环境变量安全提供给 `mail-sync`。
+运行 `career-journal start --home <data-directory>` 可以启动本地看板和 JSON API。通用方案使用内置 IMAPS 客户端，并要求调度器能把指定的 IMAP 和决策服务环境变量安全提供给 `mail-sync`。
 
-在 macOS、Linux 或 Windows 上，`automation install` 目前可以安装并检查另外三项任务。当前 alpha 版本会拒绝直接安装 `mail-sync`，因为自动生成的系统任务还没有安全、跨平台的凭据注入方式。API 客户端可以提交结构化的只读邮件批次，但要让邮箱健康检查通过，仍需单独连接并验证真实邮箱。含义明确的邮件先走免费的固定规则，模糊邮件交给 Jev；Jev 返回格式不正确或置信度不足时，进入人工复核。招聘邮件的判断不会回退到已经配置的 OpenAI-compatible 服务。
+在 macOS、Linux 或 Windows 上，`automation install` 目前可以安装并检查另外三项任务。当前 alpha 版本会拒绝直接安装 `mail-sync`，因为自动生成的系统任务还没有安全、跨平台的凭据注入方式。API 客户端可以提交结构化的只读邮件批次，但要让邮箱健康检查通过，仍需单独连接并验证邮箱。含义明确的邮件先走固定规则。配置 Jev 后，模糊邮件优先交给 Jev；没有 Jev，或者 Jev 无法给出可用结果时，系统自动改用已配置的大语言模型。两者都无法可靠判断时，邮件进入人工复核。模型输出只生成待审核记录，不会直接改变申请状态。
 
 ## 邮箱集成
 
@@ -272,8 +283,9 @@ career-journal setup --home ~/job-search --material-rules /path/to/personal-resu
 ## 招聘邮件如何做判断
 
 - **固定规则：** 先处理含义明确、可以直接检查的场景，避免产生不必要的 API 费用
-- **Jev：** 负责判断语义模糊的招聘邮件。使用 `--jev-secret-ref env:TYPESAFE_API_KEY` 配置；v1 适配器会发送 `state` 和一个选项固定的 Choice 问题，并检查返回选项与置信度
-- **人工复核：** Jev 不可用、处于 `shadow` 模式、返回格式错误或置信度低于阈值时，由用户复核。整个招聘邮件判断流程不会调用通用大模型
+- **Jev：** TypeSafe AI 于 2026 年 9 月 15 日开放 early access。CAREER JOURNAL 已完成适配，并在用户配置后把 Jev 作为首选语义判断引擎。使用 `--jev-secret-ref env:TYPESAFE_API_KEY` 配置；v1 适配器会发送 `state` 和一个选项固定的 Choice 问题，并检查返回选项与置信度
+- **大语言模型回退：** 没有 Jev 时默认使用用户配置的 OpenAI-compatible 服务；Jev 不可用、处于 `shadow` 模式、返回格式错误、结果未知或置信度不足时，也会自动改用该服务。配置命令为 `--model-provider openai-compatible --model-base-url <url> --model-name <model> --model-secret-ref env:MODEL_API_KEY`
+- **人工复核：** Jev 和大语言模型都无法给出格式正确、置信度达标的判断时，由用户复核
 
 在环境变量中提供 Key 后，可以手动运行 `npm run test:jev-live`，用三次真实请求检查 API 格式和分类结果。命令只输出分类、置信度和 token 用量，不会打印 Key。这个测试不会加入普通离线测试或每日自动任务，因此不会在后台自动消耗额度。
 

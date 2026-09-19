@@ -27,7 +27,7 @@ export async function classifyWithStructuredLlm(provider, text) {
         classification: { type: 'string', enum: EMAIL_CLASSIFICATIONS },
         confidence: { type: 'number', minimum: 0, maximum: 1 },
       },
-      required: ['classification'],
+      required: ['classification', 'confidence'],
     },
   });
   return validateEmailDecision(decision);

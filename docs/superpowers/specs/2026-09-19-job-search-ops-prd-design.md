@@ -224,7 +224,7 @@ interface ModelProvider {
 | DOCX 创建与检查 | Documents Skill / document adapter | 可选 | 用户要求 DOCX | 提供可用格式或提示启用依赖 |
 | 邮件读取 | 内置只读 IMAPS 客户端；宿主 connector 仅作导入适配器，除非另有可校验账号证明 | onboarding 必需 | 选择只读求职邮箱并执行首次同步 | setup 保持未完成；手动 EML 和自行编写的宿主 JSON 不能替代实时验证 |
 | 定时任务 | Codex Automation、可探测的操作系统调度器或符合同一契约的宿主 | onboarding 必需 | 注册四项每日任务 | 单纯 `register-external` 仅形成待验证声明；探测失败时 setup 保持未完成 |
-| Jev 决策 | TypeSafe adapter / `typesafe-ai` Skill | 配置后作为主要语义引擎 | 用户已获得 Jev 权限并启用 | 明确规则，然后人工复核 |
+| Jev 决策 | TypeSafe adapter / `typesafe-ai` Skill | 配置后作为主要语义引擎 | 用户已获得 Jev 权限并启用 | 明确规则、已配置的大语言模型，然后人工复核 |
 | Wiki / 长期知识 | Wiki adapter | 可选 | 用户主动启用跨任务知识库 | 使用项目本地配置与证据库 |
 
 开发与安装阶段使用的 Skill，例如 Skill Creator、Skill Installer 或宿主产品文档 Skill，不应伪装为最终用户的运行时硬依赖；但安装器必须记录它们生成或安装了哪些运行时组件。
@@ -332,7 +332,7 @@ README 还必须解释：
 - 每个 Skill 的职责，以及主 Skill 会在什么场景调用它
 - 邮箱由谁鉴权、哪些元数据保存在本地，以及为什么完成 onboarding 要求成功同步、四项实时调度器验证和匹配运行
 - 模型 Key 和 Jev 权限是独立的可选配置项，不影响邮箱和定时任务门禁
-- 系统不得假设用户已有 Jev 权限；没有 Jev 不影响基本记录，模糊语义判断进入人工复核
+- 系统不得假设用户已有 Jev 权限；没有 Jev 时使用用户配置的大语言模型，模型也无法可靠判断时再进入人工复核
 - 如何查看当前版本、已启用依赖和第三方许可证
 
 ### 9.5 每日定时任务配置
@@ -523,7 +523,7 @@ career-journal automation uninstall --task deadline-review
 - `Interview`：阶段、时间、问题、准备与复盘
 - `EmailAccount`：provider、授权状态和同步游标，不含明文凭据
 - `Automation`：计划、时区、最近成功时间和失败状态
-- `DecisionTrace`：规则或 Jev 判断、置信度、人工复核状态和最终处理
+- `DecisionTrace`：规则、Jev 或大语言模型判断、置信度、人工复核状态和最终处理
 
 附件存放在内容寻址目录中，以 SHA-256 建立不可变引用。敏感凭据与业务数据库分离。
 
@@ -531,7 +531,7 @@ career-journal automation uninstall --task deadline-review
 
 ### 13.1 定位
 
-Jev 是配置权限后的主要语义决策引擎，用于封闭选项的分类、评分、路由和置信度门控。确定性规则先处理明确、可审查的场景；Jev 处理需要语义理解的模糊场景。招聘决策不使用通用大模型的 prompt-and-parse 作为降级方案。Jev 不替代生成 Resume、Cover Letter 或面试材料的大模型。
+TypeSafe AI 于 2026 年 9 月 15 日开放 Jev early access。CAREER JOURNAL 已完成适配，并在用户配置后把 Jev 作为主要语义决策引擎，以便及时支持新出现的决策技术。固定规则先处理明确、可检查的场景；Jev 处理需要语义理解的模糊场景。没有 Jev，或者 Jev 无法给出可用结果时，系统自动改用用户配置的大语言模型。Jev 不替代生成 Resume、Cover Letter 或面试材料的大语言模型。
 
 适合的使用场景：
 
@@ -543,7 +543,7 @@ Jev 是配置权限后的主要语义决策引擎，用于封闭选项的分类�
 
 ### 13.2 权限与配置
 
-系统不得假设用户已有 API Key。设置流程先询问访问状态；只有已经获得权限的用户才配置保存 Key 的环境变量名称。字面 Key 不得写入配置、prompt、日志或 Git。
+系统不得假设用户已有 Jev API Key。设置流程先询问访问状态；已经获得权限的用户只配置保存 Key 的环境变量名称。没有 Jev 权限时，设置流程询问 OpenAI-compatible 服务的 base URL、模型名和保存 API Key 的环境变量名称。真实 Key 不得写入配置、prompt、日志或 Git。
 
 ```yaml
 decision_engine:
@@ -556,6 +556,7 @@ decision_engine:
     threshold: 0.8
   fallback:
     - deterministic_rules
+    - structured_llm
     - manual_review
 ```
 
@@ -564,12 +565,13 @@ decision_engine:
 ### 13.3 Fallback 和安全门
 
 - 明确规则先运行，以减少费用并保持可解释性
-- 模糊邮件交给 Jev；Jev 不可用、额度不足、格式错误、shadow 或置信度不足时进入人工复核
+- 配置 Jev 后，模糊邮件优先交给 Jev；没有 Jev，或者 Jev 不可用、额度不足、格式错误、处于 `shadow` 模式、结果未知或置信度不足时，自动改用用户配置的大语言模型
+- 大语言模型未配置、返回格式错误、结果未知或置信度不足时，邮件进入人工复核
 - 429 和 529 按有限指数退避重试；401 不重试
-- Jev 输出只产生候选决策，必须通过 schema 和状态机验证
+- Jev 和大语言模型输出只产生候选决策，必须通过 schema 和状态机验证
 - 关键事件需保留原始邮件或用户确认，不能仅凭 Jev 分数更新
 - 阈值集中配置，并通过代表性邮件集校准后才允许有限自动处理
-- 不得在招聘决策链中调用通用 LLM 作为 Jev fallback
+- 大语言模型回退必须使用结构化输出，并经过与 Jev 相同的分类、置信度和状态机门禁
 
 ### 13.4 成本与测试
 
@@ -607,7 +609,7 @@ decision_engine:
 8. 一个邮箱失败不会推进其游标，也不会影响其他邮箱的成功结果
 9. 草稿不会自动成为 submitted artifact
 10. 无原始证据或用户确认时，拒绝、面试和 Offer 不会自动成为最终状态
-11. Jev 未获权限或未配置时，基础记录功能不受阻，模糊语义判断进入人工复核
+11. Jev 未获权限或未配置时，基础记录功能不受阻，模糊语义判断交给已配置的大语言模型；模型也无法可靠判断时进入人工复核
 12. 所有外部写操作均需要用户明确触发并在操作后验证结果
 13. README 在全新环境中通过自动化 smoke test，用户可按文档完成 clone、setup、doctor 和启动
 14. README 与 `THIRD_PARTY_NOTICES.md` 完整列出 CareerOps、TypeSafe Agent Skill 及其他实际依赖的来源和许可证
@@ -771,7 +773,7 @@ career-journal doctor
 | 邮件误分类导致状态错误 | 只读、证据保留、置信度门控和待确认队列 |
 | 用户把生成材料误认为已提交 | draft/submitted 分离、不可变归档和显式确认 |
 | 个人配置泄露到 GitHub | secret scanner、默认 `.gitignore` 和发布前 fixture 检查 |
-| Jev 权限不可用或 API 变化 | 版本化契约测试、人工复核和受控真实 smoke test |
+| Jev 权限不可用或 API 变化 | 版本化契约测试、大语言模型回退、人工复核和受控真实 smoke test |
 | 通用化削弱个人定制 | profile/policy overlay 和可导入的个人 Skill 包 |
 | 漏记第三方作者或许可证 | 依赖清单、NOTICE、许可证扫描和发布门禁 |
 | README 命令过时或不可执行 | 干净环境 smoke test 与版本化安装文档 |

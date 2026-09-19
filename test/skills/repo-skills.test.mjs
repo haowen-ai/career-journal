@@ -49,7 +49,8 @@ test('career-journal skill has paired English and Simplified Chinese contracts',
     assert.match(text, /career-ops-hq\/career-ops|Santiago Fernández de Valderrama/i);
     assert.match(text, /Jev[^\n]*(?:primary semantic|主要语义)/i);
     assert.match(text, /manual review|人工复核/i);
-    assert.match(text, /generic LLM|通用大模型/i);
+    assert.match(text, /generic LLM|structured LLM|通用大模型|大语言模型/i);
+    assert.match(text, /Jev[^\n]*(?:generic LLM|structured LLM|通用大模型|大语言模型)|(?:generic LLM|structured LLM|通用大模型|大语言模型)[^\n]*Jev/i);
     assert.match(text, /Semantic Versioning|SemVer|语义化版本/i);
     assert.match(text, /Git tag/i);
     assert.match(text, /GitHub Release/i);
@@ -82,7 +83,7 @@ test('dependency manifest pins CareerOps and makes Jev primary for semantic deci
   assert.match(text, /jev[^]*required: false/);
   assert.match(text, /access_state: user-configured/);
   assert.match(text, /role: primary-semantic-decision-engine/);
-  assert.match(text, /fallback: deterministic-rules-then-manual-review/);
+  assert.match(text, /fallback: deterministic-rules-then-structured-llm-then-manual-review/);
   assert.match(text, /  email:\n    required: true/);
   assert.match(text, /  automation:\n    required: true/);
 });

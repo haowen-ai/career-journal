@@ -33,10 +33,11 @@ test('Quick Start smoke block executes against a clean home', async () => {
 
 test('README documents both modes and every lifecycle command', async () => {
   const readme = await readFile('README.md', 'utf8');
-  for (const phrase of ['Codex-native', 'Jev decisions', 'manual review', 'TYPESAFE_API_KEY', 'career-journal start', 'career-journal automation', 'career-journal update', 'career-journal migrate', 'career-journal backup', 'Uninstall', 'CareerOps', 'Jev', 'read-only email', 'THIRD_PARTY_NOTICES.md']) {
+  for (const phrase of ['Codex-native', 'newly released Jev', 'OpenAI-compatible', 'manual review', 'TYPESAFE_API_KEY', 'career-journal start', 'career-journal automation', 'career-journal update', 'career-journal migrate', 'career-journal backup', 'Uninstall', 'CareerOps', 'Jev', 'read-only email', 'THIRD_PARTY_NOTICES.md']) {
     assert.match(readme, new RegExp(phrase, 'i'));
   }
-  assert.doesNotMatch(readme, /OpenAI-compatible provider:\*\* optional structured fallback/i);
+  assert.match(readme, /Jev[^\n]*(?:September 15, 2026|Sep(?:tember)? 15, 2026)/i);
+  assert.match(readme, /without Jev[^\n]*(?:structured LLM|OpenAI-compatible)/i);
 });
 
 test('English and Simplified Chinese READMEs cross-link and cover onboarding', async () => {
@@ -46,9 +47,10 @@ test('English and Simplified Chinese READMEs cross-link and cover onboarding', a
   ]);
   assert.match(english, /\[\u7b80\u4f53\u4e2d\u6587\]\(README\.zh-CN\.md\)/);
   assert.match(chinese, /\[English\]\(README\.md\)/);
-  for (const phrase of ['\u5feb\u901f\u5f00\u59cb', '\u4e24\u79cd\u8fd0\u884c\u6a21\u5f0f', '\u6bcf\u65e5\u81ea\u52a8\u5316', '\u6570\u636e\u4e0e\u9690\u79c1', '\u66f4\u65b0\u3001\u8fc1\u79fb\u3001\u5907\u4efd\u4e0e\u5378\u8f7d', 'CareerOps', 'Jev']) {
+  for (const phrase of ['\u5feb\u901f\u5f00\u59cb', '\u4e24\u79cd\u8fd0\u884c\u6a21\u5f0f', '\u6bcf\u65e5\u81ea\u52a8\u5316', '\u6570\u636e\u4e0e\u9690\u79c1', '\u66f4\u65b0\u3001\u8fc1\u79fb\u3001\u5907\u4efd\u4e0e\u5378\u8f7d', 'CareerOps', 'Jev', '\u65b0\u53d1\u5e03', '\u5927\u8bed\u8a00\u6a21\u578b']) {
     assert.match(chinese, new RegExp(phrase, 'i'));
   }
+  assert.match(chinese, /Jev[^\n]*2026 \u5e74 9 \u6708 15 \u65e5/);
 });
 
 test('onboarding uses the computer timezone and documents built-in and personal material rules', async () => {

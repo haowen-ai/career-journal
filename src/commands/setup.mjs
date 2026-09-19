@@ -21,6 +21,20 @@ function cleanBaseUrl(value) {
   return url.href.replace(/\/$/, '');
 }
 
+function cleanModelSecretRef(value) {
+  if (value == null || value === '') return null;
+  if (!/^env:[A-Za-z_][A-Za-z0-9_]*$/.test(String(value))) {
+    throw new Error('--model-secret-ref env:VARIABLE is required; do not put the API key in config');
+  }
+  return String(value);
+}
+
+function cleanThreshold(value, label) {
+  const threshold = Number(value);
+  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) throw new Error(`${label} must be between 0 and 1`);
+  return threshold;
+}
+
 function cleanJevBaseUrl(value) {
   if (value == null || value === '') return 'https://api.typesafe.ai/v1/systemone';
   const url = new URL(value);
@@ -35,8 +49,7 @@ function jevSettings(input, current) {
   if (!/^env:[A-Za-z_][A-Za-z0-9_]*$/.test(String(secretRef ?? ''))) {
     throw new Error('--jev-secret-ref env:VARIABLE is required; do not put the API key in config');
   }
-  const threshold = input.threshold === undefined ? Number(current.threshold ?? 0.8) : Number(input.threshold);
-  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) throw new Error('Jev threshold must be between 0 and 1');
+  const threshold = cleanThreshold(input.threshold ?? current.threshold ?? 0.8, 'Jev threshold');
   return {
     accessState: 'enabled',
     baseUrl: cleanJevBaseUrl(input.baseUrl ?? current.baseUrl),
@@ -89,12 +102,15 @@ export async function setup(home, answers = {}) {
     if (answers.provisionAutomations) config.automation = { ...config.automation, setupState: 'pending-registration' };
   }
   if (answers.model) {
+    const provider = answers.model.provider ?? config.model.provider;
+    if (!['none', 'openai-compatible'].includes(provider)) throw new Error(`Unsupported model provider: ${provider}`);
     config.model = {
       ...config.model,
-      provider: answers.model.provider ?? config.model.provider,
+      provider,
       baseUrl: answers.model.baseUrl === undefined ? config.model.baseUrl : cleanBaseUrl(answers.model.baseUrl),
       model: answers.model.model ?? config.model.model,
-      secretRef: answers.model.secretRef ?? config.model.secretRef,
+      secretRef: answers.model.secretRef === undefined ? config.model.secretRef : cleanModelSecretRef(answers.model.secretRef),
+      threshold: cleanThreshold(answers.model.threshold ?? config.model.threshold ?? 0.8, 'Model threshold'),
     };
   }
   if (answers.jev?.accessState) {
@@ -250,6 +266,17 @@ export async function setupCommand(parsed, io, runtime) {
     },
     careerOps: parsed.options['careerops-root'] !== undefined ? { root: parsed.options['careerops-root'] } : undefined,
     materialRules: parsed.options['material-rules'] !== undefined ? [parsed.options['material-rules']] : undefined,
+    model: [
+      'model-provider', 'model-base-url', 'model-name', 'model-secret-ref', 'model-threshold',
+    ].some((option) => parsed.options[option] !== undefined)
+      ? {
+        provider: parsed.options['model-provider'],
+        baseUrl: parsed.options['model-base-url'],
+        model: parsed.options['model-name'],
+        secretRef: parsed.options['model-secret-ref'],
+        threshold: parsed.options['model-threshold'],
+      }
+      : undefined,
     jev: parsed.options['jev-secret-ref'] !== undefined
       ? {
         accessState: 'enabled',
@@ -265,7 +292,8 @@ export async function setupCommand(parsed, io, runtime) {
   io.out(`Timezone: ${result.config.timezone}`);
   io.out(`Email: ${result.config.email.setupState}`);
   io.out(`Automation: ${result.config.automation.setupState}`);
-  io.out(`Jev: ${result.config.jev.accessState === 'enabled' ? `${result.config.jev.model} active; key from ${result.config.jev.secretRef}` : `${result.config.jev.accessState}; ambiguous decisions require manual review`}`);
+  io.out(`Jev: ${result.config.jev.accessState === 'enabled' ? `${result.config.jev.model} active; key from ${result.config.jev.secretRef}` : `${result.config.jev.accessState}; ambiguous decisions use the configured LLM fallback, then manual review`}`);
+  io.out(`LLM fallback: ${result.config.model.provider === 'openai-compatible' ? `${result.config.model.model ?? 'model name missing'} via ${result.config.model.baseUrl ?? 'base URL missing'}` : 'not configured; unresolved decisions require manual review'}`);
   if (result.config.email.setupState !== 'verified') {
     io.out(emailProvider === 'imap'
       ? 'Next: set the IMAP credential environment variable, run email verify-imap, then create and register the mail-sync job.'

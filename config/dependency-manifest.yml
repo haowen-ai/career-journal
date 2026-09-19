@@ -57,4 +57,4 @@ dependencies:
     api_docs: https://docs.typesafe.ai/api
     access_state: user-configured
     role: primary-semantic-decision-engine
-    fallback: deterministic-rules-then-manual-review
+    fallback: deterministic-rules-then-structured-llm-then-manual-review

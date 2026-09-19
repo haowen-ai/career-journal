@@ -150,7 +150,7 @@ test('exact replay is a no-op while a changed replay is a conflict', async () =>
   } finally { context.db.close(); await rm(home, { recursive: true, force: true }); }
 });
 
-test('a failed host batch preserves cursor metadata and writes no partial message evidence', async () => {
+test('a Jev outage falls back to the structured LLM and commits the host batch atomically', async () => {
   const { home, context } = await createHostHome();
   try {
     createApplication(context.db, { company: 'Acme', role: 'Data Analyst', status: 'applied' }, '2026-09-19T00:00:00Z');
@@ -174,22 +174,20 @@ test('a failed host batch preserves cursor metadata and writes no partial messag
       ],
     }));
 
-    await assert.rejects(() => syncHostBatch(context.db, ACCOUNT_ID, retryBatch, {
+    const result = await syncHostBatch(context.db, ACCOUNT_ID, retryBatch, {
       jev: { accessState: 'enabled', mode: 'active', threshold: 0.8, decide: async () => { throw new Error('temporary Jev outage'); } },
-    }, '2026-09-19T02:01:00Z'), /temporary Jev outage/);
-    assert.equal(context.db.prepare('SELECT COUNT(*) count FROM decision_traces').get().count, 0);
-    const failed = context.db.prepare(`SELECT cursor, revision, last_run_id lastRunId, last_batch_hash lastBatchHash,
-      last_fetched_at lastFetchedAt FROM email_accounts WHERE id = ?`).get(ACCOUNT_ID);
-    assert.deepEqual({ ...failed }, { cursor: 'gmail-history-100', revision: 0, lastRunId: null, lastBatchHash: null, lastFetchedAt: null });
-    assert.equal(context.db.prepare("SELECT cursor FROM automations WHERE task_type = 'mail-sync'").get().cursor, 'gmail-history-100');
-
-    const retried = await syncHostBatch(context.db, ACCOUNT_ID, retryBatch, {
-      jev: { accessState: 'enabled', mode: 'active', threshold: 0.8, decide: async () => ({ classification: 'assessment', confidence: 0.9 }) },
-    }, '2026-09-19T02:05:00Z');
-    assert.equal(retried.created, 2);
-    assert.equal(context.db.prepare('SELECT COUNT(*) count FROM decision_traces').get().count, 2);
+      structuredLlm: async () => ({ classification: 'assessment', confidence: 0.91 }),
+    }, '2026-09-19T02:01:00Z');
+    assert.equal(result.created, 2);
+    assert.deepEqual(context.db.prepare('SELECT engine FROM decision_traces ORDER BY id').all().map((row) => row.engine).sort(), ['rules', 'structured-llm']);
     assert.equal(context.db.prepare('SELECT COUNT(*) count FROM application_events').get().count, 2);
-    assert.equal(context.db.prepare('SELECT cursor FROM email_accounts WHERE id = ?').get(ACCOUNT_ID).cursor, 'gmail-history-102');
+    const committed = context.db.prepare(`SELECT cursor, revision, last_run_id lastRunId, last_batch_hash lastBatchHash,
+      last_fetched_at lastFetchedAt FROM email_accounts WHERE id = ?`).get(ACCOUNT_ID);
+    assert.equal(committed.cursor, 'gmail-history-102');
+    assert.equal(committed.revision, 1);
+    assert.equal(committed.lastRunId, 'gmail-run-102');
+    assert.match(committed.lastBatchHash, /^[a-f0-9]{64}$/);
+    assert.equal(committed.lastFetchedAt, '2026-09-19T02:00:00.000Z');
     assert.equal(context.db.prepare("SELECT cursor FROM automations WHERE task_type = 'mail-sync'").get().cursor, 'gmail-history-102');
   } finally { context.db.close(); await rm(home, { recursive: true, force: true }); }
 });

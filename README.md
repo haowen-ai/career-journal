@@ -4,7 +4,7 @@
 
 CAREER JOURNAL is a local-first, evidence-driven application tracker for people and AI agents. It keeps roles, status events, recruiting email evidence, next actions, and the exact material lifecycle in one SQLite database. A generated resume remains a draft until the exact uploaded file is confirmed.
 
-This is an alpha release. A complete workspace requires one explicit read-only email account for job-search messages and four registered daily tasks. Jev is the primary semantic decision engine when configured; deterministic rules handle explicit cases, and uncertain or unavailable decisions go to manual review instead of a generic LLM. CareerOps remains optional unless application materials are generated.
+This is an alpha release. A complete workspace requires one explicit read-only email account for job-search messages and four registered daily tasks. CAREER JOURNAL already supports the newly released Jev, which TypeSafe AI introduced in early access on September 15, 2026. Deterministic rules handle explicit cases, Jev is the primary semantic engine when configured, and users without Jev automatically fall back to a configured structured LLM. Unreliable results go to manual review. CareerOps remains optional unless application materials are generated. See [TypeSafe AI's Jev launch announcement](https://typesafe.ai/blog/introducing-system-one-models-and-jev).
 
 ## What it does
 
@@ -52,7 +52,7 @@ flowchart LR
 ## Who it is for
 
 - **Codex users** who want a repository-aware Skill to configure and operate the workspace
-- **API and CLI users** who want deterministic local workflows plus typed Jev decisions without prompt-and-parse LLM routing
+- **API and CLI users** who want deterministic local workflows, newly released Jev support, and a structured OpenAI-compatible fallback when Jev is not configured
 - **Job seekers** who want application records, materials, and evidence together without handing their database to a hosted service
 
 ## Install
@@ -85,10 +85,10 @@ npx skills add typesafe-ai/skills --skill typesafe-ai
 The upstream Skill is not copied into this repository. Its current source and license are listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ```text
-Initialize CAREER JOURNAL in this clone with the data home $HOME/job-search. Ask me for the real email address, IMAPS host and username that I use for applications, plus the name of the environment variable that contains its app password or provider credential. If I have TypeSafe access, also ask only for the environment-variable name that contains my Jev API key and configure it with --jev-secret-ref; never ask me to paste either secret into a prompt or config file. Install or read the official TypeSafe Agent Skill before changing Jev questions. Detect this computer's IANA time zone. Create four ACTIVE daily Codex heartbeats in that time zone: mail-sync at 20:00, deadline-review at 20:15, daily-consolidation at 22:00, and local-backup at 23:00. After each heartbeat returns its real ID, register that ID to obtain codexCommandLine, update the same heartbeat so its prompt contains that returned command verbatim on its own line, then live-verify it. Trigger every verified task once and run doctor. Do not report onboarding complete unless the email and automation checks both pass.
+Initialize CAREER JOURNAL in this clone with the data home $HOME/job-search. Ask me for the real email address, IMAPS host and username that I use for applications, plus the name of the environment variable that contains its app password or provider credential. Ask whether I have TypeSafe Jev access. If I do, ask only for the environment-variable name that contains my Jev API key and configure it with --jev-secret-ref. If I do not, ask for my OpenAI-compatible base URL, model name, and API-key environment-variable name, then configure --model-provider openai-compatible, --model-base-url, --model-name, and --model-secret-ref. Never ask me to paste a secret into a prompt or config file. Install or read the official TypeSafe Agent Skill before changing Jev questions. Detect this computer's IANA time zone. Create four ACTIVE daily Codex heartbeats in that time zone: mail-sync at 20:00, deadline-review at 20:15, daily-consolidation at 22:00, and local-backup at 23:00. After each heartbeat returns its real ID, register that ID to obtain codexCommandLine, update the same heartbeat so its prompt contains that returned command verbatim on its own line, then live-verify it. Trigger every verified task once and run doctor. Do not report onboarding complete unless the email and automation checks both pass.
 ```
 
-The mail heartbeat must receive the configured IMAP environment variable from the Codex host's secret environment. Its value must not appear in the heartbeat prompt, `automation.toml`, CAREER JOURNAL config, or Git. If the host cannot securely provide the variable, stop: mail scheduling and onboarding are still incomplete.
+The mail heartbeat must receive the configured IMAP and decision-provider environment variables from the Codex host's secret environment. Their values must not appear in the heartbeat prompt, `automation.toml`, CAREER JOURNAL config, or Git. If the host cannot securely provide a required variable, stop: mail scheduling and onboarding are still incomplete.
 
 #### CLI and API-host setup
 
@@ -112,6 +112,17 @@ node ./bin/career-journal.mjs setup \
 node ./bin/career-journal.mjs email verify-imap \
   --home "$CAREER_JOURNAL_HOME" \
   --account "imap:$JOB_EMAIL"
+```
+
+If you do not have Jev access, omit `--jev-secret-ref` and configure the default structured-LLM path instead. The secret stays in the environment:
+
+```sh
+node ./bin/career-journal.mjs setup \
+  --home "$CAREER_JOURNAL_HOME" \
+  --model-provider openai-compatible \
+  --model-base-url "$MODEL_BASE_URL" \
+  --model-name "$MODEL_NAME" \
+  --model-secret-ref env:MODEL_API_KEY
 ```
 
 Setup detects the computer's IANA time zone and provisions these enabled task records in that zone:
@@ -175,9 +186,9 @@ $REPO/bin/career-journal.mjs application list --home $CAREER_JOURNAL_HOME --json
 
 Open the cloned repository in Codex and use the initialization prompt in Quick Start. Codex discovers the repo-local `career-journal` Skill, asks for the exact mailbox instead of guessing one, configures live IMAPS, creates four real ACTIVE heartbeats in the detected computer time zone, and binds every returned automation ID to its exact run command. It then reads the actual Codex automation definitions, triggers each verified job once, and finishes only after `doctor` passes. The host must inject the named IMAP environment variable into the mail job without copying its value into the prompt. A Codex mailbox connector may still supply read-only batches, but connector-authored JSON is not independent account proof. Resume and cover-letter work routes through the separate `careerops-materials` Skill.
 
-### Local API and Jev decisions
+### Local API and semantic decisions
 
-Run `career-journal start --home <data-directory>` for the loopback dashboard and JSON API. The generic path uses the built-in IMAPS client plus a scheduler that can securely expose the named IMAP and Jev environment variables to `mail-sync`. `automation install` can install and probe the other three tasks on macOS, Linux, or Windows; the current alpha refuses native installation of `mail-sync` because those generated definitions do not yet have a safe cross-platform secret provider. API hosts may instead supply structured read-only batches, but need a separate live verifier adapter before mailbox health can PASS. Explicit deterministic rules run first at no model cost. Ambiguous messages go to Jev; malformed or low-confidence results become manual-review candidates. Recruiting decisions never fall back to the configured OpenAI-compatible provider.
+Run `career-journal start --home <data-directory>` for the loopback dashboard and JSON API. The generic path uses the built-in IMAPS client plus a scheduler that can securely expose the named IMAP and decision-provider environment variables to `mail-sync`. `automation install` can install and probe the other three tasks on macOS, Linux, or Windows; the current alpha refuses native installation of `mail-sync` because those generated definitions do not yet have a safe cross-platform secret provider. API hosts may instead supply structured read-only batches, but need a separate live verifier adapter before mailbox health can PASS. Explicit deterministic rules run first at no model cost. Jev is the preferred semantic engine when configured. Without Jev, or when Jev is unavailable, in shadow mode, malformed, unknown, or below threshold, the router falls back to the configured structured LLM. If neither provider returns a valid, confident classification, the message becomes a manual-review candidate. Every provider result remains review evidence and never changes an application status by itself.
 
 ## Email Integration
 
@@ -266,8 +277,9 @@ The `careerops-materials` Skill loads the built-in defaults and every configured
 ## Decision Providers
 
 - **Deterministic rules:** handle explicit, reviewable cases first and avoid unnecessary API cost
-- **Jev:** the primary semantic classifier for ambiguous recruiting messages. Configure access with `--jev-secret-ref env:TYPESAFE_API_KEY`; the v1 adapter sends `state` plus one typed Choice question and validates the returned choice and confidence
-- **Manual review:** receives unavailable, malformed, shadow, or below-threshold Jev results. The recruiting decision path does not call a generic LLM
+- **Jev:** the primary semantic classifier for ambiguous recruiting messages. TypeSafe AI released it in early access on September 15, 2026. Configure access with `--jev-secret-ref env:TYPESAFE_API_KEY`; the v1 adapter sends `state` plus one typed Choice question and validates the returned choice and confidence
+- **Structured LLM fallback:** the default semantic path when Jev is not configured and the automatic fallback when Jev cannot return a usable decision. Configure an OpenAI-compatible service with `--model-provider openai-compatible --model-base-url <url> --model-name <model> --model-secret-ref env:MODEL_API_KEY`
+- **Manual review:** receives decisions when neither Jev nor the configured structured LLM returns a valid, confident classification
 
 After the key exists in the environment, run `npm run test:jev-live` for an explicit three-request contract and classification smoke test. It reports classifications, confidence, and token usage without printing the key. This live test is never part of the ordinary offline test suite or daily automation, so it cannot spend credit silently.
 

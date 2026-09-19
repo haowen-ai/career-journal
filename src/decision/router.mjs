@@ -11,10 +11,9 @@ export async function decide(input, adapters = {}) {
   let shadow;
   const jev = adapters.jev;
   if (jev?.accessState === 'enabled' && typeof jev.decide === 'function') {
-    const rawCandidate = await jev.decide(input);
     let candidate = null;
     try {
-      candidate = validateEmailDecision(rawCandidate);
+      candidate = validateEmailDecision(await jev.decide(input));
     } catch {
       candidate = null;
     }
@@ -25,6 +24,23 @@ export async function decide(input, adapters = {}) {
       return { decision: candidate, engine: 'jev', applied: true };
     }
     if (candidate && jev.mode === 'active') shadow = candidate;
+  }
+
+  if (typeof adapters.structuredLlm === 'function') {
+    let candidate = null;
+    try {
+      candidate = validateEmailDecision(await adapters.structuredLlm(input));
+    } catch {
+      candidate = null;
+    }
+    const threshold = Number.isFinite(Number(adapters.structuredLlmThreshold))
+      ? Number(adapters.structuredLlmThreshold)
+      : 0.8;
+    if (candidate
+      && candidate.classification !== 'unknown'
+      && (candidate.confidence ?? 0) >= threshold) {
+      return { decision: candidate, engine: 'structured-llm', applied: true, ...(shadow ? { shadow } : {}) };
+    }
   }
   return { decision: ruleDecision, engine: 'manual-review', applied: false, ...(shadow ? { shadow } : {}) };
 }

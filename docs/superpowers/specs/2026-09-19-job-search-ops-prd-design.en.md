@@ -163,7 +163,7 @@ It must not duplicate all CareerOps writing and review rules, claim a missing de
 | DOCX creation and review | Documents Skill / adapter | Optional | DOCX requested | Offer an available format or enablement guidance |
 | Mail reading | Built-in read-only IMAPS; host connectors import only unless separately verified | Onboarding required | Mailbox selection and first sync | Keep setup incomplete; manual EML and host-authored JSON cannot replace live proof |
 | Scheduling | Codex Automation, probeable OS scheduler, or equivalent host | Onboarding required | Four daily jobs | `register-external` creates only a pending claim; failed probe blocks setup |
-| Jev decisions | TypeSafe adapter / `typesafe-ai` Skill | Primary semantic engine when configured | User has access and enables it | Explicit rules, then manual review |
+| Jev decisions | TypeSafe adapter / `typesafe-ai` Skill | Primary semantic engine when configured | User has access and enables it | Explicit rules, configured structured LLM, then manual review |
 | Wiki / durable knowledge | Wiki adapter | Optional | User enables cross-task knowledge | Project-local config and evidence store |
 
 Authoring tools such as Skill Creator, Skill Installer, or host product documentation Skills are development dependencies, not end-user runtime requirements. The installer must still record which runtime components it generated or installed.
@@ -319,19 +319,19 @@ SQLite is the default fact store, with structured CLI/API access and optional JS
 - `Interview`: stage, time, preparation, questions, and retrospective
 - `EmailAccount`: provider, authorization status, and cursor, without literal credentials
 - `Automation`: schedule, time zone, external identity, probe, last matching success, and failure state
-- `DecisionTrace`: rule or Jev result, confidence, manual-review state, and final handling
+- `DecisionTrace`: rule, Jev, or structured-LLM result, confidence, manual-review state, and final handling
 
 Attachments use SHA-256 content-addressed references. Secrets remain outside the business database. Backups include an artifact metadata index by default rather than copying artifact payloads.
 
 ## 13. Jev integration
 
-Jev is the primary semantic decision engine after a user configures access. Deterministic rules run first for explicit, reviewable cases; Jev handles ambiguous cases that need semantic judgment. Recruiting decisions do not use a generic LLM prompt-and-parse fallback. Jev does not replace generative models used to draft resumes, cover letters, or interview materials.
+TypeSafe AI released Jev in early access on September 15, 2026. CAREER JOURNAL supports it as the primary semantic decision engine after a user configures access, keeping the project current with newly available decision technology. Deterministic rules run first for explicit, reviewable cases; Jev handles ambiguous cases that need semantic judgment. A configured structured LLM is the default semantic path when Jev is absent and the automatic fallback when Jev cannot return a usable decision. Jev does not replace generative models used to draft resumes, cover letters, or interview materials.
 
-Setup never assumes that a user has an API key. It asks for access state and, when access exists, stores only an environment reference such as `env:TYPESAFE_API_KEY`. Literal keys never enter config, prompts, logs, or Git. Before questions, criteria, or thresholds change, the implementation reads the official TypeSafe Agent Skill and current API documentation.
+Setup never assumes that a user has a Jev API key. It asks for access state and, when access exists, stores only an environment reference such as `env:TYPESAFE_API_KEY`. Without Jev, setup asks for an OpenAI-compatible base URL, model name, and API-key environment reference. Literal keys never enter config, prompts, logs, or Git. Before Jev questions, criteria, or thresholds change, the implementation reads the official TypeSafe Agent Skill and current API documentation.
 
-The v1 request uses `state`, `model`, and `questions`. Email classification uses one Choice question and reads `answers.classification.choice` plus `confidence`. Explicit rules avoid unnecessary API cost. Ambiguous messages go to Jev; unavailable service, exhausted quota, malformed output, shadow mode, or low confidence goes to manual review. HTTP 429 and 529 receive bounded backoff retries; 401 does not retry. The routing path never calls a generic LLM as Jev fallback.
+The v1 request uses `state`, `model`, and `questions`. Email classification uses one Choice question and reads `answers.classification.choice` plus `confidence`. Explicit rules avoid unnecessary API cost. Ambiguous messages go to Jev first when configured. Missing access, unavailable service, exhausted quota, malformed or unknown output, shadow mode, or low confidence falls back to the configured structured LLM. If that result is also missing, malformed, unknown, or below threshold, the message goes to manual review. HTTP 429 and 529 receive bounded backoff retries; 401 does not retry.
 
-Jev output remains a proposed decision until schema and state validation. Consequential events require original evidence or user confirmation. Thresholds live in one reviewable configuration and must be evaluated against representative messages before limited automation. Pricing, credits, purchase requirements, and access state are not hard-coded because they can change. Release validation covers the v1 contract, low confidence, malformed output, 401, 429/529, missing credentials, rule bypass, manual review, and one controlled live API smoke test.
+Jev and structured-LLM outputs remain proposed decisions until schema and state validation. Consequential events require original evidence or user confirmation. Thresholds live in one reviewable configuration and must be evaluated against representative messages before limited automation. Pricing, credits, purchase requirements, and access state are not hard-coded because they can change. Release validation covers the v1 contract, Jev priority, structured-LLM fallback, low confidence, malformed output, 401, 429/529, missing credentials, rule bypass, manual review, and one controlled live Jev API smoke test.
 
 ## 14. Privacy and security
 
@@ -365,7 +365,7 @@ Jev output remains a proposed decision until schema and state validation. Conseq
 8. One mailbox failure does not advance its cursor or damage successful accounts
 9. Draft artifacts never become submitted without explicit evidence
 10. Rejection, interview, and offer states require original evidence or user confirmation
-11. Missing Jev access keeps basic tracking available and routes ambiguous semantic decisions to manual review
+11. Missing Jev access keeps basic tracking available and routes ambiguous semantic decisions to the configured structured LLM, then to manual review if no reliable model result is available
 12. Consequential external writes require an explicit user action and post-action verification
 13. A clean environment passes the documented Quick Start smoke test
 14. README and third-party notices fully credit CareerOps, TypeSafe's Agent Skill, and every actual dependency
@@ -440,7 +440,7 @@ Each run records version, commit, system, runtime mode, fresh-install or upgrade
 | Misclassified email changes state | Read-only access, retained evidence, confidence gates, and pending review |
 | Generated material is mistaken for submitted | Separate draft/submitted lifecycle and exact-artifact confirmation |
 | Personal data leaks to GitHub | Ignore secrets, scan releases, and use synthetic fixtures |
-| Jev access is unavailable or its API changes | Versioned contract tests, manual review, and a controlled live smoke test |
+| Jev access is unavailable or its API changes | Versioned contract tests, structured-LLM fallback, manual review, and a controlled live smoke test |
 | Generalization weakens customization | Profile and policy overlays plus importable personal rules |
 | Upstream credit or license is missed | Manifest, notices, license files, and a release gate |
 | README commands drift | Clean-environment smoke tests and versioned docs |

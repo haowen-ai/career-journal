@@ -22,6 +22,28 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.10] - 2026-09-19
+
+### Added
+
+- Added CLI setup options for an OpenAI-compatible decision provider, including base URL, model name, environment-only key reference, and confidence threshold
+- Added runtime construction of the structured-LLM email classifier from the saved provider configuration
+
+### Changed
+
+- Made Jev the preferred semantic engine and the configured structured LLM the automatic fallback when Jev is missing, unavailable, shadowed, malformed, unknown, or below threshold
+- Marked Jev as a newly released early-access integration, based on TypeSafe AI's September 15, 2026 announcement
+- Updated the English README, Simplified Chinese README, PRD, repository Skill, and dependency contract to describe the same decision order
+
+### Fixed
+
+- Prevented a missing or failed Jev call from sending every ambiguous recruiting email directly to manual review when a valid structured model provider is available
+- Kept manual review as the final fallback when neither decision provider returns a valid, confident classification
+
+### Security
+
+- Kept Jev and model API keys outside configuration, prompts, logs, and Git by accepting only `env:VARIABLE` references
+
 ## [0.1.0-alpha.9] - 2026-09-19
 
 ### Added

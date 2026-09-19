@@ -10,6 +10,8 @@ import {
 import { importEml } from '../email/eml.mjs';
 import { saveConfig } from '../config/store.mjs';
 import { createJevAdapter } from '../decision/jev.mjs';
+import { classifyWithStructuredLlm } from '../decision/structured-llm.mjs';
+import { createProvider } from '../providers/interface.mjs';
 import { loadHostBatch, syncHostBatch } from '../email/host-sync.mjs';
 import { automationSetupState, listTasks } from '../automation/registry.mjs';
 import { syncImapEmailAccount } from '../email/imap-sync.mjs';
@@ -17,6 +19,13 @@ import { syncImapEmailAccount } from '../email/imap-sync.mjs';
 export function configuredDecisionAdapters(config, fetchImpl = globalThis.fetch, env = process.env) {
   const adapters = {};
   if (config.jev?.accessState) adapters.jev = createJevAdapter(config.jev, fetchImpl, env);
+  if (config.model?.provider === 'openai-compatible' && config.model.baseUrl && config.model.model) {
+    const provider = createProvider(config.model, fetchImpl, env);
+    adapters.structuredLlm = (input) => classifyWithStructuredLlm(provider, input?.text);
+    adapters.structuredLlmThreshold = Number.isFinite(Number(config.model.threshold))
+      ? Number(config.model.threshold)
+      : 0.8;
+  }
   return adapters;
 }
 

@@ -382,3 +382,39 @@ test('CLI setup refuses a Jev endpoint outside the TypeSafe API origin', async (
     'jev-base-url': 'https://attacker.example/v1/systemone',
   } }, memoryIO()), /api\.typesafe\.ai/);
 }));
+
+test('CLI setup configures an OpenAI-compatible LLM fallback when Jev is unavailable', async () => withHome(async (home) => {
+  await setupCommand({ options: {
+    home,
+    'email-provider': 'host',
+    'email-address': 'candidate@school.edu',
+    'email-connector': 'gmail',
+    'model-provider': 'openai-compatible',
+    'model-base-url': 'https://model.example/v1',
+    'model-name': 'decision-model',
+    'model-secret-ref': 'env:MODEL_API_KEY',
+    'model-threshold': '0.85',
+  } }, memoryIO());
+  const config = await loadConfig(home);
+  assert.deepEqual(config.model, {
+    provider: 'openai-compatible',
+    baseUrl: 'https://model.example/v1',
+    model: 'decision-model',
+    secretRef: 'env:MODEL_API_KEY',
+    threshold: 0.85,
+  });
+  assert.equal(config.jev.accessState, 'unavailable');
+}));
+
+test('CLI setup rejects literal LLM credentials', async () => withHome(async (home) => {
+  await assert.rejects(() => setupCommand({ options: {
+    home,
+    'email-provider': 'host',
+    'email-address': 'candidate@school.edu',
+    'email-connector': 'gmail',
+    'model-provider': 'openai-compatible',
+    'model-base-url': 'https://model.example/v1',
+    'model-name': 'decision-model',
+    'model-secret-ref': 'secret-value',
+  } }, memoryIO()), /model-secret-ref.*env:VARIABLE/i);
+}));

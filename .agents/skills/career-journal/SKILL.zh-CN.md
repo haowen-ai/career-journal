@@ -7,11 +7,11 @@
 ## 首次使用契约
 
 1. 向用户取得准确邮箱地址。不得推测学校、工作或个人邮箱。Provider 允许时优先使用内置实时 IMAPS 路径。App password 或 Provider 凭据只能保存在 secret 环境变量中。IMAPS 不可用时，宿主管理的 Connector 可以只读导入邮件，但其 JSON 属于自我声明；在独立实时验证适配器可用前，onboarding 仍未完成。不得用手动 EML 替代实时验证。
-2. 询问用户是否已获得 TypeSafe 权限。如已获得，只询问保存 Jev Key 的环境变量名称，并增加 `--jev-secret-ref env:<VARIABLE>`；不得询问或保存字面密钥。修改问题或阈值前，必须读取官方 [TypeSafe Agent Skill](https://github.com/typesafe-ai/skills/tree/main/skills/typesafe-ai) 和最新 API 文档。TypeSafe 不可用时仍可继续记录，但模糊邮件必须进入人工复核。
-3. 在克隆目录中运行 `node ./bin/career-journal.mjs setup --home <absolute-home> --email-provider imap --email-address <address> --imap-host <host> --imap-user <username> --secret-ref env:<VARIABLE> [--jev-secret-ref env:<JEV_VARIABLE>]`。除非用户明确覆盖，否则使用当前电脑检测到的 IANA 时区。不得使用保留的示例邮箱。仓库命令应使用 `node ./bin/career-journal.mjs ...` 或 `./career-journal ...`；不要假设全局 `career-journal` 命令已存在。
+2. 询问用户是否已获得 TypeSafe 权限。如已获得，只询问保存 Jev Key 的环境变量名称，并增加 `--jev-secret-ref env:<VARIABLE>`；不得询问或保存真实密钥。修改问题或阈值前，必须读取官方 [TypeSafe Agent Skill](https://github.com/typesafe-ai/skills/tree/main/skills/typesafe-ai) 和最新 API 文档。如果没有 TypeSafe 权限，询问 OpenAI-compatible 服务的 base URL、模型名和保存 API Key 的环境变量名称，再配置大语言模型回退。不得要求用户粘贴真实 Key。
+3. 在克隆目录中运行 `node ./bin/career-journal.mjs setup --home <absolute-home> --email-provider imap --email-address <address> --imap-host <host> --imap-user <username> --secret-ref env:<VARIABLE>`，并根据用户情况增加 `--jev-secret-ref env:<JEV_VARIABLE>`，或增加 `--model-provider openai-compatible --model-base-url <url> --model-name <model> --model-secret-ref env:<MODEL_VARIABLE>`。除非用户明确覆盖，否则使用当前电脑检测到的 IANA 时区。不得使用保留的示例邮箱。仓库命令应使用 `node ./bin/career-journal.mjs ...` 或 `./career-journal ...`；不要假设全局 `career-journal` 命令已存在。
 4. 运行 `node ./bin/career-journal.mjs email verify-imap --home <absolute-home> --account imap:<address>`。如实报告认证或邮箱错误，不能用 Connector JSON 替代。
 5. 使用宿主自动化能力，在同一时区真实创建四个 ACTIVE 每日任务：20:00 `mail-sync`、20:15 `deadline-review`、22:00 `daily-consolidation`、23:00 `local-backup`。在 Codex Desktop 中使用 `automation_update`，不得手写 `automation.toml`。如果已有匹配任务，不得创建第二套。
-6. 每个 Codex heartbeat 返回 ID 后，运行 `node ./bin/career-journal.mjs automation register-external --home <absolute-home> --task <task> --driver codex --external-id <real-id>`。从 JSON 结果读取 `codexCommandLine`，更新同一个 heartbeat，将该命令原样作为独立一行放入 prompt，并写明检测到的 IANA 时区。不得重构命令，也不得把任何 secret 值写入 prompt。邮件 heartbeat 的宿主环境必须安全提供邮箱与 Jev secret 引用指定的变量。
+6. 每个 Codex heartbeat 返回 ID 后，运行 `node ./bin/career-journal.mjs automation register-external --home <absolute-home> --task <task> --driver codex --external-id <real-id>`。从 JSON 结果读取 `codexCommandLine`，更新同一个 heartbeat，将该命令原样作为独立一行放入 prompt，并写明检测到的 IANA 时区。不得重构命令，也不得把任何 secret 值写入 prompt。邮件 heartbeat 的宿主环境必须安全提供邮箱、Jev 或大语言模型 secret 引用指定的变量。
 7. 对每个任务运行 `node ./bin/career-journal.mjs automation verify --home <absolute-home> --task <task>`。验证必须读取实际保存的调度定义，并核对 ACTIVE 状态、计划、时区、可执行文件、CLI、任务 ID、数据目录和外部 ID。注册声明、生成文件、截图、占位 ID 或相似命令都不算验证。
 8. 使用准确的 `codexCommandLine` 分别触发四个已验证任务。首次 IMAPS 同步可以没有相关新邮件。直接同步会刷新邮箱验证，且只有在本地证据全部提交后才推进 UID 游标。
 9. 运行 `node ./bin/career-journal.mjs doctor --home <absolute-home>`；只有邮箱和自动化都通过才结束配置。邮箱 PASS 要求过去 36 小时内有实时 IMAPS 验证和一次成功的只读同步。自动化 PASS 要求每个任务都有一次实时调度器探测，以及同一窗口内一次与外部 ID 匹配的成功运行。
@@ -29,9 +29,9 @@
 - Email：使用实时 IMAPS 和已验证的 `career-journal-mail-sync` 命令；宿主 `email sync-host` 批次只用于导入且属于自我声明，手动 EML 仅为一次性 fallback
 - 定时检查：创建真实宿主 automation，用 `automation register-external` 记录，以相同外部 ID 触发，并通过 `doctor` 验证
 - 跨项目长期知识：仅在用户请求时使用宿主 Wiki 能力
-- Jev：配置权限后作为主要语义分类器；先执行明确的确定性规则，验证类型化输出，并将不可用或不确定结果送入人工复核，不再回退通用大模型
+- Jev：配置权限后作为主要语义分类器；先执行明确的固定规则，再验证类型化输出。没有 Jev，或者 Jev 不可用、处于 `shadow` 模式、格式错误、结果未知或置信度不足时，自动改用已配置的大语言模型；两者都无法可靠判断时进入人工复核
 
-CareerOps 是由 Santiago Fernández de Valderrama 独立维护、使用 MIT 许可证的 [career-ops-hq/career-ops](https://github.com/career-ops-hq/career-ops) 项目。CAREER JOURNAL 通过仓库内 `careerops-materials` 适配器路由材料任务，并且必须保留上游署名。TypeSafe Agent Skill 由 [TypeSafe AI](https://github.com/typesafe-ai/skills) 独立维护并采用 MIT 许可证，用于指导 Jev 集成，但源代码没有复制进本仓库。未配置 Jev 时仍可记录求职信息，语义邮件判断则进入人工复核。
+CareerOps 是由 Santiago Fernández de Valderrama 独立维护、使用 MIT 许可证的 [career-ops-hq/career-ops](https://github.com/career-ops-hq/career-ops) 项目。CAREER JOURNAL 通过仓库内 `careerops-materials` 适配器路由材料任务，并且必须保留上游署名。TypeSafe Agent Skill 由 [TypeSafe AI](https://github.com/typesafe-ai/skills) 独立维护并采用 MIT 许可证，用于指导 Jev 集成，但源代码没有复制进本仓库。未配置 Jev 时仍可使用已配置的大语言模型判断语义模糊的邮件；人工复核是最终回退。
 
 ## 证据规则
 
