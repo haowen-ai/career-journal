@@ -8,6 +8,9 @@ import { startCommand } from '../commands/start.mjs';
 import { automationCommand } from '../commands/automation.mjs';
 import { emailCommand } from '../commands/email.mjs';
 import { materialCommand } from '../commands/material.mjs';
+import { updateCommand } from '../commands/update.mjs';
+import { migrateCommand } from '../commands/migrate.mjs';
+import { backupCommand } from '../commands/backup.mjs';
 
 export function createRuntime({ root, version }) {
   return {
@@ -24,6 +27,9 @@ export function createRuntime({ root, version }) {
       ['automation', automationCommand],
       ['email', emailCommand],
       ['material', materialCommand],
+      ['update', updateCommand],
+      ['migrate', migrateCommand],
+      ['backup', backupCommand],
     ]),
   };
 }

@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { migration001 } from './migrations/001-initial.mjs';
 
-const migrations = [migration001];
+export const schemaMigrations = [migration001];
 
 export function openDatabase(file) {
   const resolved = file === ':memory:' ? file : path.resolve(file);
@@ -19,7 +19,7 @@ function appliedVersions(db) {
   return new Set(db.prepare('SELECT version FROM schema_migrations').all().map((row) => Number(row.version)));
 }
 
-export function migrate(db, { dryRun = false } = {}) {
+export function migrate(db, { dryRun = false, migrations = schemaMigrations } = {}) {
   const existing = appliedVersions(db);
   const pending = migrations.filter((item) => !existing.has(item.version));
   if (dryRun) return { pending: pending.map((item) => item.version), applied: [] };
@@ -44,4 +44,3 @@ export function migrate(db, { dryRun = false } = {}) {
   }
   return { pending: [], applied };
 }
-
