@@ -12,12 +12,13 @@ checkout="$scratch/repository"
 data_home="$scratch/data-home"
 backup_dir="$scratch/pre-upgrade-backup"
 git clone --quiet --no-hardlinks "$source_repo" "$checkout"
+to_commit=$(git -C "$checkout" rev-parse "$to_ref")
 git -C "$checkout" checkout --quiet "$from_ref"
 cli="$checkout/bin/jobops.mjs"
 HOME="$scratch/isolated-home" "$node_bin" "$cli" setup --home "$data_home" --timezone UTC --skip-email
 HOME="$scratch/isolated-home" "$node_bin" "$cli" application add --home "$data_home" --company UpgradeCo --role PreservedRole
 
-git -C "$checkout" checkout --quiet "$to_ref"
+git -C "$checkout" checkout --quiet "$to_commit"
 HOME="$scratch/isolated-home" "$node_bin" "$cli" update --check
 HOME="$scratch/isolated-home" "$node_bin" "$cli" backup create --home "$data_home" --output "$backup_dir"
 HOME="$scratch/isolated-home" "$node_bin" "$cli" migrate --home "$data_home" --dry-run
