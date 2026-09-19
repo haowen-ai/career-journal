@@ -3,18 +3,18 @@
 [English](2026-09-19-job-search-ops-prd-design.en.md) | [简体中文](2026-09-19-job-search-ops-prd-design.md)
 
 **Status:** Review Draft
-**Version:** 0.14
+**Version:** 0.15
 **Date:** 2026-09-19
 **Product:** CAREER JOURNAL
 **Delivery:** Open-source GitHub project with a Codex-native edition and a provider-neutral LLM API edition
 
-**Revision focus:** Configuration claims and verified external capability are separate. The selected mailbox must pass a live read-only IMAPS verification, or an equivalent independently verifiable adapter, and all four daily jobs must pass a live Codex or operating-system scheduler probe plus one successful run with the matching external ID before `career-journal doctor` can pass. Placeholder IDs, direct manual invocations, screenshots, and host-authored JSON cannot satisfy those gates on their own.
+**Revision focus:** Configuration claims and verified external capability are separate. The selected mailbox must pass a live read-only IMAPS verification, or an equivalent independently verifiable adapter, and both required daily jobs must pass a live Codex or operating-system scheduler probe plus one successful run with the matching external ID before `career-journal doctor` can pass. Placeholder IDs, direct manual invocations, screenshots, and host-authored JSON cannot satisfy those gates on their own.
 
 ## 1. Product overview
 
 CAREER JOURNAL is a local-first, evidence-driven job-search operating system. It connects job analysis, application-material generation, application tracking, recruiting-email review, interview preparation, and retrospectives in one traceable workflow while retaining the source, date, and artifact version behind every fact.
 
-The product serves different countries, industries, roles, and career stages. It must not assume a school, work, or personal email account, a fixed resume format, a particular job site, or a single model provider. Before onboarding is complete, the user must explicitly select one read-only job-search mailbox, complete live verification and an initial read-only sync, and register and probe four daily jobs. The built-in portable path obtains IMAPS credentials through an environment-variable reference. Host connectors may import mail, but their batches remain self-attested until an independent live verifier confirms the account. CAREER JOURNAL never stores passwords, tokens, or cookies.
+The product serves different countries, industries, roles, and career stages. It must not assume a school, work, or personal email account, a fixed resume format, a particular job site, or a single model provider. Before onboarding is complete, the user must explicitly select one read-only job-search mailbox, complete live verification and an initial read-only sync, and register and probe two required daily jobs. The built-in portable path obtains IMAPS credentials through an environment-variable reference. Host connectors may import mail, but their batches remain self-attested until an independent live verifier confirms the account. CAREER JOURNAL never stores passwords, tokens, or cookies.
 
 Two runtime editions share the same domain model, state machine, evidence rules, storage, CareerOps interface, and test fixtures:
 
@@ -41,7 +41,7 @@ Job seekers commonly split their work across documents, email, recruiting sites,
 - Generate and revise resumes, cover letters, and related materials from the JD and verified candidate evidence
 - Make every important fact and state change traceable, reviewable, and reversible
 - Require one user-selected read-only mailbox and a successful initial sync for completed onboarding
-- Register four daily jobs in the IANA time zone detected from the user's computer, with `career-journal doctor` as the completion gate
+- Register two required daily jobs in the IANA time zone detected from the user's computer, with `career-journal doctor` as the completion gate
 - Give Codex users a low-configuration clone-and-initialize experience
 - Give API users provider choice without changing workflow behavior
 - Compose CareerOps, PDF, Documents, email, Wiki, and other capabilities through independent Skills or adapters
@@ -127,7 +127,7 @@ The shared core contains deterministic behavior only:
 
 ### 7.2 Codex adapter
 
-The root instructions and repository-local `career-journal` Skill bootstrap the Codex edition. Initialization must inspect dependencies, create ignored local config and data, import candidate evidence, require the chosen read-only mailbox, complete a live IMAPS verification and initial sync, create and probe all four daily jobs in the computer-detected time zone, and use host PDF, Documents, browser, and automation capabilities when appropriate. Installed capability is not connected-account proof. Onboarding stays incomplete until `doctor` confirms fresh mailbox verification and sync plus four live scheduler probes and matching runs.
+The root instructions and repository-local `career-journal` Skill bootstrap the Codex edition. Initialization must inspect dependencies, create ignored local config and data, import candidate evidence, require the chosen read-only mailbox, complete a live IMAPS verification and initial sync, create and probe both required daily jobs in the computer-detected time zone, and use host PDF, Documents, browser, and automation capabilities when appropriate. Installed capability is not connected-account proof. Onboarding stays incomplete until `doctor` confirms fresh mailbox verification and sync plus two live scheduler probes and matching runs.
 
 ### 7.3 General API adapter
 
@@ -162,7 +162,7 @@ It must not duplicate all CareerOps writing and review rules, claim a missing de
 | PDF creation and review | PDF Skill / document adapter | Conditionally required | PDF requested | A text draft is allowed only with clear PDF-not-created status |
 | DOCX creation and review | Documents Skill / adapter | Optional | DOCX requested | Offer an available format or enablement guidance |
 | Mail reading | Built-in read-only IMAPS; host connectors import only unless separately verified | Onboarding required | Mailbox selection and first sync | Keep setup incomplete; manual EML and host-authored JSON cannot replace live proof |
-| Scheduling | Codex Automation, probeable OS scheduler, or equivalent host | Onboarding required | Four daily jobs | `register-external` creates only a pending claim; failed probe blocks setup |
+| Scheduling | Codex Automation, probeable OS scheduler, or equivalent host | Onboarding required | Two required daily jobs | `register-external` creates only a pending claim; failed probe blocks setup |
 | Jev decisions | TypeSafe adapter / `typesafe-ai` Skill | Primary semantic engine when configured | User has access and enables it | Explicit rules, configured structured LLM, then manual review |
 | Wiki / durable knowledge | Wiki adapter | Optional | User enables cross-task knowledge | Project-local config and evidence store |
 
@@ -189,14 +189,14 @@ After clone, the user may ask Codex to initialize CAREER JOURNAL. The system mus
 5. Choose locale and language, and detect the computer's current IANA time zone
 6. Require the user to select one exact read-only job-search mailbox and complete live IMAPS verification or an equivalent independently verifiable adapter
 7. Check CareerOps and document capabilities
-8. Create real jobs in the detected time zone: `mail-sync` at 20:00, `deadline-review` at 20:15, `daily-consolidation` at 22:00, and `local-backup` at 23:00; record real IDs and probe the saved Codex `automation.toml`, launchd, cron, or Windows Task Scheduler definition
+8. Create two real jobs in the detected time zone: `mail-sync` at 20:00 and `deadline-review` at 20:15; record real IDs and probe the saved Codex `automation.toml`, launchd, cron, or Windows Task Scheduler definition
 9. Trigger each job with its matching ID; the IMAPS job uses TLS and read-only retrieval, advancing its UID cursor only after the local transaction commits
 10. Run `career-journal doctor`; any missing mailbox proof, successful sync, scheduler probe, or matching run leaves setup incomplete
 11. Create or import the first application
 
 ### 9.2 API edition
 
-The API path also selects a hosted or local model provider, stores only a reference to its key, tests structured output, sets a budget, and optionally enables Jev. It uses the same live IMAPS path or an independently verifiable mailbox adapter, and the same four jobs through a probeable OS scheduler or durable worker. Model keys belong in an OS keychain, protected secret store, or runtime environment. IMAPS configuration stores only `env:VARIABLE`; OAuth tokens, passwords, cookies, and literal secrets never enter the database, logs, prompts, or backups.
+The API path also selects a hosted or local model provider, stores only a reference to its key, tests structured output, sets a budget, and optionally enables Jev. It uses the same live IMAPS path or an independently verifiable mailbox adapter, and the same two required jobs through a probeable OS scheduler or durable worker. Model keys belong in an OS keychain, protected secret store, or runtime environment. IMAPS configuration stores only `env:VARIABLE`; OAuth tokens, passwords, cookies, and literal secrets never enter the database, logs, prompts, or backups.
 
 ### 9.3 Mailbox contract
 
@@ -208,7 +208,9 @@ Manual EML is a one-message fallback only. Mailbox integrations are read-only: t
 
 ### 9.4 README onboarding contract
 
-The README must let a new user install without author explanation. Copyable instructions cover requirements, clone and dependency commands, Codex versus API choice, setup, profile import or blank start, provider configuration, live read-only mailbox verification and first sync, creation and probing of all four jobs in the detected time zone, one run per job, `doctor`, dashboard start, first application, update, uninstall, backup, and local-data removal.
+The README exposes two alternative Agent-first entry points: a user may give an Agent only the GitHub repository address, or copy a complete setup prompt that includes that address. Both paths instruct the Agent to clone or open the repository, read root `AGENTS.md` and the repository Skill, install or read the official TypeSafe Skill using one supported method, ask only for unavoidable account information or authorization, complete setup, create and verify the two required schedules, run them once, and finish with `doctor`. The Agent performs the commands; the user is not turned into the installer.
+
+The README must let a new user install without author explanation. Copyable instructions cover requirements, clone and dependency commands, Codex versus API choice, setup, profile import or blank start, provider configuration, live read-only mailbox verification and first sync, creation and probing of both required jobs in the detected time zone, one run per job, `doctor`, dashboard start, first application, update, uninstall, backup, and local-data removal.
 
 It must explain which functions are fully local, what minimal information optional external APIs receive, each Skill's responsibility, credential ownership, why completed onboarding requires live mailbox and scheduler proof, how Jev is configured without storing its key, and how to inspect versions and third-party licenses.
 
@@ -220,12 +222,10 @@ Times are editable defaults interpreted in the IANA time zone detected from each
 |---|---|---|
 | 20:00 | `mail-sync` | Read-only sync of the selected mailbox into reviewable events |
 | 20:15 | `deadline-review` | Review assessments, interviews, and offers that need action |
-| 22:00 | `daily-consolidation` | Deduplicate and consolidate new job-search facts and preferences |
-| 23:00 | `local-backup` | Back up the database, non-secret config snapshot, and artifact metadata index |
 
 Codex uses the host Automation/heartbeat service when available. The API edition uses a probeable OS scheduler or durable local worker. Both obey the same task and cursor contracts. Re-running setup updates the same stable task identities rather than creating duplicates.
 
-In alpha.6, native `automation install` supports the three tasks that do not need mailbox credentials. Native installation of `mail-sync` is blocked because the generated cross-platform definitions do not provide safe secret injection. A trusted external scheduler must provide the environment variable named by `secret-ref`. Codex registration returns an exact `codexCommandLine` containing the absolute Node path, CLI, data home, task ID, and external ID. The heartbeat prompt stores that exact line by itself; live verification checks ACTIVE state, schedule, time zone, and exact argv.
+Native `automation install` supports `deadline-review`, which does not need mailbox credentials. Native installation of `mail-sync` is blocked because the generated cross-platform definitions do not provide safe secret injection. A trusted external scheduler must provide the environment variable named by `secret-ref`. Codex registration returns an exact `codexCommandLine` containing the absolute Node path, CLI, data home, task ID, and external ID. The heartbeat prompt stores that exact line by itself; live verification checks ACTIVE state, schedule, time zone, and exact argv. Daily consolidation is outside onboarding, and backup is an optional on-demand command.
 
 ## 10. Core workflows
 
@@ -292,7 +292,7 @@ The CLI and local dashboard expose filters, timelines, evidence, next actions, a
 
 ### 11.6 Automation
 
-- Four stable daily task IDs are mandatory for completed onboarding
+- Two stable daily task IDs are mandatory for completed onboarding
 - Reconfiguration updates a task instead of duplicating it
 - Support list, dry-run, install, verify, update, disable, uninstall, remove, register-external, and unregister-external
 - `verify` rereads a supported scheduler's real saved definition
@@ -355,7 +355,7 @@ Jev and structured-LLM outputs remain proposed decisions until schema and state 
 
 ## 16. MVP acceptance criteria
 
-1. A new user can complete mailbox selection, live verification, initial sync, four scheduler probes and matching runs, `doctor`, and the first Application within ten minutes
+1. A new user can complete mailbox selection, live verification, initial sync, two scheduler probes and matching runs, `doctor`, and the first Application within ten minutes
 2. Missing or stale mailbox verification or sync, missing scheduler proof, or missing matching run leaves setup incomplete and `doctor` non-successful
 3. No default personal mailbox or real personal information exists in code, fixtures, screenshots, or examples
 4. Codex and API editions produce the same event deduplication and state transitions for shared fixtures
@@ -369,7 +369,7 @@ Jev and structured-LLM outputs remain proposed decisions until schema and state 
 12. Consequential external writes require an explicit user action and post-action verification
 13. A clean environment passes the documented Quick Start smoke test
 14. README and third-party notices fully credit CareerOps, TypeSafe's Agent Skill, and every actual dependency
-15. Setup detects the computer's IANA time zone and creates 20:00 `mail-sync`, 20:15 `deadline-review`, 22:00 `daily-consolidation`, and 23:00 `local-backup` without duplicating or overwriting explicit custom settings
+15. Setup detects the computer's IANA time zone and creates 20:00 `mail-sync` plus 20:15 `deadline-review` without duplicating or overwriting explicit custom settings; daily consolidation is outside onboarding and backup is optional on demand
 16. Users can pause, edit, and remove tasks; `doctor` reports any resulting incomplete baseline honestly
 17. A public remote tag passes a fresh-clone test without untracked development files
 18. An independent new-user dogfood run produces reproducible issues and version-planned fixes
@@ -411,7 +411,7 @@ Each run records version, commit, system, runtime mode, fresh-install or upgrade
 ## 18. Delivery phases
 
 - **Phase 0 — public contracts:** Remove personal paths, mailbox defaults, and personal rules; define schemas, state machines, dependency manifest, CareerOps adapter, notices, licenses, Quick Start, SemVer, Issue templates, and release checks
-- **Phase 1 — local MVP:** CLI, SQLite, exports, Application/Event/Artifact/Dashboard, JD import, material workflow, Codex bootstrap, live mailbox onboarding, four verified jobs, first prerelease, and public-clone dogfood
+- **Phase 1 — local MVP:** CLI, SQLite, exports, Application/Event/Artifact/Dashboard, JD import, material workflow, Codex bootstrap, live mailbox onboarding, two verified jobs, first prerelease, and public-clone dogfood
 - **Phase 2 — email and automation expansion:** Add independently verifiable Gmail, Microsoft, and local-mail adapters; improve classification, deadline handling, health reporting, and native scheduler coverage
 - **Phase 3 — general API and model gateway:** Provider-neutral models, local Web UI, BYOK, budget limits, structured-output tests, and Codex/API parity
 - **Phase 4 — Jev experiment:** Optional adapter, access-state UI, shadow mode, labeled decision set, calibration, and narrowly gated automatic updates only after measured accuracy
@@ -425,7 +425,7 @@ Each run records version, commit, system, runtime mode, fresh-install or upgrade
 - Unsupported statements blocked by CareerOps fact gates
 - Ability to locate the correct JD, submitted materials, and prep package before interview
 - Behavioral parity between runtime editions
-- Mailbox verification, first sync, four-task registration, and doctor completion rate
+- Mailbox verification, first sync, two-task registration, and doctor completion rate
 - Core workflow success without model or Jev configuration
 - Fresh-clone Quick Start and prior-version upgrade success rates
 - Proportion of fixes with reproducible evidence and complete verification notes

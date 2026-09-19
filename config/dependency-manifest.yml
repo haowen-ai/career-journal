@@ -44,8 +44,8 @@ dependencies:
     default_schedule:
       mail-sync: "20:00"
       deadline-review: "20:15"
-      daily-consolidation: "22:00"
-      local-backup: "23:00"
+    optional_commands:
+      - backup-create
     timezone: computer-detected-iana
   wiki:
     required: false

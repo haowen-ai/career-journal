@@ -6,7 +6,7 @@ import { loadConfig, workspaceDirectory } from '../config/store.mjs';
 import { detectCareerOps } from '../integrations/careerops.mjs';
 import { openReadOnlyDatabase, migrate } from '../storage/database.mjs';
 import { isLiveVerifiedEmailAccount, listEmailAccounts } from '../email/accounts.mjs';
-import { isCurrentTaskRegistration, listTasks } from '../automation/registry.mjs';
+import { isCurrentTaskRegistration, listTasks, REQUIRED_TASK_TYPES } from '../automation/registry.mjs';
 import { probeTaskRegistration } from '../automation/probe.mjs';
 
 const major = (version) => Number(String(version).replace(/^v/, '').split('.')[0]);
@@ -124,7 +124,7 @@ export async function doctor(home, capabilities = {}) {
           : accounts.length ? 'manual or unsupported email account cannot provide daily sync' : 'no job-search email account configured',
     });
   }
-  const requiredTasks = ['mail-sync', 'deadline-review', 'daily-consolidation', 'local-backup'];
+  const requiredTasks = REQUIRED_TASK_TYPES;
   const schedulerProbe = capabilities.schedulerProbe ?? ((task) => probeTaskRegistration(task, {
     codexHome: capabilities.codexHome,
   }));
@@ -160,7 +160,7 @@ export async function doctor(home, capabilities = {}) {
     id: 'automation',
     severity: automationUsable ? 'pass' : 'fail',
     detail: automationUsable
-      ? 'daily mailbox, deadline, consolidation, and backup tasks are live-probed and have run successfully within 36 hours'
+      ? 'daily mailbox and deadline-review tasks are live-probed and have run successfully within 36 hours'
       : failedSchedulerProbes.length
         ? `scheduler probe failed (${failedSchedulerProbes.join('; ')}); install or verify every real schedule, then observe one matching successful run within 36 hours`
         : 'daily tasks are not fully healthy; verify every real schedule and observe one matching successful run for each task within 36 hours',

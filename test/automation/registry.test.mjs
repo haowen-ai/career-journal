@@ -226,6 +226,12 @@ test('external scheduler registration stores an unverified claim and binding rev
       email: { mode: 'configure', provider: 'host', address: 'candidate@example.test', settings: { connector: 'gmail' } },
       provisionAutomations: true,
     });
+    await automationCommand({ subcommand: 'configure', options: {
+      home, task: 'daily-consolidation', time: '22:00', timezone: 'UTC', enabled: true,
+    } }, memoryIO(), { root: process.cwd(), version: 'test' });
+    await automationCommand({ subcommand: 'configure', options: {
+      home, task: 'local-backup', time: '23:00', timezone: 'UTC', enabled: true,
+    } }, memoryIO(), { root: process.cwd(), version: 'test' });
     let output = '';
     for (const taskType of ['mail-sync', 'deadline-review', 'daily-consolidation', 'local-backup']) {
       const io = memoryIO();
@@ -344,6 +350,12 @@ test('unregister-external and uninstall clear attestation and persist pending se
       provisionAutomations: true,
     });
     const runtime = { root: process.cwd(), version: 'test' };
+    await automationCommand({ subcommand: 'configure', options: {
+      home, task: 'daily-consolidation', time: '22:00', timezone: 'UTC', enabled: true,
+    } }, memoryIO(), runtime);
+    await automationCommand({ subcommand: 'configure', options: {
+      home, task: 'local-backup', time: '23:00', timezone: 'UTC', enabled: true,
+    } }, memoryIO(), runtime);
     for (const task of ['mail-sync', 'deadline-review', 'daily-consolidation', 'local-backup']) {
       await automationCommand({ subcommand: 'register-external', options: {
         home, task, driver: 'codex', 'external-id': `automation-${task}`,

@@ -22,6 +22,27 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.11] - 2026-09-19
+
+### Added
+
+- Added two alternative Agent-first onboarding entries to the README: share only the repository URL, or copy a complete setup prompt
+- Added repository-level Agent instructions that cover CAREER JOURNAL setup, TypeSafe Skill installation, account handoff, automation registration, verification, and the first run
+
+### Changed
+
+- Reduced new-workspace onboarding to two required daily tasks: `mail-sync` at 20:00 and `deadline-review` at 20:15 in the computer's detected time zone
+- Made the Agent responsible for cloning, configuration commands, scheduler setup, verification, and `doctor`, leaving the user only unavoidable login, authorization, and account choices
+
+### Fixed
+
+- Removed the unrelated daily consolidation and scheduled backup jobs from the default onboarding flow while preserving them for existing-workspace compatibility and on-demand use
+- Updated setup, doctor, smoke tests, bilingual documentation, the PRD, and repository Skills to enforce the same two-task contract
+
+### Security
+
+- Kept mailbox passwords and Jev or LLM API keys out of prompts, configuration values, logs, and Git; onboarding uses environment-variable names or an external secret store
+
 ## [0.1.0-alpha.10] - 2026-09-19
 
 ### Added

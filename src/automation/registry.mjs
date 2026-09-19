@@ -16,7 +16,7 @@ function validateTime(value) {
 
 export { BUILT_IN_TASKS };
 
-export const REQUIRED_TASK_TYPES = Object.freeze(['mail-sync', 'deadline-review', 'daily-consolidation', 'local-backup']);
+export const REQUIRED_TASK_TYPES = Object.freeze(['mail-sync', 'deadline-review']);
 
 export function taskBindingRevision(task) {
   return createHash('sha256').update(JSON.stringify({

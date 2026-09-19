@@ -214,7 +214,7 @@ test('setup requires an explicit migration instead of mutating an old database',
   inspect.close();
 }));
 
-test('first CLI setup provisions the mailbox and daily automations', async () => withHome(async (home) => {
+test('first CLI setup provisions only the two job-search automations', async () => withHome(async (home) => {
   const io = memoryIO();
   await setupCommand({ options: {
     home,
@@ -233,10 +233,10 @@ test('first CLI setup provisions the mailbox and daily automations', async () =>
     assert.equal(accounts[0].id, 'host:candidate@school.edu');
     assert.deepEqual(accounts[0].settings, { connector: 'outlook' });
     const tasks = listTasks(context.db);
-    assert.deepEqual(tasks.map((task) => task.type), ['daily-consolidation', 'deadline-review', 'local-backup', 'mail-sync']);
+    assert.deepEqual(tasks.map((task) => task.type), ['deadline-review', 'mail-sync']);
     assert.equal(tasks.find((task) => task.type === 'mail-sync').accountId, accounts[0].id);
     assert.equal(tasks.find((task) => task.type === 'mail-sync').schedule, '20:00');
-    assert.equal(tasks.find((task) => task.type === 'daily-consolidation').schedule, '22:00');
+    assert.equal(tasks.find((task) => task.type === 'deadline-review').schedule, '20:15');
     const config = await loadConfig(home);
     assert.equal(config.email.setupState, 'pending-verification');
     assert.equal(config.automation.setupState, 'pending-registration');

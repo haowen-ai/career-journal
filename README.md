@@ -4,7 +4,7 @@
 
 CAREER JOURNAL is a local-first, evidence-driven application tracker for people and AI agents. It keeps roles, status events, recruiting email evidence, next actions, and the exact material lifecycle in one SQLite database. A generated resume remains a draft until the exact uploaded file is confirmed.
 
-This is an alpha release. A complete workspace requires one explicit read-only email account for job-search messages and four registered daily tasks. CAREER JOURNAL already supports the newly released Jev, which TypeSafe AI introduced in early access on September 15, 2026. Deterministic rules handle explicit cases, Jev is the primary semantic engine when configured, and users without Jev automatically fall back to a configured structured LLM. Unreliable results go to manual review. CareerOps remains optional unless application materials are generated. See [TypeSafe AI's Jev launch announcement](https://typesafe.ai/blog/introducing-system-one-models-and-jev).
+This is an alpha release. A complete workspace requires one explicit read-only email account for job-search messages and two verified daily tasks: mail sync and active-stage review. CAREER JOURNAL already supports the newly released Jev, which TypeSafe AI introduced in early access on September 15, 2026. Deterministic rules handle explicit cases, Jev is the primary semantic engine when configured, and users without Jev automatically fall back to a configured structured LLM. Unreliable results go to manual review. CareerOps remains optional unless application materials are generated. See [TypeSafe AI's Jev launch announcement](https://typesafe.ai/blog/introducing-system-one-models-and-jev).
 
 ## What it does
 
@@ -13,7 +13,7 @@ This is an alpha release. A complete workspace requires one explicit read-only e
 - **Preserves the material lifecycle:** generated, verified, and actually submitted files remain distinct
 - **Supports application materials:** combines CareerOps with built-in U.S. resume rules and optional personal rules
 - **Runs locally:** stores records in SQLite and serves a loopback-only dashboard and JSON API
-- **Runs daily routines:** checks recruiting mail, active hiring stages, application summaries, and backups in the computer's detected time zone
+- **Runs daily routines:** checks recruiting mail and active hiring stages in the computer's detected time zone
 
 ## Product preview
 
@@ -37,7 +37,7 @@ The CareerOps bridge can prepare a role-specific resume or cover letter. CAREER 
 
 ### Run daily checks
 
-Four registered tasks cover mail sync, active-stage review, daily consolidation, and local backup. Each task has its own cursor, advances only after success, and stays quiet when nothing actionable changed.
+Two registered tasks cover mail sync and active-stage review. Each task has its own cursor, advances only after success, and stays quiet when nothing actionable changed. Daily summaries are outside CAREER JOURNAL onboarding, and backups run only when a user asks for one.
 
 ```mermaid
 flowchart LR
@@ -62,33 +62,41 @@ flowchart LR
 - Node.js 24 or newer
 - Git for installation and updates
 - A real read-only mailbox connection. The built-in, independently verifiable path uses IMAPS over TLS; a Codex or API host connector may also import mail, but its JSON alone is self-attested
-- A scheduler. Codex can run all four jobs when its host securely injects the IMAP environment variable; native OS installation currently covers the other three jobs
+- An AI agent or scheduler that can create the two required jobs. The mail job must receive the IMAP environment variable securely
 - The exact email address chosen by the user; CAREER JOURNAL never guesses whether to use a school, work, or personal account
 
 ### Quick Start
 
-#### Codex setup
+#### Agent-first setup: choose one entry point
 
-Clone the project, open the cloned folder in Codex, and send the prompt below. The repository Skill performs the configuration and stops if it cannot verify the mailbox or any daily job:
+The two choices below are alternatives. After either one, the Agent handles cloning, setup, Skill installation, time-zone detection, automation creation, verification, and the first run. The user only supplies account details, authentication, or environment-variable names that the Agent cannot infer safely.
 
-```sh
-git clone https://github.com/haowenchen0811/career-journal.git
-cd career-journal
-```
+##### Option 1 — give the Agent only the GitHub address
 
-If TypeSafe access will be used, install TypeSafe AI's independently maintained MIT-licensed Agent Skill into the clone, then select Codex when prompted:
-
-```sh
-npx skills add typesafe-ai/skills --skill typesafe-ai
-```
-
-The upstream Skill is not copied into this repository. Its current source and license are listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+Send this to a coding Agent:
 
 ```text
-Initialize CAREER JOURNAL in this clone with the data home $HOME/job-search. Ask me for the real email address, IMAPS host and username that I use for applications, plus the name of the environment variable that contains its app password or provider credential. Ask whether I have TypeSafe Jev access. If I do, ask only for the environment-variable name that contains my Jev API key and configure it with --jev-secret-ref. If I do not, ask for my OpenAI-compatible base URL, model name, and API-key environment-variable name, then configure --model-provider openai-compatible, --model-base-url, --model-name, and --model-secret-ref. Never ask me to paste a secret into a prompt or config file. Install or read the official TypeSafe Agent Skill before changing Jev questions. Detect this computer's IANA time zone. Create four ACTIVE daily Codex heartbeats in that time zone: mail-sync at 20:00, deadline-review at 20:15, daily-consolidation at 22:00, and local-backup at 23:00. After each heartbeat returns its real ID, register that ID to obtain codexCommandLine, update the same heartbeat so its prompt contains that returned command verbatim on its own line, then live-verify it. Trigger every verified task once and run doctor. Do not report onboarding complete unless the email and automation checks both pass.
+Set up this project for me and complete onboarding automatically:
+https://github.com/haowenchen0811/career-journal
 ```
 
-The mail heartbeat must receive the configured IMAP and decision-provider environment variables from the Codex host's secret environment. Their values must not appear in the heartbeat prompt, `automation.toml`, CAREER JOURNAL config, or Git. If the host cannot securely provide a required variable, stop: mail scheduling and onboarding are still incomplete.
+The repository root [`AGENTS.md`](AGENTS.md) tells the Agent to clone or open the project, read the CAREER JOURNAL Skill, obtain only the required account information, create the two real schedules, verify them, and run `doctor`.
+
+##### Option 2 — copy the full setup prompt
+
+Use this when an Agent does not automatically inspect repository instructions:
+
+```text
+Set up CAREER JOURNAL from https://github.com/haowenchen0811/career-journal and complete onboarding for me. If the repository is not already available locally, clone it and work from that clone. Read AGENTS.md and .agents/skills/career-journal/SKILL.md before configuring anything.
+
+Install the TypeSafe skill. If you're in Claude Code, run `claude plugin marketplace add typesafe-ai/skills`, then `claude plugin install typesafe@typesafe-ai`. If you're in another agent, run `npx skills add typesafe-ai/skills --skill typesafe-ai` and select your agent. Use one installation method. You can read the skill directly at https://github.com/typesafe-ai/skills/blob/main/skills/typesafe-ai/SKILL.md (raw: https://raw.githubusercontent.com/typesafe-ai/skills/main/skills/typesafe-ai/SKILL.md). Then use the TypeSafe skill when working on this project.
+
+Do not ask me to run installation or configuration commands. Ask me only for information or authentication that you cannot infer or perform safely: my real job-search email address, its IMAPS settings when needed, the names of environment variables that hold credentials, and whether I have TypeSafe Jev access. Never ask me to paste a password or API key into chat, config, logs, or Git.
+
+Detect this computer's IANA time zone. Configure Jev when I have access; otherwise configure my OpenAI-compatible structured-LLM provider. Create only two ACTIVE daily jobs in the detected time zone: mail-sync at 20:00 and deadline-review at 20:15. Register each real automation ID, put the returned codexCommandLine verbatim into the same scheduler job, verify the saved definitions, and trigger both verified jobs once. Run career-journal doctor and report onboarding complete only when the live mailbox and both required jobs pass. Do not create daily-consolidation or a scheduled local-backup. Backups are optional and run only when I ask for one.
+```
+
+CAREER JOURNAL never asks the Agent to place secret values in a prompt or repository. If a provider requires login, 2FA, or explicit account authorization, the Agent pauses only for that unavoidable user-controlled step and resumes automatically afterward.
 
 #### CLI and API-host setup
 
@@ -131,16 +139,12 @@ Setup detects the computer's IANA time zone and provisions these enabled task re
 |---|---|---|
 | 20:00 | `mail-sync` | Verify and read the selected mailbox over TLS, then ingest recruiting updates |
 | 20:15 | `deadline-review` | Review applications in assessment, interview, or offer stages |
-| 22:00 | `daily-consolidation` | Write the daily application summary |
-| 23:00 | `local-backup` | Create a local backup |
 
-The database records above do not wake the process. The commands below are the Codex path; native and other external schedulers are documented under Daily Automations. Create four real Codex jobs. Each must be ACTIVE and its saved definition must contain the correct daily schedule, detected time zone, and exact command binding. Replace the four shell variables below with the returned automation IDs, then register them:
+The database records above do not wake the process. The commands below are the Codex path; native and other external schedulers are documented under Daily Automations. Create two real Codex jobs. Each must be ACTIVE and its saved definition must contain the correct daily schedule, detected time zone, and exact command binding. Replace the two shell variables below with the returned automation IDs, then register them:
 
 ```sh
 node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURNAL_HOME" --task mail-sync --driver codex --external-id "$MAIL_SYNC_ID"
 node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURNAL_HOME" --task deadline-review --driver codex --external-id "$DEADLINE_REVIEW_ID"
-node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURNAL_HOME" --task daily-consolidation --driver codex --external-id "$DAILY_CONSOLIDATION_ID"
-node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURNAL_HOME" --task local-backup --driver codex --external-id "$LOCAL_BACKUP_ID"
 ```
 
 Each registration prints `codexCommandLine`. Before verification, update the matching heartbeat prompt so that returned string appears verbatim as a standalone line and the prompt states the detected IANA time zone. Then probe the saved jobs and trigger each one once:
@@ -148,12 +152,8 @@ Each registration prints `codexCommandLine`. Before verification, update the mat
 ```sh
 node ./bin/career-journal.mjs automation verify --home "$CAREER_JOURNAL_HOME" --task mail-sync
 node ./bin/career-journal.mjs automation verify --home "$CAREER_JOURNAL_HOME" --task deadline-review
-node ./bin/career-journal.mjs automation verify --home "$CAREER_JOURNAL_HOME" --task daily-consolidation
-node ./bin/career-journal.mjs automation verify --home "$CAREER_JOURNAL_HOME" --task local-backup
 node ./bin/career-journal.mjs automation run --id career-journal-mail-sync --home "$CAREER_JOURNAL_HOME" --external-id "$MAIL_SYNC_ID"
 node ./bin/career-journal.mjs automation run --id career-journal-deadline-review --home "$CAREER_JOURNAL_HOME" --external-id "$DEADLINE_REVIEW_ID"
-node ./bin/career-journal.mjs automation run --id career-journal-daily-consolidation --home "$CAREER_JOURNAL_HOME" --external-id "$DAILY_CONSOLIDATION_ID"
-node ./bin/career-journal.mjs automation run --id career-journal-local-backup --home "$CAREER_JOURNAL_HOME" --external-id "$LOCAL_BACKUP_ID"
 node ./bin/career-journal.mjs doctor --home "$CAREER_JOURNAL_HOME"
 node ./bin/career-journal.mjs start --home "$CAREER_JOURNAL_HOME"
 ```
@@ -171,8 +171,6 @@ The commands below are a synthetic contract smoke test. They verify CLI wiring a
 $REPO/bin/career-journal.mjs setup --home $CAREER_JOURNAL_HOME --timezone UTC --email-provider host --email-address candidate@school.edu --email-connector test
 $REPO/bin/career-journal.mjs automation register-external --home $CAREER_JOURNAL_HOME --task mail-sync --driver test --external-id smoke-mail-sync
 $REPO/bin/career-journal.mjs automation register-external --home $CAREER_JOURNAL_HOME --task deadline-review --driver test --external-id smoke-deadline-review
-$REPO/bin/career-journal.mjs automation register-external --home $CAREER_JOURNAL_HOME --task daily-consolidation --driver test --external-id smoke-daily-consolidation
-$REPO/bin/career-journal.mjs automation register-external --home $CAREER_JOURNAL_HOME --task local-backup --driver test --external-id smoke-local-backup
 $REPO/bin/career-journal.mjs email sync-host --home $CAREER_JOURNAL_HOME --account host:candidate@school.edu --file $REPO/docs/examples/initial-mail-sync.json --dry-run
 $REPO/bin/career-journal.mjs application add --home $CAREER_JOURNAL_HOME --company ExampleCorp --role DataScientist
 $REPO/bin/career-journal.mjs event add --home $CAREER_JOURNAL_HOME --id examplecorp-datascientist --event-id example-submit --type application_submitted --title Submitted --status-after applied
@@ -184,11 +182,11 @@ $REPO/bin/career-journal.mjs application list --home $CAREER_JOURNAL_HOME --json
 
 ### Codex-native
 
-Open the cloned repository in Codex and use the initialization prompt in Quick Start. Codex discovers the repo-local `career-journal` Skill, asks for the exact mailbox instead of guessing one, configures live IMAPS, creates four real ACTIVE heartbeats in the detected computer time zone, and binds every returned automation ID to its exact run command. It then reads the actual Codex automation definitions, triggers each verified job once, and finishes only after `doctor` passes. The host must inject the named IMAP environment variable into the mail job without copying its value into the prompt. A Codex mailbox connector may still supply read-only batches, but connector-authored JSON is not independent account proof. Resume and cover-letter work routes through the separate `careerops-materials` Skill.
+Give Codex either the repository address or the full initialization prompt in Quick Start. Codex clones or opens the repository, discovers the repo-local `career-journal` Skill, asks only for information it cannot infer safely, configures live IMAPS, creates the two required ACTIVE heartbeats in the detected computer time zone, and binds every returned automation ID to its exact run command. It then reads the actual Codex automation definitions, triggers each verified job once, and finishes only after `doctor` passes. The host must inject the named IMAP environment variable into the mail job without copying its value into the prompt. A Codex mailbox connector may still supply read-only batches, but connector-authored JSON is not independent account proof. Resume and cover-letter work routes through the separate `careerops-materials` Skill.
 
 ### Local API and semantic decisions
 
-Run `career-journal start --home <data-directory>` for the loopback dashboard and JSON API. The generic path uses the built-in IMAPS client plus a scheduler that can securely expose the named IMAP and decision-provider environment variables to `mail-sync`. `automation install` can install and probe the other three tasks on macOS, Linux, or Windows; the current alpha refuses native installation of `mail-sync` because those generated definitions do not yet have a safe cross-platform secret provider. API hosts may instead supply structured read-only batches, but need a separate live verifier adapter before mailbox health can PASS. Explicit deterministic rules run first at no model cost. Jev is the preferred semantic engine when configured. Without Jev, or when Jev is unavailable, in shadow mode, malformed, unknown, or below threshold, the router falls back to the configured structured LLM. If neither provider returns a valid, confident classification, the message becomes a manual-review candidate. Every provider result remains review evidence and never changes an application status by itself.
+Run `career-journal start --home <data-directory>` for the loopback dashboard and JSON API. The generic path uses the built-in IMAPS client plus a scheduler that can securely expose the named IMAP and decision-provider environment variables to `mail-sync`. `automation install` can install and probe `deadline-review` on macOS, Linux, or Windows; the current alpha refuses native installation of `mail-sync` because those generated definitions do not yet have a safe cross-platform secret provider. API hosts may instead supply structured read-only batches, but need a separate live verifier adapter before mailbox health can PASS. Explicit deterministic rules run first at no model cost. Jev is the preferred semantic engine when configured. Without Jev, or when Jev is unavailable, in shadow mode, malformed, unknown, or below threshold, the router falls back to the configured structured LLM. If neither provider returns a valid, confident classification, the message becomes a manual-review candidate. Every provider result remains review evidence and never changes an application status by itself.
 
 ## Email Integration
 
@@ -285,14 +283,12 @@ After the key exists in the environment, run `npm run test:jev-live` for an expl
 
 ## Daily Automations
 
-Setup provisions `mail-sync` at 20:00, `deadline-review` at 20:15, `daily-consolidation` at 22:00, and `local-backup` at 23:00 in the detected computer time zone. These defaults can be changed explicitly during setup or with `automation configure`.
+Setup provisions only `mail-sync` at 20:00 and `deadline-review` at 20:15 in the detected computer time zone. These defaults can be changed explicitly during setup or with `automation configure`. `daily-consolidation` is retained only for upgrade compatibility, and `backup create` remains an optional on-demand command. Neither is created during new onboarding.
 
 The scheduler that actually wakes the process lives outside CAREER JOURNAL. A Codex automation, service scheduler, or API host must create every job. `register-external` records a pending claim after successful creation; it neither creates nor verifies a job. Do not register a placeholder ID.
 
 - `mail-sync`: run `automation run --id career-journal-mail-sync --home <absolute-home> --external-id <registered-id>` in a host that securely supplies the configured IMAP environment variable
 - `deadline-review`: run `automation run --id career-journal-deadline-review --home <absolute-home> --external-id <registered-id>`
-- `daily-consolidation`: run `automation run --id career-journal-daily-consolidation --home <absolute-home> --external-id <registered-id>`
-- `local-backup`: run `automation run --id career-journal-local-backup --home <absolute-home> --external-id <registered-id>`
 
 Each task keeps its own cursor and records success only after its handler finishes. The mail cursor is not advanced after a partial or failed batch.
 
@@ -302,16 +298,14 @@ Create each heartbeat first and keep the returned automation ID. Register that I
 
 ### Native schedulers
 
-`automation install` installs and live-probes launchd on macOS, the current user's crontab on Linux, or Windows Task Scheduler. Alpha.6 supports native installation for `deadline-review`, `daily-consolidation`, and `local-backup`:
+`automation install` installs and live-probes launchd on macOS, the current user's crontab on Linux, or Windows Task Scheduler. Native installation is available for `deadline-review`:
 
 ```sh
 node ./bin/career-journal.mjs automation install --home "$CAREER_JOURNAL_HOME" --task deadline-review
-node ./bin/career-journal.mjs automation install --home "$CAREER_JOURNAL_HOME" --task daily-consolidation
-node ./bin/career-journal.mjs automation install --home "$CAREER_JOURNAL_HOME" --task local-backup
 node ./bin/career-journal.mjs automation list --home "$CAREER_JOURNAL_HOME"
 ```
 
-Use the verified `registration.externalId` shown by `automation list` when triggering each task once. New installations use `io.career-journal.<task>` on macOS, `career-journal-<task>` on Linux, and `CareerJournal-<task>` on Windows. Native `mail-sync` installation is deliberately blocked in alpha.6: use Codex or another trusted external scheduler that can inject the configured environment secret without writing the secret into the job definition. A host-managed mailbox also needs an independent live verifier. Run `doctor` only after all four tasks have been probed and observed with their matching external IDs.
+Use the verified `registration.externalId` shown by `automation list` when triggering each task once. New installations use `io.career-journal.<task>` on macOS, `career-journal-<task>` on Linux, and `CareerJournal-<task>` on Windows. Native `mail-sync` installation is deliberately blocked in alpha.6: use Codex or another trusted external scheduler that can inject the configured environment secret without writing the secret into the job definition. A host-managed mailbox also needs an independent live verifier. Run `doctor` only after both required tasks have been probed and observed with their matching external IDs.
 
 If you manually registered a definition, remove the OS registration before deleting its file:
 
@@ -341,7 +335,7 @@ career-journal migrate --home ~/job-search --dry-run
 career-journal migrate --home ~/job-search --apply
 ```
 
-Back up before an upgrade, pull a tagged release, run `career-journal update --check`, and apply only the reported migration. The default backup preserves the artifact index and hashes, not the original files. To uninstall, remove all four external scheduler jobs, run `career-journal automation uninstall` for prepared definitions, preserve or export the selected data home, and then delete the cloned repository. Delete the data home only when you also want to remove all local records and archived artifacts.
+Back up before an upgrade, pull a tagged release, run `career-journal update --check`, and apply only the reported migration. The default backup preserves the artifact index and hashes, not the original files. To uninstall, remove both required external scheduler jobs, run `career-journal automation uninstall` for prepared definitions, preserve or export the selected data home, and then delete the cloned repository. Delete the data home only when you also want to remove all local records and archived artifacts.
 
 ### Compatibility with v0.1.0-alpha.5 and earlier
 

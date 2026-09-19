@@ -41,10 +41,11 @@ export async function checkRelease(root) {
   } catch (error) { check('version-consistency', false, error.message); }
 
   try {
-    const [englishReadme, chineseReadme, skill] = await Promise.all([
+    const [englishReadme, chineseReadme, skill, agentInstructions] = await Promise.all([
       read('README.md'),
       read('README.zh-CN.md'),
       read('.agents/skills/career-journal/SKILL.md'),
+      read('AGENTS.md'),
     ]);
     const repositoryUrl = packageJson.repository?.url;
     const identityOk = packageJson.name === '@haowenchen0811/career-journal'
@@ -52,8 +53,9 @@ export async function checkRelease(root) {
       && packageJson.bin?.jobops === 'bin/jobops.mjs'
       && repositoryUrl === 'https://github.com/haowenchen0811/career-journal.git'
       && /^name: career-journal$/m.test(skill)
-      && /git clone https:\/\/github\.com\/haowenchen0811\/career-journal\.git/.test(englishReadme)
-      && /git clone https:\/\/github\.com\/haowenchen0811\/career-journal\.git/.test(chineseReadme)
+      && /https:\/\/github\.com\/haowenchen0811\/career-journal/.test(englishReadme)
+      && /https:\/\/github\.com\/haowenchen0811\/career-journal/.test(chineseReadme)
+      && /\.agents\/skills\/career-journal\/SKILL\.md/.test(agentInstructions)
       && !/git clone [^\n]*job-search-ops/.test(englishReadme)
       && !/git clone [^\n]*job-search-ops/.test(chineseReadme);
     check('product-identity', identityOk, 'CAREER JOURNAL package, repository, primary CLI, Skill, and onboarding');
@@ -140,8 +142,8 @@ export async function checkRelease(root) {
       /Jev[^\n]*(?:generic LLM|structured LLM|通用大模型|大语言模型)|(?:generic LLM|structured LLM|通用大模型|大语言模型)[^\n]*Jev/i,
       /mail-sync[^\n]*20:00|20:00[^\n]*mail-sync/i,
       /deadline-review[^\n]*20:15|20:15[^\n]*deadline-review/i,
-      /daily-consolidation[^\n]*22:00|22:00[^\n]*daily-consolidation/i,
-      /local-backup[^\n]*23:00|23:00[^\n]*local-backup/i,
+      /(?:two|required|两个|两项)[^\n]*(?:mail-sync|任务)/i,
+      /(?:backup|备份)[^\n]*(?:optional|on-demand|可选|按需)/i,
       /IANA/i,
       /Semantic Versioning|SemVer|语义化版本/i,
       /Git tag/i,

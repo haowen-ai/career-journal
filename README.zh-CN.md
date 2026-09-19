@@ -4,7 +4,7 @@
 
 CAREER JOURNAL 是一款在本地运行的求职申请管理工具，既可以由求职者直接使用，也可以交给 AI Agent 操作。它把岗位、申请阶段、招聘邮件、下一步行动和实际投递的材料统一保存在一个 SQLite 数据库中。系统生成的简历和求职信默认只是草稿；只有用户明确确认自己上传了哪个文件，系统才会把它记录为实际投递版本。
 
-当前版本仍处于 alpha 阶段。要让 `doctor` 判定首次配置已经完成，需要满足两项条件：一是连接一个由用户自己选择的求职邮箱，并验证只读同步；二是在当前电脑或 Codex 中实际创建并验证 4 个每日自动任务。这 4 个任务默认在 20:00 同步招聘邮件、20:15 检查正在进行中的申请和临近事项、22:00 生成当天汇总、23:00 创建本地备份。
+当前版本仍处于 alpha 阶段。要让 `doctor` 判定首次配置已经完成，需要连接一个由用户自己选择的求职邮箱并验证只读同步，同时创建并验证两个每日任务：20:00 同步招聘邮件，20:15 检查正在进行中的申请和临近事项。当天汇总不属于 CAREER JOURNAL 的默认流程；备份只在用户需要时按需执行。
 
 这里的“实际创建”指调度器真的会在指定时间执行命令。`setup` 写入数据库的只是任务设置，不会自己在晚上唤醒程序；真正负责定时运行的是 Codex heartbeat、macOS `launchd`、Linux `cron`、Windows Task Scheduler，或其他外部调度服务。
 
@@ -17,7 +17,7 @@ CAREER JOURNAL 已经支持 TypeSafe AI 于 2026 年 9 月 15 日开放 early ac
 - **区分材料所处阶段：** 分别记录刚生成的草稿、通过规则检查的文件和用户确认实际提交的版本
 - **生成求职材料：** 通过 CareerOps 结合内置美式简历规则和用户自己的补充规则
 - **数据保存在本地：** 使用 SQLite 存储记录，并提供只允许本机访问的看板和 JSON API
-- **按本机时区每天运行：** 自动同步招聘邮件、检查正在进行中的申请、生成汇总并创建本地备份
+- **按本机时区每天运行：** 自动同步招聘邮件，并检查正在进行中的申请和临近事项
 
 ## 产品界面
 
@@ -43,7 +43,7 @@ Codex、API 客户端或其他运行环境也可以批量导入结构化邮件�
 
 ### 执行每日检查
 
-四个每日任务分别负责邮件同步、申请与截止事项检查、当天汇总和本地备份。每个任务都有自己的处理位置记录，只有成功完成后才会向前推进；没有需要用户处理的新变化时，任务保持安静。
+两个每日任务分别负责邮件同步，以及申请与截止事项检查。每个任务都有自己的处理位置记录，只有成功完成后才会向前推进；没有需要用户处理的新变化时，任务保持安静。
 
 ```mermaid
 flowchart LR
@@ -68,39 +68,41 @@ flowchart LR
 - Node.js 24 或更新版本
 - Git，用于安装和更新
 - 一个由用户选择、能够实际完成只读连接的求职邮箱。内置验证方式使用 TLS 加密的 IMAPS；Codex 或 API 连接器也可以导入邮件，但单独一份 JSON 不能证明邮箱已经连接成功
-- 一个能够按时执行命令的调度器。Codex 能安全提供 IMAP 环境变量时可以运行全部四项任务；当前版本的本机操作系统安装只覆盖另外三项任务
+- 一个能够按时执行命令的调度器。Codex 能安全提供 IMAP 环境变量时可以运行两个必需任务；当前版本的本机操作系统安装支持 `deadline-review`
 - 准确的邮箱地址。CAREER JOURNAL 不会替用户猜测应该使用学校邮箱、工作邮箱还是个人邮箱
 
 ### 快速开始
 
-#### Codex 配置
+#### 由 Agent 自动配置：任选一种入口
 
-先克隆项目，再用 Codex 打开克隆后的目录，然后发送下面这段话。仓库内的 Skill 会完成配置；如果邮箱或任何一个每日任务没有通过验证，它会明确说明初始化仍未完成：
+下面两种方式二选一即可。无论选择哪一种，后续的下载、Skill 安装、时区检测、项目配置、定时任务创建、验证和首次运行都由 Agent 完成。用户只需提供 Agent 无法安全推断的账号信息、授权或环境变量名称。
 
-```sh
-git clone https://github.com/haowenchen0811/career-journal.git
-cd career-journal
-```
+##### 方式一：只把 GitHub 地址交给 Agent
 
-如果要启用 Jev，请先安装由 TypeSafe AI 独立维护、采用 MIT 许可证的 Agent Skill，并在安装提示中选择 Codex：
-
-```sh
-npx skills add typesafe-ai/skills --skill typesafe-ai
-```
-
-本仓库没有复制上游 Skill 源码；最新来源和许可证见 [`THIRD_PARTY_NOTICES.zh-CN.md`](THIRD_PARTY_NOTICES.zh-CN.md)。
+把下面这段发给编程 Agent：
 
 ```text
-请初始化当前克隆目录中的 CAREER JOURNAL，数据目录使用 $HOME/job-search。
-
-请先询问我实际用于求职的邮箱地址、IMAPS 主机、用户名，以及保存应用专用密码或服务凭据的环境变量名称。再询问我是否已有 TypeSafe Jev 权限。如果有，只询问保存 Jev API Key 的环境变量名称，并通过 --jev-secret-ref 配置。如果没有，询问 OpenAI-compatible 服务的 base URL、模型名和保存 API Key 的环境变量名称，再配置 --model-provider openai-compatible、--model-base-url、--model-name 和 --model-secret-ref。不要让我把任何真实密码或 Key 粘贴到 prompt 或配置文件中。修改 Jev 问题前，先安装或读取 TypeSafe 官方 Agent Skill。
-
-请检测当前电脑的 IANA 时区，并按该时区创建四个处于 ACTIVE 状态的每日 Codex heartbeat：20:00 mail-sync、20:15 deadline-review、22:00 daily-consolidation、23:00 local-backup。每个 heartbeat 返回 automation ID 后，先登记该 ID 并取得 codexCommandLine；再更新同一个 heartbeat，把返回的完整命令单独放在 prompt 的一行中，然后检查实际保存的任务定义。
-
-请分别运行一次已经验证的任务，再执行 doctor。只有邮箱和自动任务检查都通过时，才能说明首次配置已经完成。
+请帮我自动安装并完成这个项目的首次配置：
+https://github.com/haowenchen0811/career-journal
 ```
 
-负责同步邮件的 heartbeat 必须从 Codex 的受保护运行环境中读取已经配置好的 IMAP 环境变量。密码或 Key 的实际值不能写入 heartbeat prompt、`automation.toml`、CAREER JOURNAL 配置或 Git。如果运行环境无法安全提供该变量，配置应停止，并明确说明邮件定时同步和首次初始化尚未完成。
+仓库根目录的 [`AGENTS.md`](AGENTS.md) 会要求 Agent 自动克隆或打开项目、读取 CAREER JOURNAL Skill、只询问必要的账号信息、创建两个真实定时任务、完成验证并运行 `doctor`。
+
+##### 方式二：复制完整安装提示词
+
+如果 Agent 不会主动读取仓库说明，复制下面的完整提示词：
+
+```text
+请从 https://github.com/haowenchen0811/career-journal 安装 CAREER JOURNAL，并替我完成首次配置。如果本地还没有这个仓库，请先克隆，再进入克隆后的目录工作。开始配置前，先读取 AGENTS.md 和 .agents/skills/career-journal/SKILL.md。
+
+安装 TypeSafe Skill。如果你使用 Claude Code，运行 `claude plugin marketplace add typesafe-ai/skills`，再运行 `claude plugin install typesafe@typesafe-ai`；如果你使用其他 Agent，运行 `npx skills add typesafe-ai/skills --skill typesafe-ai`，并选择当前 Agent。只使用其中一种安装方式。也可以直接读取 https://github.com/typesafe-ai/skills/blob/main/skills/typesafe-ai/SKILL.md，原始文件地址是 https://raw.githubusercontent.com/typesafe-ai/skills/main/skills/typesafe-ai/SKILL.md。之后在这个项目中使用 TypeSafe Skill。
+
+不要让我手动执行安装或配置命令。只询问你无法安全推断或代替完成的信息与授权：我的真实求职邮箱、必要的 IMAPS 配置、保存凭据的环境变量名称，以及我是否已经获得 TypeSafe Jev 权限。不要让我把密码或 API Key 粘贴进对话、配置文件、日志或 Git。
+
+检测这台电脑的 IANA 时区。有 Jev 权限时配置 Jev；没有时配置我的 OpenAI-compatible 大语言模型。只创建两个 ACTIVE 每日任务：20:00 的 mail-sync 和 20:15 的 deadline-review。登记真实 automation ID，把返回的 codexCommandLine 原样放进同一个定时任务，检查实际保存的任务定义，并分别运行一次。最后运行 career-journal doctor；只有真实邮箱和两个必需任务都通过后，才能告诉我首次配置已完成。不要创建 daily-consolidation，也不要安排每日 local-backup。备份只在我明确要求时按需执行。
+```
+
+CAREER JOURNAL 不会要求 Agent 把真实密钥写入提示词或仓库。如果邮箱或服务商要求登录、2FA 或明确授权，Agent 只在这个无法替代的环节暂停，用户完成后继续自动执行。
 
 #### 使用 CLI 或 API 配置
 
@@ -137,22 +139,18 @@ node ./bin/career-journal.mjs setup \
   --model-secret-ref env:MODEL_API_KEY
 ```
 
-`setup` 会读取当前电脑的 IANA 时区，并在数据库中写入以下四项已启用的任务设置：
+`setup` 会读取当前电脑的 IANA 时区，并在数据库中写入以下两项已启用的任务设置：
 
 | 本地时间 | 任务 | 作用 |
 |---|---|---|
 | 20:00 | `mail-sync` | 通过 TLS 验证并只读抓取所选邮箱，再导入招聘进展 |
 | 20:15 | `deadline-review` | 检查测评、面试或 Offer 阶段的申请 |
-| 22:00 | `daily-consolidation` | 生成每日申请汇总 |
-| 23:00 | `local-backup` | 创建本地备份 |
 
-这些数据库记录不会自动执行。使用 Codex 时，还要真正创建四个 heartbeat，并让每个 heartbeat 在正确的本地时间运行对应命令；使用本机或其他调度器时，请参阅“每日自动化”。Codex 中的四个任务都必须处于 `ACTIVE` 状态，保存的定义要包含正确的每日时间、检测到的时区和完整命令。创建后，把下面四个 shell 变量替换成 Codex 返回的 automation ID，再把它们登记到 CAREER JOURNAL：
+这些数据库记录不会自动执行。使用 Codex 时，还要真正创建两个 heartbeat，并让每个 heartbeat 在正确的本地时间运行对应命令；使用本机或其他调度器时，请参阅“每日自动化”。Codex 中的两个任务都必须处于 `ACTIVE` 状态，保存的定义要包含正确的每日时间、检测到的时区和完整命令。创建后，把下面两个 shell 变量替换成 Codex 返回的 automation ID，再把它们登记到 CAREER JOURNAL：
 
 ```sh
 node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURNAL_HOME" --task mail-sync --driver codex --external-id "$MAIL_SYNC_ID"
 node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURNAL_HOME" --task deadline-review --driver codex --external-id "$DEADLINE_REVIEW_ID"
-node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURNAL_HOME" --task daily-consolidation --driver codex --external-id "$DAILY_CONSOLIDATION_ID"
-node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURNAL_HOME" --task local-backup --driver codex --external-id "$LOCAL_BACKUP_ID"
 ```
 
 每次登记都会输出 `codexCommandLine`。验证前，编辑对应 heartbeat 的 prompt，把这条字符串完整地单独放在一行中，并写明检测到的 IANA 时区。随后检查 Codex 中实际保存的任务定义，再分别运行一次：
@@ -160,19 +158,15 @@ node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURN
 ```sh
 node ./bin/career-journal.mjs automation verify --home "$CAREER_JOURNAL_HOME" --task mail-sync
 node ./bin/career-journal.mjs automation verify --home "$CAREER_JOURNAL_HOME" --task deadline-review
-node ./bin/career-journal.mjs automation verify --home "$CAREER_JOURNAL_HOME" --task daily-consolidation
-node ./bin/career-journal.mjs automation verify --home "$CAREER_JOURNAL_HOME" --task local-backup
 node ./bin/career-journal.mjs automation run --id career-journal-mail-sync --home "$CAREER_JOURNAL_HOME" --external-id "$MAIL_SYNC_ID"
 node ./bin/career-journal.mjs automation run --id career-journal-deadline-review --home "$CAREER_JOURNAL_HOME" --external-id "$DEADLINE_REVIEW_ID"
-node ./bin/career-journal.mjs automation run --id career-journal-daily-consolidation --home "$CAREER_JOURNAL_HOME" --external-id "$DAILY_CONSOLIDATION_ID"
-node ./bin/career-journal.mjs automation run --id career-journal-local-backup --home "$CAREER_JOURNAL_HOME" --external-id "$LOCAL_BACKUP_ID"
 node ./bin/career-journal.mjs doctor --home "$CAREER_JOURNAL_HOME"
 node ./bin/career-journal.mjs start --home "$CAREER_JOURNAL_HOME"
 ```
 
 IMAPS 邮件处理器会先完成账号认证，再用 `EXAMINE` 以只读方式打开邮箱，并通过 `BODY.PEEK[]` 获取邮件。只有邮件成功写入本地后，系统才会更新 UID 游标；如果邮箱没有新邮件，空结果仍算一次成功同步。
 
-只有 `doctor` 同时通过邮箱和自动化检查，首次配置才算完成。邮箱检查要求最近 36 小时内至少有一次真实的 IMAPS 认证和成功只读同步；自动化检查要求系统能够读取调度器中实际保存的任务定义，而且四个任务都曾使用各自登记的外部 ID 成功运行一次。以后再次执行 `setup` 时，已保存的时间、通知策略、启用状态、登记信息和时区都会保留，除非用户明确要求修改。
+只有 `doctor` 同时通过邮箱和自动化检查，首次配置才算完成。邮箱检查要求最近 36 小时内至少有一次真实的 IMAPS 认证和成功只读同步；自动化检查要求系统能够读取调度器中实际保存的任务定义，而且两个必需任务都曾使用各自登记的外部 ID 成功运行一次。以后再次执行 `setup` 时，已保存的时间、通知策略、启用状态、登记信息和时区都会保留，除非用户明确要求修改。
 
 可以在仓库中使用 `node ./bin/career-journal.mjs ...` 或随项目提供的 `./career-journal ...` 启动器。如果当前 Node.js 安装包含 npm，可运行 `npm link` 全局安装 `career-journal` 命令。
 
@@ -182,7 +176,7 @@ IMAPS 邮件处理器会先完成账号认证，再用 `EXAMINE` 以只读方式
 
 ### Codex 原生模式
 
-在 Codex 中打开克隆后的仓库，并使用“快速开始”里的初始化提示。Codex 会读取仓库内的 `career-journal` Skill，向用户询问准确的求职邮箱，而不会自行猜测。随后它会配置 IMAPS 只读连接，按照电脑检测到的时区创建四个处于 `ACTIVE` 状态的 heartbeat，并把每个 automation ID 与对应的完整命令绑定。
+把仓库地址或“快速开始”中的完整提示词交给 Codex 即可。Codex 会自动克隆或打开仓库，读取 `career-journal` Skill，只询问无法安全推断的信息，配置 IMAPS 只读连接，按照电脑检测到的时区创建两个必需的 `ACTIVE` heartbeat，并把每个 automation ID 与对应的完整命令绑定。
 
 完成后，Codex 会重新读取它实际保存的自动化定义，检查时间、时区和命令，再分别运行一次。只有 `doctor` 通过后，初始化才会结束。Codex 的运行环境必须安全提供指定的 IMAP 环境变量，不能把密码复制进 prompt。Codex 邮箱连接器仍可导入只读邮件批次，但连接器生成的 JSON 不能单独证明邮箱账号已经验证。简历和求职信任务由独立的 `careerops-materials` Skill 处理。
 
@@ -190,7 +184,7 @@ IMAPS 邮件处理器会先完成账号认证，再用 `EXAMINE` 以只读方式
 
 运行 `career-journal start --home <data-directory>` 可以启动本地看板和 JSON API。通用方案使用内置 IMAPS 客户端，并要求调度器能把指定的 IMAP 和决策服务环境变量安全提供给 `mail-sync`。
 
-在 macOS、Linux 或 Windows 上，`automation install` 目前可以安装并检查另外三项任务。当前 alpha 版本会拒绝直接安装 `mail-sync`，因为自动生成的系统任务还没有安全、跨平台的凭据注入方式。API 客户端可以提交结构化的只读邮件批次，但要让邮箱健康检查通过，仍需单独连接并验证邮箱。含义明确的邮件先走固定规则。配置 Jev 后，模糊邮件优先交给 Jev；没有 Jev，或者 Jev 无法给出可用结果时，系统自动改用已配置的大语言模型。两者都无法可靠判断时，邮件进入人工复核。模型输出只生成待审核记录，不会直接改变申请状态。
+在 macOS、Linux 或 Windows 上，`automation install` 目前可以安装并检查 `deadline-review`。当前 alpha 版本会拒绝直接安装 `mail-sync`，因为自动生成的系统任务还没有安全、跨平台的凭据注入方式。API 客户端可以提交结构化的只读邮件批次，但要让邮箱健康检查通过，仍需单独连接并验证邮箱。含义明确的邮件先走固定规则。配置 Jev 后，模糊邮件优先交给 Jev；没有 Jev，或者 Jev 无法给出可用结果时，系统自动改用已配置的大语言模型。两者都无法可靠判断时，邮件进入人工复核。模型输出只生成待审核记录，不会直接改变申请状态。
 
 ## 邮箱集成
 
@@ -291,14 +285,12 @@ career-journal setup --home ~/job-search --material-rules /path/to/personal-resu
 
 ## 每日自动化
 
-`setup` 默认使用电脑当前检测到的时区，安排以下四个每日任务：20:00 运行 `mail-sync`，20:15 运行 `deadline-review`，22:00 运行 `daily-consolidation`，23:00 运行 `local-backup`。可以在执行 `setup` 时或之后通过 `automation configure` 修改时间。
+`setup` 默认使用电脑当前检测到的时区，只安排两个每日任务：20:00 运行 `mail-sync`，20:15 运行 `deadline-review`。可以在执行 `setup` 时或之后通过 `automation configure` 修改时间。`daily-consolidation` 只为旧版本升级保留；`backup create` 是可选的按需命令。新用户首次配置时不会创建这两项任务。
 
 CAREER JOURNAL 自己不会在后台等待时间并启动任务。Codex 自动化、操作系统调度器或 API 运行服务必须真正创建并执行每个任务。`register-external` 只负责记录一个已经创建、等待验证的外部任务；它不会替你创建任务，也不会让任务自动通过验证。不要使用随便填写的占位 ID。
 
 - `mail-sync`：在能够安全读取 IMAP 环境变量的运行环境中执行 `automation run --id career-journal-mail-sync --home <absolute-home> --external-id <registered-id>`
 - `deadline-review`：运行 `automation run --id career-journal-deadline-review --home <absolute-home> --external-id <registered-id>`
-- `daily-consolidation`：运行 `automation run --id career-journal-daily-consolidation --home <absolute-home> --external-id <registered-id>`
-- `local-backup`：运行 `automation run --id career-journal-local-backup --home <absolute-home> --external-id <registered-id>`
 
 每个任务分别记录自己的处理位置，只有处理器完整执行成功后才会更新。邮件只导入一部分或批次处理失败时，同步位置不会向前推进，下一次仍可安全重试。
 
@@ -312,18 +304,16 @@ CAREER JOURNAL 自己不会在后台等待时间并启动任务。Codex 自动�
 
 ### 本机调度器
 
-`automation install` 可以把任务安装到 macOS `launchd`、Linux 当前用户的 `crontab` 或 Windows Task Scheduler，并检查系统中实际保存的任务定义。当前版本支持直接安装 `deadline-review`、`daily-consolidation` 和 `local-backup`：
+`automation install` 可以把任务安装到 macOS `launchd`、Linux 当前用户的 `crontab` 或 Windows Task Scheduler，并检查系统中实际保存的任务定义。当前版本支持直接安装 `deadline-review`：
 
 ```sh
 node ./bin/career-journal.mjs automation install --home "$CAREER_JOURNAL_HOME" --task deadline-review
-node ./bin/career-journal.mjs automation install --home "$CAREER_JOURNAL_HOME" --task daily-consolidation
-node ./bin/career-journal.mjs automation install --home "$CAREER_JOURNAL_HOME" --task local-backup
 node ./bin/career-journal.mjs automation list --home "$CAREER_JOURNAL_HOME"
 ```
 
 第一次手动触发每个任务时，应使用 `automation list` 中已经验证的 `registration.externalId`。新任务在 macOS 中使用 `io.career-journal.<task>`，在 Linux 中使用 `career-journal-<task>`，在 Windows 中使用 `CareerJournal-<task>`。
 
-当前 alpha 版本会阻止操作系统直接安装 `mail-sync`，因为生成的任务定义还不能安全、跨平台地提供邮箱凭据。请改用 Codex 或其他可信的外部调度器，在不把密钥写入任务定义的前提下提供已配置的环境变量。由其他运行环境获取的邮箱数据仍需单独验证真实邮箱连接。四项任务都完成定义检查，并各自使用匹配的外部 ID 成功运行一次后，再执行 `doctor`。
+当前 alpha 版本会阻止操作系统直接安装 `mail-sync`，因为生成的任务定义还不能安全、跨平台地提供邮箱凭据。请改用 Codex 或其他可信的外部调度器，在不把密钥写入任务定义的前提下提供已配置的环境变量。由其他运行环境获取的邮箱数据仍需单独验证真实邮箱连接。两个必需任务都完成定义检查，并各自使用匹配的外部 ID 成功运行一次后，再执行 `doctor`。
 
 如果你手动注册了调度定义，应先删除操作系统中的注册，再删除本地定义文件：
 
@@ -342,7 +332,7 @@ schtasks /Delete /TN "CareerJournal-deadline-review" /F
 
 CAREER JOURNAL 的持久数据保存在用户选择的本地目录中。`.career-journal/` 包含配置、SQLite 数据库、不可变的申请材料副本、报告、备份和生成的调度文件。导出内容不会包含密钥引用；从邮件中识别出的登录或验证链接会先脱敏。临时邮件批次应放在私有目录中，并按用户自己的保留策略清理。项目不会自动提交求职申请、发送邮件或联系招聘方。
 
-`backup create` 会备份已经脱敏的配置、SQLite 数据库、清单和 `artifacts-index.json`。申请材料可能包含个人信息或其他敏感内容，所以默认备份只保留材料索引和哈希，不复制原文件；原件应保存在用户自己控制的安全位置。备份中还会清除邮箱验证结果、同步健康状态和调度登记证明，因此从备份恢复后，必须重新验证邮箱和四个自动任务。
+`backup create` 会备份已经脱敏的配置、SQLite 数据库、清单和 `artifacts-index.json`。申请材料可能包含个人信息或其他敏感内容，所以默认备份只保留材料索引和哈希，不复制原文件；原件应保存在用户自己控制的安全位置。备份中还会清除邮箱验证结果、同步健康状态和调度登记证明，因此从备份恢复后，必须重新验证邮箱和两个必需任务。
 
 ## 更新、迁移、备份与卸载
 
@@ -355,7 +345,7 @@ career-journal migrate --home ~/job-search --apply
 
 升级前先创建备份，再拉取明确的版本标签，运行 `career-journal update --check`，只执行命令实际列出的迁移。默认备份会保留材料索引和哈希，但不包含材料原文件。
 
-卸载时，先从 Codex 或操作系统中删除四个外部调度任务，再对生成的定义运行 `career-journal automation uninstall`。确认已经保留或导出所需数据后，才能删除克隆的仓库。只有确实希望清除全部本地申请记录和归档材料时，才删除数据目录。
+卸载时，先从 Codex 或操作系统中删除两个必需的外部调度任务，再对生成的定义运行 `career-journal automation uninstall`。确认已经保留或导出所需数据后，才能删除克隆的仓库。只有确实希望清除全部本地申请记录和归档材料时，才删除数据目录。
 
 ### 兼容 v0.1.0-alpha.5 及更早版本
 

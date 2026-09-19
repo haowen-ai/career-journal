@@ -126,7 +126,7 @@ test('host connector JSON remains self-attested and cannot make onboarding healt
     const clock = Date.now();
     const registeredAt = new Date(clock - 2 * 60 * 1000).toISOString();
     const fetchedAt = new Date(clock - 60 * 1000).toISOString();
-    for (const task of ['mail-sync', 'deadline-review', 'daily-consolidation', 'local-backup']) {
+    for (const task of ['mail-sync', 'deadline-review']) {
       markTaskRegistration(context.db, `career-journal-${task}`, {
         driver: 'codex', externalId: `external-${task}`, registeredAt,
       });

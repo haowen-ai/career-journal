@@ -40,6 +40,27 @@ test('README documents both modes and every lifecycle command', async () => {
   assert.match(readme, /without Jev[^\n]*(?:structured LLM|OpenAI-compatible)/i);
 });
 
+test('README offers two alternative agent-first onboarding entry points', async () => {
+  const [english, chinese, agentInstructions] = await Promise.all([
+    readFile('README.md', 'utf8'),
+    readFile('README.zh-CN.md', 'utf8'),
+    readFile('AGENTS.md', 'utf8'),
+  ]);
+  for (const readme of [english, chinese]) {
+    assert.match(readme, /https:\/\/github\.com\/haowenchen0811\/career-journal/);
+    assert.match(readme, /(?:give|send|share|提供|发送|交给)[^\n]*(?:GitHub|仓库|地址|链接)/i);
+    assert.match(readme, /(?:copy|paste|复制)[^\n]*(?:prompt|提示词)/i);
+    assert.match(readme, /TypeSafe[^\n]*(?:skill|Skill)/i);
+  }
+  assert.doesNotMatch(english, /four registered daily tasks/i);
+  assert.doesNotMatch(chinese, /4 个每日自动任务|四个每日任务/);
+  assert.match(agentInstructions, /\.agents\/skills\/career-journal\/SKILL\.md/);
+  assert.match(agentInstructions, /mail-sync[^\n]*20:00|20:00[^\n]*mail-sync/i);
+  assert.match(agentInstructions, /deadline-review[^\n]*20:15|20:15[^\n]*deadline-review/i);
+  assert.doesNotMatch(agentInstructions, /daily-consolidation[^\n]*22:00|22:00[^\n]*daily-consolidation/i);
+  assert.doesNotMatch(agentInstructions, /local-backup[^\n]*23:00|23:00[^\n]*local-backup/i);
+});
+
 test('English and Simplified Chinese READMEs cross-link and cover onboarding', async () => {
   const [english, chinese] = await Promise.all([
     readFile('README.md', 'utf8'),
@@ -108,7 +129,7 @@ test('public onboarding uses the friendly localhost dashboard URL', async () => 
   }
 });
 
-test('public onboarding requires a mailbox and verified daily scheduler registrations', async () => {
+test('public onboarding requires a mailbox and the two verified job-search schedules', async () => {
   const [english, chinese] = await Promise.all([
     readFile('README.md', 'utf8'),
     readFile('README.zh-CN.md', 'utf8'),
@@ -124,12 +145,14 @@ test('public onboarding requires a mailbox and verified daily scheduler registra
     assert.match(readme, /automation verify/);
     assert.match(readme, /automation run[^\n]*--external-id/);
     assert.match(readme, /codexCommandLine/);
-    for (const task of ['mail-sync', 'deadline-review', 'daily-consolidation', 'local-backup']) {
+    for (const task of ['mail-sync', 'deadline-review']) {
       assert.match(readme, new RegExp(task));
     }
-    for (const time of ['20:00', '20:15', '22:00', '23:00']) {
+    for (const time of ['20:00', '20:15']) {
       assert.match(readme, new RegExp(time.replace(':', '\\:')));
     }
+    assert.doesNotMatch(readme, /(?:daily-consolidation[^\n]*22:00|22:00[^\n]*daily-consolidation)/i);
+    assert.doesNotMatch(readme, /(?:local-backup[^\n]*23:00|23:00[^\n]*local-backup)/i);
   }
   assert.match(english, /manual EML[^\n]*(fallback|one-off)/i);
   assert.match(chinese, /手动(?:导入 )?EML[^\n]*(备用|临时|单次)/i);

@@ -19,7 +19,7 @@ test('publishes CAREER JOURNAL as the primary repository, package, CLI, and Skil
   await access('career-journal.cmd');
   assert.match(skill, /^---\nname: career-journal\n/m);
   for (const readme of [english, chinese]) {
-    assert.match(readme, /github\.com\/haowenchen0811\/career-journal\.git/);
+    assert.match(readme, /github\.com\/haowenchen0811\/career-journal(?:\.git)?/);
     assert.match(readme, /career-journal start/);
     assert.doesNotMatch(readme, /git clone [^\n]*job-search-ops/);
   }

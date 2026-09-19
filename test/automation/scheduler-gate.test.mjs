@@ -1006,8 +1006,6 @@ test('automation setup stays pending until every verified scheduler has one matc
     const schedule = {
       'mail-sync': '20:00',
       'deadline-review': '20:15',
-      'daily-consolidation': '22:00',
-      'local-backup': '23:00',
     };
     for (const [type, time] of Object.entries(schedule)) {
       const task = upsertTask(context, {
@@ -1025,6 +1023,9 @@ test('automation setup stays pending until every verified scheduler has one matc
         handler: async () => ({ changed: 0, cursor: task.cursor }),
       });
     }
+    upsertTask(context, {
+      type: 'local-backup', enabled: true, timezone: 'UTC', time: '23:00', notificationPolicy: 'failures',
+    });
     assert.equal(automationSetupState(listTasks(context)), 'registered');
   } finally {
     context.close();

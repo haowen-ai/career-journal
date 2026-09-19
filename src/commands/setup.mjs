@@ -10,8 +10,6 @@ import { upsertTask, listTasks, automationSetupState } from '../automation/regis
 const DAILY_AUTOMATIONS = Object.freeze({
   'mail-sync': { time: '20:00', notificationPolicy: 'actionable' },
   'deadline-review': { time: '20:15', notificationPolicy: 'actionable' },
-  'daily-consolidation': { time: '22:00', notificationPolicy: 'actionable' },
-  'local-backup': { time: '23:00', notificationPolicy: 'failures' },
 });
 
 function cleanBaseUrl(value) {
@@ -261,8 +259,6 @@ export async function setupCommand(parsed, io, runtime) {
     automationTimes: {
       ...(parsed.options['mail-sync-time'] ? { 'mail-sync': parsed.options['mail-sync-time'] } : {}),
       ...(parsed.options['deadline-review-time'] ? { 'deadline-review': parsed.options['deadline-review-time'] } : {}),
-      ...(parsed.options['daily-consolidation-time'] ? { 'daily-consolidation': parsed.options['daily-consolidation-time'] } : {}),
-      ...(parsed.options['local-backup-time'] ? { 'local-backup': parsed.options['local-backup-time'] } : {}),
     },
     careerOps: parsed.options['careerops-root'] !== undefined ? { root: parsed.options['careerops-root'] } : undefined,
     materialRules: parsed.options['material-rules'] !== undefined ? [parsed.options['material-rules']] : undefined,
@@ -300,7 +296,7 @@ export async function setupCommand(parsed, io, runtime) {
       : 'Next: connect a live verifier for the selected host mailbox; host batch JSON alone remains self-attested.');
   }
   if (result.config.automation.setupState !== 'registered') {
-    io.out('Next: create all four real schedules, register each returned ID, add the returned exact command to its scheduler job, run automation verify, trigger each verified job once, then run doctor.');
+    io.out('Next: create the mail-sync and deadline-review schedules, register each returned ID, add the returned exact command to its scheduler job, run automation verify, trigger each verified job once, then run doctor.');
   }
   return 0;
 }

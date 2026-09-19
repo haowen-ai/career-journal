@@ -59,9 +59,9 @@ test('career-journal skill has paired English and Simplified Chinese contracts',
     for (const contract of [
       /mail-sync[^\n]*20:00|20:00[^\n]*mail-sync/i,
       /deadline-review[^\n]*20:15|20:15[^\n]*deadline-review/i,
-      /daily-consolidation[^\n]*22:00|22:00[^\n]*daily-consolidation/i,
-      /local-backup[^\n]*23:00|23:00[^\n]*local-backup/i,
     ]) assert.match(text, contract);
+    assert.match(text, /(?:two|required|两个|两项)[^\n]*(?:mail-sync|任务)/i);
+    assert.match(text, /(?:backup|备份)[^\n]*(?:optional|on-demand|可选|按需)/i);
   }
 });
 
