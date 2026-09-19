@@ -6,6 +6,9 @@ import path from 'node:path';
 import { openDatabase, migrate } from '../../src/storage/database.mjs';
 import { configureEmailAccount } from '../../src/email/accounts.mjs';
 import { fingerprintMessage, importEml } from '../../src/email/eml.mjs';
+import { setup } from '../../src/commands/setup.mjs';
+import { openHomeDatabase } from '../../src/runtime/home.mjs';
+import { createApplication } from '../../src/commands/application.mjs';
 
 const baseMessage = {
   messageId: '<ABC@example.test>', from: 'recruiting@example.test', subject: 'Interview invitation',
@@ -41,3 +44,38 @@ test('deduplicates EML, redacts auth links, and creates a pending event without 
   } finally { db.close(); await rm(home, { recursive: true, force: true }); }
 });
 
+test('same Message-ID with changed content is a conflict and decision plus event stay atomic', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'jobops-eml-conflict-'));
+  try {
+    await setup(home, { timezone: 'UTC', email: { mode: 'skip' } });
+    const context = await openHomeDatabase(home);
+    configureEmailAccount(context.db, { provider: 'manual-eml', address: 'candidate@example.test' });
+    createApplication(context.db, { company: 'Acme', role: 'Analyst' });
+    const first = path.join(home, 'first.eml');
+    const changed = path.join(home, 'changed.eml');
+    await writeFile(first, 'Message-ID: <same@example.test>\nSubject: Interview invitation\n\nSchedule an interview');
+    await writeFile(changed, 'Message-ID: <same@example.test>\nSubject: Application update\n\nUnfortunately we are not moving forward');
+    await importEml(context.db, first, { accountId: 'manual-eml:candidate@example.test', applicationId: 'acme-analyst' });
+    await assert.rejects(() => importEml(context.db, changed, { accountId: 'manual-eml:candidate@example.test', applicationId: 'acme-analyst' }), /Email identity conflict/);
+    assert.equal(context.db.prepare('SELECT COUNT(*) count FROM decision_traces').get().count, 1);
+    assert.equal(context.db.prepare('SELECT COUNT(*) count FROM application_events').get().count, 1);
+    context.db.close();
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test('ambiguous email uses the configured decision router and persists its engine', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'jobops-eml-router-'));
+  try {
+    await setup(home, { timezone: 'UTC', email: { mode: 'skip' } });
+    const context = await openHomeDatabase(home);
+    configureEmailAccount(context.db, { provider: 'manual-eml', address: 'candidate@example.test' });
+    const file = path.join(home, 'ambiguous.eml');
+    await writeFile(file, 'Message-ID: <router@example.test>\nSubject: Update\n\nThere is an update');
+    const result = await importEml(context.db, file, { accountId: 'manual-eml:candidate@example.test' }, {
+      structuredLlm: async () => ({ classification: 'assessment', confidence: 0.9 }),
+    });
+    assert.equal(result.classification, 'assessment');
+    assert.equal(context.db.prepare('SELECT engine FROM decision_traces').get().engine, 'structured-llm');
+    context.db.close();
+  } finally { await rm(home, { recursive: true, force: true }); }
+});

@@ -22,6 +22,8 @@ node ./bin/jobops.mjs doctor --home "$HOME/job-search"
 node ./bin/jobops.mjs start --home "$HOME/job-search"
 ```
 
+Use `node ./bin/jobops.mjs ...` or the included `./jobops ...` launcher from the clone. To install the bare `jobops` command globally, run `npm link` with a Node.js installation that includes npm.
+
 The commands below are executed by the documentation test against a new temporary home:
 
 <!-- quickstart-smoke:start -->
@@ -29,6 +31,7 @@ The commands below are executed by the documentation test against a new temporar
 $REPO/bin/jobops.mjs setup --home $JOBOPS_HOME --timezone UTC --skip-email
 $REPO/bin/jobops.mjs doctor --home $JOBOPS_HOME
 $REPO/bin/jobops.mjs application add --home $JOBOPS_HOME --company ExampleCorp --role DataScientist
+$REPO/bin/jobops.mjs event add --home $JOBOPS_HOME --id examplecorp-datascientist --event-id example-submit --type application_submitted --title Submitted --status-after applied
 $REPO/bin/jobops.mjs application list --home $JOBOPS_HOME --json
 $REPO/bin/jobops.mjs automation configure --home $JOBOPS_HOME --task daily-consolidation --time 22:00 --enabled
 ```
@@ -87,7 +90,20 @@ jobops automation run --home ~/job-search --task deadline-review --dry-run
 jobops automation install --home ~/job-search --task deadline-review
 ```
 
-`install` writes a platform-specific scheduler definition under `.jobops/schedulers/`. Review it, then load it with `launchctl` on macOS, `crontab` on Linux, or `schtasks` on Windows. Each task keeps its own cursor, advances it only after success, and stays quiet when nothing actionable changed.
+`install` prepares a platform-specific scheduler definition under `.jobops/schedulers/`; it does not register it with the operating system. Review it, then load it with `launchctl` on macOS, `crontab` on Linux, or `schtasks` on Windows. Each task keeps its own cursor, advances it only after success, and stays quiet when nothing actionable changed. In this alpha, `local-backup` has an executable handler; tasks whose adapters are unavailable fail visibly and do not record a successful run.
+
+If you manually registered a definition, remove the OS registration before deleting its file:
+
+```sh
+# macOS: use the exact plist path you loaded
+launchctl bootout "gui/$(id -u)" "/path/to/io.job-search-ops.deadline-review.plist"
+# Linux: remove the exact jobops-deadline-review line from the current crontab
+crontab -l | grep -v 'jobops-deadline-review' | crontab -
+# Windows
+schtasks /Delete /TN "JobSearchOps-deadline-review" /F
+```
+
+Then run `jobops automation uninstall --home ~/job-search --task deadline-review` to remove the prepared definition. Its result deliberately distinguishes definition removal from OS scheduler removal.
 
 ## Data and Privacy
 

@@ -34,7 +34,7 @@ function normalizedEvent(input) {
   };
 }
 
-export function recordEvent(db, input) {
+export function recordEvent(db, input, { withinTransaction = false } = {}) {
   const event = normalizedEvent(input);
   const contentHash = createHash('sha256').update(JSON.stringify(event)).digest('hex');
   const existing = db.prepare('SELECT content_hash FROM application_events WHERE id = ?').get(event.id);
@@ -45,7 +45,7 @@ export function recordEvent(db, input) {
   const application = db.prepare('SELECT status FROM applications WHERE id = ?').get(event.applicationId);
   if (!application) throw new Error(`Unknown application: ${event.applicationId}`);
   if (event.statusAfter) assertStatusTransition(application.status, event.statusAfter);
-  db.exec('BEGIN IMMEDIATE');
+  if (!withinTransaction) db.exec('BEGIN IMMEDIATE');
   try {
     db.prepare(`INSERT INTO application_events
       (id, application_id, event_type, occurred_at, observed_at, recorded_at, title, note, source_json, status_after, content_hash)
@@ -53,11 +53,10 @@ export function recordEvent(db, input) {
       .run(event.id, event.applicationId, event.type, event.occurredAt, event.observedAt, event.recordedAt, event.title, event.note, JSON.stringify(event.source), event.statusAfter, contentHash);
     if (event.statusAfter) db.prepare('UPDATE applications SET status = ?, stage = ?, updated_at = ? WHERE id = ?')
       .run(event.statusAfter, event.title, event.recordedAt, event.applicationId);
-    db.exec('COMMIT');
+    if (!withinTransaction) db.exec('COMMIT');
   } catch (error) {
-    db.exec('ROLLBACK');
+    if (!withinTransaction) db.exec('ROLLBACK');
     throw error;
   }
   return { created: true, eventId: event.id };
 }
-

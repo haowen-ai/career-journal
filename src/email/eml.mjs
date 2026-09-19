@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fingerprintMessage } from './dedupe.mjs';
 import { recordEvent } from '../domain/events.mjs';
+import { decide } from '../decision/router.mjs';
+import { classifyEmailWithRules } from '../decision/rules.mjs';
 
 function parseHeaders(raw) {
   const unfolded = raw.replace(/\r?\n[ \t]+/g, ' ');
@@ -30,45 +32,62 @@ export function parseEml(text) {
 }
 
 export function classifyEmail(message) {
-  const text = `${message.subject}\n${message.body}`.toLowerCase();
-  if (/offer|congratulations.*position|pleased to offer/.test(text)) return 'offer';
-  if (/interview|schedule.*time|video cover letter/.test(text)) return 'interview';
-  if (/assessment|coding challenge|complete.*test/.test(text)) return 'assessment';
-  if (/not moving forward|other candidates|unfortunately|regret to inform/.test(text)) return 'rejection';
-  if (/application (has been )?received|thank you for applying|application submitted/.test(text)) return 'application_confirmation';
-  if (/newsletter|job alert|recommended jobs|talent community/.test(text)) return 'marketing';
-  return 'unknown';
+  return classifyEmailWithRules(`${message.subject}\n${message.body}`).classification;
 }
 
 export { fingerprintMessage };
 
-export async function importEml(db, file, options) {
+function messageContentHash(message) {
+  return createHash('sha256').update(JSON.stringify({
+    from: message.from,
+    to: message.to,
+    subject: message.subject,
+    sentAt: message.sentAt,
+    body: message.body,
+  })).digest('hex');
+}
+
+export async function importEml(db, file, options, adapters = {}) {
   const account = db.prepare('SELECT id FROM email_accounts WHERE id = ?').get(options.accountId);
   if (!account) throw new Error(`Unknown email account: ${options.accountId}`);
   const message = parseEml(await readFile(file, 'utf8'));
   const fingerprint = fingerprintMessage(message);
+  const contentHash = messageContentHash(message);
   const traceId = `email-${createHash('sha256').update(`${options.accountId}\0${fingerprint}`).digest('hex').slice(0, 32)}`;
-  if (db.prepare('SELECT 1 FROM decision_traces WHERE id = ?').get(traceId)) return { created: false, fingerprint };
-  const classification = classifyEmail(message);
-  const decision = { classification, fingerprint, subject: message.subject, from: message.from };
-  db.prepare(`INSERT INTO decision_traces
-    (id, application_id, engine, mode, decision_json, confidence, applied, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, 0, ?)`)
-    .run(traceId, options.applicationId ?? null, 'rules', 'email-ingest', JSON.stringify(decision), null, options.recordedAt ?? new Date().toISOString());
-  if (options.applicationId) {
-    recordEvent(db, {
-      id: traceId,
-      applicationId: options.applicationId,
-      type: 'email_candidate',
-      occurredAt: null,
-      observedAt: message.sentAt ?? options.recordedAt ?? new Date().toISOString(),
-      recordedAt: options.recordedAt ?? new Date().toISOString(),
-      title: `Email candidate: ${classification}`,
-      note: `${classification.replaceAll('_', ' ')} email detected; pending review before application status changes.`,
-      source: { kind: 'email', accountId: options.accountId, messageId: message.messageId, from: message.from, subject: message.subject },
-      statusAfter: null,
-    });
+  const existing = db.prepare('SELECT decision_json decisionJson FROM decision_traces WHERE id = ?').get(traceId);
+  if (existing) {
+    const prior = JSON.parse(existing.decisionJson);
+    if (prior.contentHash && prior.contentHash !== contentHash) throw new Error(`Email identity conflict: ${fingerprint}`);
+    return { created: false, fingerprint };
   }
-  return { created: true, classification, fingerprint, traceId };
+  const routed = await decide({ kind: 'email-classification', text: `${message.subject}\n${message.body}` }, adapters);
+  const classification = routed.decision.classification;
+  const decision = { ...routed.decision, fingerprint, contentHash, subject: message.subject, from: message.from, ...(routed.shadow ? { shadow: routed.shadow } : {}) };
+  const recordedAt = options.recordedAt ?? new Date().toISOString();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare(`INSERT INTO decision_traces
+      (id, application_id, engine, mode, decision_json, confidence, applied, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(traceId, options.applicationId ?? null, routed.engine, 'email-ingest', JSON.stringify(decision), routed.decision.confidence ?? null, routed.applied ? 1 : 0, recordedAt);
+    if (options.applicationId) {
+      recordEvent(db, {
+        id: traceId,
+        applicationId: options.applicationId,
+        type: 'email_candidate',
+        occurredAt: null,
+        observedAt: message.sentAt ?? recordedAt,
+        recordedAt,
+        title: `Email candidate: ${classification}`,
+        note: `${classification.replaceAll('_', ' ')} email detected; pending review before application status changes.`,
+        source: { kind: 'email', accountId: options.accountId, messageId: message.messageId, from: message.from, subject: message.subject },
+        statusAfter: null,
+      }, { withinTransaction: true });
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  return { created: true, classification, fingerprint, traceId, engine: routed.engine };
 }
-

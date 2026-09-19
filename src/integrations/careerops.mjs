@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
@@ -62,18 +62,24 @@ function executeProcess({ command, args, cwd, stdin, timeoutMs }) {
 function validateRequest(request) {
   if (!ACTIONS.has(request?.action)) throw new Error(`Unsupported CareerOps action: ${request?.action ?? 'missing'}`);
   if (!request.applicationId || typeof request.applicationId !== 'string') throw new Error('CareerOps request requires applicationId');
-  if (request.action === 'prepare' && !MATERIAL_KINDS.has(request.materialKind)) throw new Error('CareerOps prepare requires resume or cover-letter materialKind');
+  if (!MATERIAL_KINDS.has(request.materialKind)) throw new Error('CareerOps material request requires resume or cover-letter materialKind');
   const structured = { ...request, lifecycle: 'draft' };
   const serialized = JSON.stringify(structured);
   if (Buffer.byteLength(serialized) > MAX_REQUEST_BYTES) throw new Error('CareerOps structured request is too large');
   return { structured, serialized };
 }
 
-function validateResult(result) {
+async function validateResult(result, request) {
   if (!result || result.ok !== true) throw new Error('CareerOps did not report a successful result');
+  if (result.applicationId !== request.applicationId) throw new Error('CareerOps result application association does not match the request');
   if (result.lifecycle !== 'draft') throw new Error('CareerOps material output must use the draft lifecycle');
   if (typeof result.outputPath !== 'string' || !result.outputPath) throw new Error('CareerOps result is missing outputPath');
   if (!['passed', 'failed', 'pending'].includes(result.verification)) throw new Error('CareerOps result has an invalid verification state');
+  try {
+    if (!(await stat(result.outputPath)).isFile()) throw new Error('not a file');
+  } catch {
+    throw new Error(`CareerOps output does not exist: ${result.outputPath}`);
+  }
   return result;
 }
 
@@ -96,5 +102,5 @@ export async function runCareerOps(request, config = {}, dependencies = {}) {
   let result;
   try { result = JSON.parse(String(execution.stdout ?? '')); }
   catch { throw new Error('CareerOps returned invalid JSON'); }
-  return validateResult(result);
+  return validateResult(result, structured);
 }

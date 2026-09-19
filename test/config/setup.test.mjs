@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { setup } from '../../src/commands/setup.mjs';
 import { loadConfig } from '../../src/config/store.mjs';
+import { setupCommand } from '../../src/commands/setup.mjs';
+import { memoryIO } from '../../test-utils/helpers.mjs';
 
 async function withHome(run) {
   const home = await mkdtemp(path.join(os.tmpdir(), 'jobops-setup-'));
@@ -45,3 +47,8 @@ test('rejects an invalid timezone', async () => withHome(async (home) => {
   await assert.rejects(() => setup(home, { timezone: 'Moon/Base' }), /Invalid IANA timezone/);
 }));
 
+test('CLI setup without timezone preserves an existing timezone', async () => withHome(async (home) => {
+  await setup(home, { timezone: 'Asia/Tokyo', email: { mode: 'skip' } });
+  await setupCommand({ options: { home, 'careerops-root': '/tmp/career-ops' } }, memoryIO());
+  assert.equal((await loadConfig(home)).timezone, 'Asia/Tokyo');
+}));

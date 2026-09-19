@@ -39,6 +39,15 @@ All notable changes are documented here. This project follows Semantic Versionin
 ### Fixed
 
 - Upgrade dogfood resolves the target revision before checking out the older source revision, so `HEAD` cannot drift to the old commit
+- Failed or locked migrations no longer replace live SQLite files, preventing concurrent-write data loss
+- Cross-origin, invalid-Host, and non-JSON local API mutations are rejected
+- Automation runs no longer report success for unavailable handlers; local backup performs real work
+- Email identity collisions detect changed content and decision/event writes are atomic
+- Event command retries preserve ingestion timestamps and the documented aliases now work
+- Repeated setup preserves the existing timezone unless a new timezone is supplied
+- Doctor distinguishes configured and usable model, email, Jev, storage, and CareerOps capabilities
+- Backups preserve safe environment-variable references while excluding secret values
+- CareerOps material output must exist, match the application, and is archived with its verification state
 
 ### Security
 

@@ -10,12 +10,33 @@ const assets = new Map([
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
 ]);
 
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
+
+function requestHost(value) {
+  if (!value) return null;
+  try { return new URL(`http://${value}`).hostname; } catch { return null; }
+}
+
+function allowedOrigin(value) {
+  if (!value) return true;
+  try { return LOOPBACK_HOSTS.has(new URL(value).hostname); } catch { return false; }
+}
+
 export function createServer({ db, config, webRoot }) {
   const resolvedWebRoot = path.resolve(webRoot);
   return http.createServer(async (request, response) => {
     try {
+      if (!LOOPBACK_HOSTS.has(requestHost(request.headers.host)) || !allowedOrigin(request.headers.origin)) {
+        sendJson(response, 403, { error: 'Loopback Host and Origin required' });
+        return;
+      }
       const url = new URL(request.url, 'http://127.0.0.1');
       if (url.pathname.startsWith('/api/')) {
+        if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)
+          && !String(request.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
+          sendJson(response, 415, { error: 'Mutating API requests require application/json' });
+          return;
+        }
         if (!await handleApi(request, response, url, { db, config })) sendJson(response, 404, { error: 'Not found' });
         return;
       }
@@ -34,4 +55,3 @@ export function createServer({ db, config, webRoot }) {
     }
   });
 }
-

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import { setup } from '../../src/commands/setup.mjs';
 import { openHomeDatabase } from '../../src/runtime/home.mjs';
 import { createServer } from '../../src/server/app.mjs';
@@ -43,3 +44,21 @@ test('rejects invalid JSON and oversized request bodies', async () => withServer
   assert.equal(oversized.status, 413);
 }));
 
+test('rejects cross-origin, invalid-host, and non-JSON mutation requests', async () => withServer(async (baseUrl) => {
+  const body = JSON.stringify({ company: 'Cross Origin', role: 'Attacker' });
+  const crossOrigin = await fetch(`${baseUrl}/api/applications`, {
+    method: 'POST', headers: { origin: 'https://untrusted.example', 'content-type': 'text/plain' }, body,
+  });
+  assert.equal(crossOrigin.status, 403);
+  const target = new URL(`${baseUrl}/api/applications`);
+  const wrongHostStatus = await new Promise((resolve, reject) => {
+    const request = http.request({ hostname: target.hostname, port: target.port, path: target.pathname, method: 'POST', headers: { host: 'untrusted.example', 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } }, (response) => {
+      response.resume(); response.once('end', () => resolve(response.statusCode));
+    });
+    request.once('error', reject); request.end(body);
+  });
+  assert.equal(wrongHostStatus, 403);
+  const nonJson = await fetch(`${baseUrl}/api/applications`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body });
+  assert.equal(nonJson.status, 415);
+  assert.equal((await (await fetch(`${baseUrl}/api/applications`)).json()).length, 0);
+}));

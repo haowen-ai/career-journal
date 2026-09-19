@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { setup } from '../../src/commands/setup.mjs';
@@ -17,7 +17,7 @@ async function walk(directory) {
   return output;
 }
 
-test('backup contains data and artifacts but no secret references or scheduler files', async () => {
+test('backup contains data and artifacts, preserves safe references, and excludes secret values and scheduler files', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'jobops-backup-'));
   const home = path.join(root, 'home');
   const output = path.join(root, 'backup');
@@ -31,9 +31,38 @@ test('backup contains data and artifacts but no secret references or scheduler f
     assert.equal(result.manifest.schemaVersion, 1);
     const files = await walk(output);
     const content = (await Promise.all(files.filter((file) => !file.endsWith('.db')).map((file) => readFile(file, 'utf8')))).join('\n');
-    assert.equal(content.includes('VERY_SECRET_KEY'), false);
+    assert.equal(content.includes('env:VERY_SECRET_KEY'), true);
     assert.equal(content.includes('real-secret-value'), false);
     assert.equal(files.some((file) => file.endsWith('jobops.db')), true);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('backup preserves provider references, applications, artifacts, and automation IDs', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'jobops-backup-roundtrip-'));
+  const home = path.join(root, 'home');
+  const output = path.join(root, 'backup');
+  try {
+    const configured = await setup(home, { timezone: 'UTC', email: { mode: 'skip' }, model: { provider: 'openai-compatible', baseUrl: 'https://example.test/v1', secretRef: 'env:MODEL_KEY' }, jev: { accessState: 'enabled' } });
+    configured.config.jev.secretRef = 'env:JEV_KEY';
+    const { saveConfig } = await import('../../src/config/store.mjs');
+    await saveConfig(home, configured.config);
+    const context = await openHomeDatabase(home);
+    createApplication(context.db, { company: 'Example', role: 'Engineer' });
+    const artifactDir = path.join(home, '.jobops', 'artifacts', 'example-engineer');
+    await mkdir(artifactDir, { recursive: true });
+    await writeFile(path.join(artifactDir, 'resume.txt'), 'artifact');
+    context.db.prepare("INSERT INTO automations (id, task_type, enabled, timezone, schedule, notification_policy, config_json) VALUES ('jobops-local-backup','local-backup',1,'UTC','23:00','actionable','{}')").run();
+    context.db.close();
+    await createBackup(home, output);
+    const backupConfig = JSON.parse(await readFile(path.join(output, 'config.json'), 'utf8'));
+    assert.equal(backupConfig.model.secretRef, 'env:MODEL_KEY');
+    assert.equal(backupConfig.jev.secretRef, 'env:JEV_KEY');
+    const { openDatabase } = await import('../../src/storage/database.mjs');
+    const backupDb = openDatabase(path.join(output, 'jobops.db'));
+    assert.equal(backupDb.prepare('SELECT company FROM applications').get().company, 'Example');
+    assert.equal(backupDb.prepare('SELECT id FROM automations').get().id, 'jobops-local-backup');
+    backupDb.close();
+    assert.equal(await readFile(path.join(output, 'artifacts', 'example-engineer', 'resume.txt'), 'utf8'), 'artifact');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

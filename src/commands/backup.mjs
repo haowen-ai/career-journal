@@ -14,7 +14,11 @@ function sanitize(value) {
   if (!value || typeof value !== 'object') return value;
   const output = {};
   for (const [key, item] of Object.entries(value)) {
-    if (/secret|password|token|api.?key/i.test(key)) continue;
+    if (/secretRef$/i.test(key)) {
+      if (item == null || /^env:[A-Za-z_][A-Za-z0-9_]*$/.test(String(item))) output[key] = item;
+      continue;
+    }
+    if (/^(?:secret|password|token|api.?key)$/i.test(key)) continue;
     output[key] = sanitize(item);
   }
   return output;
@@ -39,6 +43,7 @@ export async function createBackup(home, output, options = {}) {
   const destination = path.resolve(output);
   if (await exists(destination)) throw new Error(`Backup destination already exists: ${destination}`);
   const config = await loadConfig(root);
+  await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
   await mkdir(destination, { recursive: false, mode: 0o700 });
   try {
     await writeFile(path.join(destination, 'config.json'), `${JSON.stringify(sanitize(config), null, 2)}\n`, { mode: 0o600 });

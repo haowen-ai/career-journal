@@ -57,12 +57,21 @@ export async function setup(home, answers = {}) {
 }
 
 export async function setupCommand(parsed, io, runtime) {
+  const home = parsed.options.home ?? process.cwd();
+  let timezone = parsed.options.timezone;
+  if (timezone === undefined) {
+    try { await loadConfig(home); }
+    catch (error) {
+      if (!/not configured/.test(error.message)) throw error;
+      timezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC';
+    }
+  }
   const answers = {
-    timezone: parsed.options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC',
+    timezone,
     email: parsed.options['skip-email'] ? { mode: 'skip' } : undefined,
     careerOps: parsed.options['careerops-root'] !== undefined ? { root: parsed.options['careerops-root'] } : undefined,
   };
-  const result = await setup(parsed.options.home ?? process.cwd(), answers);
+  const result = await setup(home, answers);
   io.out(result.created ? 'Configuration created.' : 'Configuration updated.');
   io.out(`Timezone: ${result.config.timezone}`);
   io.out(`Email: ${result.config.email.setupState}`);

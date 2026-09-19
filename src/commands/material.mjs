@@ -16,7 +16,19 @@ export async function materialCommand(parsed, io) {
         pinnedVersion: configured.pinnedVersion ?? '1.32.0',
         entrypoint: configured.entrypoint,
       });
-      io.out(JSON.stringify(result, null, 2));
+      const artifact = await archiveArtifact(context.db, {
+        applicationId: request.applicationId,
+        kind: request.materialKind,
+        lifecycle: 'draft',
+        submittedConfirmed: false,
+        filePath: result.outputPath,
+        storageRoot: context.artifactRoot,
+        verification: result.verification,
+        metadata: { source: 'careerops', action: parsed.subcommand, verificationEvidence: result.verificationEvidence ?? null },
+      });
+      context.db.prepare('UPDATE artifacts SET verification = ?, metadata_json = ? WHERE id = ?')
+        .run(result.verification, JSON.stringify({ source: 'careerops', action: parsed.subcommand, verificationEvidence: result.verificationEvidence ?? null }), artifact.id);
+      io.out(JSON.stringify({ ...result, artifact: { ...artifact, verification: result.verification } }, null, 2));
       return 0;
     }
     if (parsed.subcommand === 'mark-submitted') {

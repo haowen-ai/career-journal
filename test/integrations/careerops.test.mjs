@@ -39,12 +39,14 @@ test('constructs a bounded structured draft request and validates the result', a
   await writeFile(path.join(directory, 'package.json'), JSON.stringify({ name: 'career-ops', version: '1.32.0' }));
   await writeFile(path.join(directory, 'jobops-adapter.mjs'), '');
   let invocation;
+  const outputPath = path.join(directory, 'resume.pdf');
+  await writeFile(outputPath, '%PDF fixture');
   const result = await runCareerOps({
     action: 'prepare', applicationId: 'app-1', materialKind: 'resume', jdPath: '/tmp/jd.txt', evidencePath: '/tmp/profile.md',
   }, { root: directory, pinnedVersion: '1.32.0' }, {
     execute: async (value) => {
       invocation = value;
-      return { exitCode: 0, stdout: JSON.stringify({ ok: true, lifecycle: 'draft', outputPath: '/tmp/resume.pdf', verification: 'passed' }), stderr: '' };
+      return { exitCode: 0, stdout: JSON.stringify({ ok: true, applicationId: 'app-1', lifecycle: 'draft', outputPath, verification: 'passed' }), stderr: '' };
     },
   });
   assert.deepEqual(invocation.args, [path.join(directory, 'jobops-adapter.mjs'), 'material', 'prepare']);
@@ -61,9 +63,25 @@ test('does not fabricate success or accept a submitted lifecycle from the adapte
   await assert.rejects(() => runCareerOps({ action: 'prepare', applicationId: 'app-1', materialKind: 'resume' }, config, {
     execute: async () => ({ exitCode: 1, stdout: '', stderr: 'fact gate failed' }),
   }), /fact gate failed/);
+  const outputPath = path.join(directory, 'resume.pdf');
+  await writeFile(outputPath, '%PDF fixture');
   await assert.rejects(() => runCareerOps({ action: 'prepare', applicationId: 'app-1', materialKind: 'resume' }, config, {
-    execute: async () => ({ exitCode: 0, stdout: JSON.stringify({ ok: true, lifecycle: 'submitted', outputPath: '/tmp/resume.pdf', verification: 'passed' }), stderr: '' }),
+    execute: async () => ({ exitCode: 0, stdout: JSON.stringify({ ok: true, applicationId: 'app-1', lifecycle: 'submitted', outputPath, verification: 'passed' }), stderr: '' }),
   }), /draft lifecycle/);
+}));
+
+test('rejects missing output files and wrong application associations', async () => withDirectory(async (directory) => {
+  await writeFile(path.join(directory, 'package.json'), JSON.stringify({ name: 'career-ops', version: '1.32.0' }));
+  await writeFile(path.join(directory, 'jobops-adapter.mjs'), '');
+  const config = { root: directory, pinnedVersion: '1.32.0' };
+  await assert.rejects(() => runCareerOps({ action: 'prepare', applicationId: 'app-1', materialKind: 'resume' }, config, {
+    execute: async () => ({ exitCode: 0, stdout: JSON.stringify({ ok: true, applicationId: 'app-1', lifecycle: 'draft', outputPath: path.join(directory, 'missing.pdf'), verification: 'passed' }), stderr: '' }),
+  }), /does not exist/);
+  const outputPath = path.join(directory, 'resume.pdf');
+  await writeFile(outputPath, '%PDF fixture');
+  await assert.rejects(() => runCareerOps({ action: 'prepare', applicationId: 'app-1', materialKind: 'resume' }, config, {
+    execute: async () => ({ exitCode: 0, stdout: JSON.stringify({ ok: true, applicationId: 'other', lifecycle: 'draft', outputPath, verification: 'passed' }), stderr: '' }),
+  }), /application association/);
 }));
 
 test('rejects unsupported actions and oversized structured requests', async () => withDirectory(async (directory) => {

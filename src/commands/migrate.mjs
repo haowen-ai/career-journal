@@ -1,30 +1,10 @@
-import { randomUUID } from 'node:crypto';
-import { access, copyFile, mkdir, rm } from 'node:fs/promises';
+import { access, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { loadConfig } from '../config/store.mjs';
 import { migrate, openDatabase, schemaMigrations } from '../storage/database.mjs';
 
 async function exists(file) {
   try { await access(file); return true; } catch { return false; }
-}
-
-async function snapshotFiles(database, prefix) {
-  const copied = [];
-  for (const suffix of ['', '-wal', '-shm']) {
-    const source = `${database}${suffix}`;
-    if (await exists(source)) {
-      const destination = `${prefix}${suffix || '-db'}`;
-      await copyFile(source, destination);
-      copied.push({ source, destination });
-    }
-  }
-  return copied;
-}
-
-async function restoreFiles(database, snapshot, existed) {
-  for (const suffix of ['', '-wal', '-shm']) await rm(`${database}${suffix}`, { force: true });
-  if (!existed) return;
-  for (const item of snapshot) await copyFile(item.destination, item.source);
 }
 
 export async function migrateHome(home, options = {}) {
@@ -42,21 +22,17 @@ export async function migrateHome(home, options = {}) {
   }
 
   await mkdir(path.dirname(database), { recursive: true, mode: 0o700 });
-  const rollbackPrefix = path.join(path.dirname(database), `.migration-${randomUUID()}`);
-  const snapshot = await snapshotFiles(database, rollbackPrefix);
   let db;
   try {
     db = openDatabase(database);
+    if (options.busyTimeoutMs !== undefined) db.exec(`PRAGMA busy_timeout = ${Math.max(0, Number(options.busyTimeoutMs) || 0)}`);
     const result = migrate(db, { migrations: candidates });
     db.close();
     db = null;
     return { database, ...result, dryRun: false };
   } catch (error) {
     try { db?.close(); } catch {}
-    await restoreFiles(database, snapshot, existed);
     throw error;
-  } finally {
-    for (const item of snapshot) await rm(item.destination, { force: true });
   }
 }
 

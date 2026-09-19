@@ -44,6 +44,18 @@ test('event replay is a no-op and a conflicting event fails', async () => fixtur
   assert.match(conflict.stderr, /Event id conflict/);
 }));
 
+test('event command retries with generated timestamps and accepts documented aliases', async () => fixture(async (home) => {
+  const runtime = createRuntime({ root: process.cwd(), version: '0.1.0-alpha.1' });
+  const add = memoryIO();
+  await runCli(['application', 'add', '--home', home, '--company', 'Acme', '--role', 'Engineer'], add, runtime);
+  const id = JSON.parse(add.stdout).id;
+  const args = ['event', 'add', '--home', home, '--id', id, '--event-id', 'evt-generated', '--type', 'application_submitted', '--title', 'Application submitted', '--status-after', 'applied'];
+  assert.equal(await runCli(args, memoryIO(), runtime), 0);
+  const replay = memoryIO();
+  assert.equal(await runCli(args, replay, runtime), 0, replay.stderr);
+  assert.equal(JSON.parse(replay.stdout).created, false);
+}));
+
 test('submitted artifacts require the submitted flag', async () => fixture(async (home) => {
   const runtime = createRuntime({ root: process.cwd(), version: '0.1.0-alpha.1' });
   const add = memoryIO();

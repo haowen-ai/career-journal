@@ -2,6 +2,19 @@ import { openHomeDatabase } from '../runtime/home.mjs';
 import { configureEmailAccount, listEmailAccounts, disconnectEmailAccount } from '../email/accounts.mjs';
 import { importEml } from '../email/eml.mjs';
 import { saveConfig } from '../config/store.mjs';
+import { createProvider } from '../providers/interface.mjs';
+import { createJevAdapter } from '../decision/jev.mjs';
+import { classifyWithStructuredLlm } from '../decision/structured-llm.mjs';
+
+export function configuredDecisionAdapters(config, fetchImpl = globalThis.fetch, env = process.env) {
+  const adapters = {};
+  if (config.model?.provider && config.model.provider !== 'none') {
+    const provider = createProvider(config.model, fetchImpl, env);
+    adapters.structuredLlm = (input) => classifyWithStructuredLlm(provider, input.text);
+  }
+  if (config.jev?.accessState) adapters.jev = createJevAdapter(config.jev, fetchImpl, env);
+  return adapters;
+}
 
 export async function emailCommand(parsed, io) {
   const context = await openHomeDatabase(parsed.options.home ?? process.cwd());
@@ -28,7 +41,7 @@ export async function emailCommand(parsed, io) {
         accountId: parsed.options.account,
         applicationId: parsed.options.id ?? null,
         recordedAt: parsed.options['recorded-at'] ?? new Date().toISOString(),
-      });
+      }, configuredDecisionAdapters(context.config));
       io.out(JSON.stringify(result, null, 2));
       return 0;
     }
@@ -43,4 +56,3 @@ export async function emailCommand(parsed, io) {
     throw new Error('Usage: jobops email configure|list|import-eml|disconnect');
   } finally { context.db.close(); }
 }
-
