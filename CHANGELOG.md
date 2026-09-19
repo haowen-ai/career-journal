@@ -22,6 +22,27 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.13] - 2026-09-19
+
+### Added
+
+- Added an optional post-setup history-import interview for existing applications
+- Added bounded sources for history review: read-only mailbox evidence, files, spreadsheets, or a guided interview
+
+### Changed
+
+- Kept the public one-sentence README setup request unchanged while moving the history-import behavior into repository instructions and the CAREER JOURNAL Skill
+- Required Agents to present deduplicated candidate records for confirmation before writing them
+
+### Fixed
+
+- Prevented onboarding Agents from silently skipping the question about existing application history
+- Kept unknown application dates, statuses, rejection reasons, and submitted-material identities empty instead of inferring them
+
+### Security
+
+- Historical mailbox review remains read-only, user-bounded, and optional
+
 ## [0.1.0-alpha.12] - 2026-09-19
 
 ### Added

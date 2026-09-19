@@ -52,6 +52,39 @@ test('README is a concise product landing page with one Agent setup sentence', a
   assert.match(agentInstructions, /\.agents\/skills\/career-journal\/SKILL\.md/);
 });
 
+test('the repository-driven first run offers a review-before-write history import without changing the README prompt', async () => {
+  const [englishReadme, chineseReadme, agentInstructions, englishSkill, chineseSkill, englishGuide, chineseGuide] = await Promise.all([
+    readFile('README.md', 'utf8'),
+    readFile('README.zh-CN.md', 'utf8'),
+    readFile('AGENTS.md', 'utf8'),
+    readFile('.agents/skills/career-journal/SKILL.md', 'utf8'),
+    readFile('.agents/skills/career-journal/SKILL.zh-CN.md', 'utf8'),
+    readFile('docs/getting-started.md', 'utf8'),
+    readFile('docs/getting-started.zh-CN.md', 'utf8'),
+  ]);
+
+  assert.match(englishReadme, /Set up CAREER JOURNAL from https:\/\/github\.com\/haowenchen0811\/career-journal by reading AGENTS\.md and completing onboarding automatically\./);
+  assert.match(chineseReadme, /请从 https:\/\/github\.com\/haowenchen0811\/career-journal 安装并配置 CAREER JOURNAL，读取 AGENTS\.md 后自动完成首次配置。/);
+
+  for (const document of [agentInstructions, englishSkill, englishGuide]) {
+    assert.match(document, /asks? (?:the user )?whether (?:they want to|to) import (?:their )?(?:existing|historical|past) applications/i);
+    assert.match(document, /read-only mailbox|file|spreadsheet|interview/i);
+    assert.match(document, /candidate records/i);
+    assert.match(document, /confirm[^\n]*before[^\n]*(?:writ|commit|record)/i);
+    assert.match(document, /do(?:es)? not infer[^\n]*(?:date|status|submitted material)/i);
+    assert.match(document, /skip/i);
+  }
+
+  for (const document of [chineseSkill, chineseGuide]) {
+    assert.match(document, /询问用户是否(?:需要|希望)导入历史投递/);
+    assert.match(document, /只读邮箱|文件|表格|问答/);
+    assert.match(document, /候选记录/);
+    assert.match(document, /确认后再写入/);
+    assert.match(document, /不得推测[^\n]*(?:日期|状态|实际提交材料)/);
+    assert.match(document, /跳过/);
+  }
+});
+
 test('English and Chinese landing pages use matching-language product previews', async () => {
   const [english, chinese] = await Promise.all([
     readFile('README.md', 'utf8'),

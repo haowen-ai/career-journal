@@ -3,7 +3,7 @@
 [English](2026-09-19-job-search-ops-prd-design.en.md) | [简体中文](2026-09-19-job-search-ops-prd-design.md)
 
 **Status:** Review Draft
-**Version:** 0.16
+**Version:** 0.17
 **Date:** 2026-09-19
 **Product:** CAREER JOURNAL
 **Delivery:** Open-source GitHub project with an Agent-managed edition and a provider-neutral LLM API edition
@@ -209,6 +209,8 @@ Manual EML is a one-message fallback only. Mailbox integrations are read-only: t
 ### 9.4 README onboarding contract
 
 The README leads with one setup sentence that points an Agent at the GitHub repository. Codex, Claude Code, Cursor, or another repository-aware coding Agent then clones or opens the repository, reads root `AGENTS.md` and the repository Skill, installs or reads the official TypeSafe Skill using one supported method, asks only for unavoidable account information or authorization, completes setup, creates and verifies the two required schedules, runs them once, and finishes with `doctor`. The Agent performs the commands; the user is not turned into the installer.
+
+After technical setup passes, the Agent asks whether the user wants to import existing applications. History import is optional and may use a user-bounded read-only mailbox review, an existing file or spreadsheet, or a guided interview. The Agent presents deduplicated candidate records for confirmation before it writes them. Missing dates, statuses, rejection reasons, and submitted-artifact identities remain unknown rather than being inferred, and the user may skip the step.
 
 The README must let a new user install without author explanation. Copyable instructions cover requirements, clone and dependency commands, Codex versus API choice, setup, profile import or blank start, provider configuration, live read-only mailbox verification and first sync, creation and probing of both required jobs in the detected time zone, one run per job, `doctor`, dashboard start, first application, update, uninstall, backup, and local-data removal.
 

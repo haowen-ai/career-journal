@@ -18,7 +18,11 @@ Paste this one sentence into Codex, Claude Code, Cursor, or another repository-a
 Set up CAREER JOURNAL from https://github.com/haowenchen0811/career-journal by reading AGENTS.md and completing onboarding automatically.
 ```
 
-The Agent clones or opens the repository, reads [`AGENTS.md`](../AGENTS.md) and the repository Skill, detects the computer's IANA time zone, configures the selected read-only mailbox and decision provider, creates the two required schedules, verifies them, runs them once, and finishes with `doctor`. The user only handles an unavoidable login, authorization, or account choice. Passwords and API keys stay in environment variables or a secret store.
+The Agent clones or opens the repository, reads [`AGENTS.md`](../AGENTS.md) and the repository Skill, detects the computer's IANA time zone, configures the selected read-only mailbox and decision provider, creates the two required schedules, verifies them, runs them once, and finishes with `doctor`. It then asks the user whether they want to import existing applications. The user only handles an unavoidable login, authorization, account choice, or confirmation of proposed history records. Passwords and API keys stay in environment variables or a secret store.
+
+### Optional history import
+
+After technical onboarding passes, the Agent asks the user whether they want to import existing applications. The user may choose a bounded read-only mailbox review, a file or spreadsheet, a short guided interview, or skip the step. The Agent prepares candidate records and asks the user to confirm them before writing. It does not infer missing dates, statuses, rejection reasons, or submitted materials, and it does not treat an old draft as the file actually submitted.
 
 ## CLI and API-host setup
 
@@ -104,7 +108,7 @@ $REPO/bin/career-journal.mjs application list --home $CAREER_JOURNAL_HOME --json
 
 ### Agent-managed onboarding
 
-Give the repository URL and one-line setup request to Codex, Claude Code, Cursor, or another repository-aware coding Agent. The Agent clones or opens the repository, discovers the repo-local `career-journal` Skill, asks only for information it cannot infer safely, configures live IMAPS, creates the two required ACTIVE scheduled jobs in the detected computer time zone, and binds every returned scheduler ID to its exact run command. It then reads the actual scheduler definitions, triggers each verified job once, and finishes only after `doctor` passes. The host must inject the named IMAP environment variable into the mail job without copying its value into the prompt. Host mailbox connectors may still supply read-only batches, but connector-authored JSON is not independent account proof. Resume and cover-letter work routes through the separate `careerops-materials` Skill.
+Give the repository URL and one-line setup request to Codex, Claude Code, Cursor, or another repository-aware coding Agent. The Agent clones or opens the repository, discovers the repo-local `career-journal` Skill, asks only for information it cannot infer safely, configures live IMAPS, creates the two required ACTIVE scheduled jobs in the detected computer time zone, and binds every returned scheduler ID to its exact run command. It then reads the actual scheduler definitions, triggers each verified job once, and finishes technical setup only after `doctor` passes. Next it offers the optional review-before-write history import described above. The host must inject the named IMAP environment variable into the mail job without copying its value into the prompt. Host mailbox connectors may still supply read-only batches, but connector-authored JSON is not independent account proof. Resume and cover-letter work routes through the separate `careerops-materials` Skill.
 
 ### Local API and semantic decisions
 

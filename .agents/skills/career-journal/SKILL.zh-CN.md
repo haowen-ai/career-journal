@@ -15,6 +15,7 @@
 7. 对每个任务运行 `node ./bin/career-journal.mjs automation verify --home <absolute-home> --task <task>`。验证必须读取实际保存的调度定义，并核对 ACTIVE 状态、计划、时区、可执行文件、CLI、任务 ID、数据目录和外部 ID。注册声明、生成文件、截图、占位 ID 或相似命令都不算验证。
 8. 使用准确的 `codexCommandLine` 分别触发两个已验证任务。首次 IMAPS 同步可以没有相关新邮件。直接同步会刷新邮箱验证，且只有在本地证据全部提交后才推进 UID 游标。
 9. 运行 `node ./bin/career-journal.mjs doctor --home <absolute-home>`；只有邮箱和自动化都通过才结束配置。邮箱 PASS 要求过去 36 小时内有实时 IMAPS 验证和一次成功的只读同步。自动化 PASS 要求两个必需任务都有一次实时调度器探测，以及同一窗口内一次与外部 ID 匹配的成功运行。
+10. 技术配置通过后，询问用户是否需要导入历史投递。用户可以选择限定范围的只读邮箱检查、文件或表格导入、简短问答，也可以跳过。先整理候选记录，得到用户确认后再写入；存在外部申请编号时优先按编号去重，否则按公司和岗位去重。不得推测缺失的投递日期、状态、拒绝原因或实际提交材料，未知字段保持为空，也不能把旧的简历草稿当成实际提交版本。
 
 对于 API 或仅 CLI 的宿主，`automation install` 可以通过 launchd、cron 或 Windows Task Scheduler 安装并探测 `deadline-review`。当前 alpha 有意阻止原生安装 `mail-sync`，因为生成的定义没有安全的跨平台 secret provider。应使用能够注入被引用环境变量的可信外部调度器，再通过相同门禁进行注册、验证和运行。本地备份是可选的按需操作，只在用户要求时运行 `backup create`，不属于每日必需任务。
 

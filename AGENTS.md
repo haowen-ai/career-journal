@@ -12,5 +12,6 @@ When a user gives you this repository URL or asks you to set up CAREER JOURNAL, 
 5. Create two required ACTIVE daily jobs through the host's real automation capability: `mail-sync` at 20:00 and `deadline-review` at 20:15 in the detected time zone. In Codex, use `automation_update`; do not hand-write scheduler files
 6. Register each real external automation ID, place the returned `codexCommandLine` verbatim in that same job, verify the saved scheduler definition, and trigger each verified job once
 7. Run `career-journal doctor`. Report onboarding complete only when the live mailbox and both required automations pass
+8. After the technical setup passes, ask the user whether they want to import existing applications. They may use a bounded read-only mailbox review, a file or spreadsheet, or a short guided interview, and they may skip this step. Prepare candidate records first, ask the user to confirm them before writing, and do not infer missing dates, statuses, rejection reasons, or submitted materials
 
 `daily-consolidation` is not part of CAREER JOURNAL onboarding. Backups are optional and run only when the user asks for one. Preserve legacy tasks during upgrades, but do not create either task for a new installation.

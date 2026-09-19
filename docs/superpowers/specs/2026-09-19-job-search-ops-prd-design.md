@@ -3,7 +3,7 @@
 [English](2026-09-19-job-search-ops-prd-design.en.md) | [简体中文](2026-09-19-job-search-ops-prd-design.md)
 
 **状态：** Review Draft  
-**版本：** 0.16
+**版本：** 0.17
 **日期：** 2026-09-19  
 **产品名称：** CAREER JOURNAL
 **交付形态：** 开源 GitHub 项目，提供 Agent 托管版本和通用 LLM API 版本
@@ -391,6 +391,8 @@ career-journal automation uninstall --task deadline-review
 ### 9.4 README onboarding 契约
 
 README 首页必须以一句话安装指令开头。用户把这句话交给 Codex、Claude Code、Cursor 或其他能够读取仓库的编程 Agent 后，由 Agent 自动克隆或打开仓库、读取根目录 `AGENTS.md` 和仓库 Skill、选择一种方式安装或读取 TypeSafe 官方 Skill、只询问无法代替完成的账号信息或授权、完成 setup、创建并验证两个必需任务、分别运行一次，再执行 `doctor`。命令由 Agent 执行，不能把用户变成安装人员。
+
+技术配置通过后，Agent 必须询问用户是否需要导入历史投递。历史导入是可选步骤，来源可以是用户限定范围的只读邮箱、已有文件或表格，以及引导式问答。Agent 必须先整理和去重候选记录，得到用户确认后再写入。不得推测缺失的投递日期、状态、拒绝原因或实际提交材料；用户可以直接跳过。
 
 ## 10. 核心用户流程
 
