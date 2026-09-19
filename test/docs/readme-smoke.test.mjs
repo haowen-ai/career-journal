@@ -128,6 +128,32 @@ test('Agent onboarding discovers and selects one or more host mailboxes without 
   assert.match(agentInstructions, /do not ask whether Jev is available/i);
 });
 
+test('macOS mailbox discovery enumerates the full Apple Mail account inventory', async () => {
+  const [agentInstructions, englishSkill, chineseSkill, englishGuide, chineseGuide] = await Promise.all([
+    readFile('AGENTS.md', 'utf8'),
+    readFile('.agents/skills/career-journal/SKILL.md', 'utf8'),
+    readFile('.agents/skills/career-journal/SKILL.zh-CN.md', 'utf8'),
+    readFile('docs/getting-started.md', 'utf8'),
+    readFile('docs/getting-started.zh-CN.md', 'utf8'),
+  ]);
+  for (const document of [agentInstructions, englishSkill, englishGuide]) {
+    assert.match(document, /All Inboxes/i);
+    assert.match(document, /main (?:Mail )?window/i);
+    assert.match(document, /every top-level account|complete account inventory/i);
+    assert.match(document, /selected message[^\n]*not[^\n]*(?:account inventory|all accounts)/i);
+    assert.match(document, /Mail Settings[^\n]*Accounts/i);
+    assert.match(document, /count[^\n]*(?:disagree|mismatch)[^\n]*(?:do not|must not)[^\n]*(?:complete|finished)/i);
+  }
+  for (const document of [chineseSkill, chineseGuide]) {
+    assert.match(document, /All Inboxes/i);
+    assert.match(document, /Mail 主窗口|邮件主窗口/);
+    assert.match(document, /全部顶层账号|完整账号清单/);
+    assert.match(document, /当前选中邮件[^\n]*不能[^\n]*(?:完整账号|全部账号)/);
+    assert.match(document, /Mail 设置[^\n]*账户/);
+    assert.match(document, /数量[^\n]*(?:不一致|不匹配)[^\n]*不得[^\n]*(?:完成|完整)/);
+  }
+});
+
 test('English and Chinese landing pages use matching-language product previews', async () => {
   const [english, chinese] = await Promise.all([
     readFile('README.md', 'utf8'),

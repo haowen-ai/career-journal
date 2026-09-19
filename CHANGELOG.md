@@ -22,6 +22,25 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.16] - 2026-09-19
+
+### Added
+
+- Added an Apple Mail inventory procedure that opens the main window, expands `All Inboxes`, enumerates every top-level account, and cross-checks Mail Settings > Accounts
+- Added regression coverage that prevents a selected message's mailbox from being treated as the complete account inventory
+
+### Changed
+
+- Agent onboarding must show the complete discovered account list before asking which one or more accounts are used for job search
+
+### Fixed
+
+- Fixed Apple Mail discovery that could report only the account associated with the currently selected message
+
+### Security
+
+- Account-settings inspection is read-only and must not modify Mail configuration
+
 ## [0.1.0-alpha.15] - 2026-09-19
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "@haowenchen0811/career-journal",
-  "version": "0.1.0-alpha.15",
+  "version": "0.1.0-alpha.16",
   "description": "CAREER JOURNAL: a local-first, evidence-driven application tracker",
   "type": "module",
   "private": false,
