@@ -1,6 +1,6 @@
 {
   "name": "job-search-ops",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0-alpha.3",
   "description": "Local-first, evidence-driven job search operations",
   "type": "module",
   "private": false,

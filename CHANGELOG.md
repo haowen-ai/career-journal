@@ -8,7 +8,7 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Added
 
-- Published bilingual dogfood evidence for the `v0.1.0-alpha.2` public tag
+- None
 
 ### Changed
 
@@ -21,6 +21,27 @@ All notable changes are documented here. This project follows Semantic Versionin
 ### Security
 
 - None
+
+## [0.1.0-alpha.3] - 2026-09-19
+
+### Added
+
+- Added an interface preview with synthetic application data and accessible SVG metadata
+- Added product, core-workflow, and intended-user sections in English and Simplified Chinese
+- Added a release gate that enforces product-first README order and the presence of the interface preview
+- Published bilingual dogfood evidence for the `v0.1.0-alpha.2` public tag
+
+### Changed
+
+- Reorganized both README home pages so visitors understand the product and see its interface before installation instructions
+
+### Fixed
+
+- Replaced the install-first landing experience with a product-oriented project introduction
+
+### Security
+
+- The public interface preview contains only synthetic companies, roles, dates, and statuses
 
 ## [0.1.0-alpha.2] - 2026-09-19
 
@@ -80,6 +101,7 @@ All notable changes are documented here. This project follows Semantic Versionin
 - Credentials are referenced through environment variables and excluded from exports
 - Submitted artifacts require explicit confirmation
 
-[Unreleased]: https://github.com/haowenchen0811/job-search-ops/compare/v0.1.0-alpha.2...HEAD
+[Unreleased]: https://github.com/haowenchen0811/job-search-ops/compare/v0.1.0-alpha.3...HEAD
+[0.1.0-alpha.3]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.1

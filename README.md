@@ -6,13 +6,64 @@ Job Search Ops is a local-first, evidence-driven application tracker for people 
 
 This is an alpha release. Core tracking is usable without an email account, model key, CareerOps, or Jev access.
 
-## Requirements
+## What it does
+
+- **Tracks every application:** company, role, current stage, dates, next actions, and a time-stamped event history
+- **Separates facts from assumptions:** recruiting messages become review candidates before they can change an application status
+- **Preserves the material lifecycle:** generated, verified, and actually submitted files remain distinct
+- **Supports application materials:** combines CareerOps with built-in U.S. resume rules and optional personal rules
+- **Runs locally:** stores records in SQLite and serves a loopback-only dashboard and JSON API
+- **Prepares daily routines:** generates portable tasks for mail review, deadlines, consolidation, and backups in the computer's own time zone
+
+## Product preview
+
+![Job Search Ops dashboard showing example applications](docs/assets/dashboard-preview.svg)
+
+*Synthetic example data. The dashboard runs locally on `127.0.0.1` and can be searched or filtered by application status.*
+
+## Core workflows
+
+### Track applications and decisions
+
+Create a role, add evidence-backed events, record deadlines, and see the current stage without overwriting its history. Manual updates remain available even when no email or AI provider is configured.
+
+### Review recruiting evidence
+
+Read-only email evidence is attached to the relevant application and reviewed before it changes a status. Marketing mail is not treated as recruiting progress, and a received timestamp is not silently reused as an application date.
+
+### Create and verify application materials
+
+The CareerOps bridge can prepare a role-specific resume or cover letter. Job Search Ops records whether a file is a draft, passed its rules, or was confirmed as the exact submitted artifact.
+
+### Run daily checks
+
+Portable automation definitions support mail review, deadline review, daily consolidation, and local backups. Each task has its own cursor, advances only after success, and stays quiet when nothing actionable changed.
+
+```mermaid
+flowchart LR
+    A[Job description] --> C[CareerOps material workflow]
+    B[Candidate evidence and resume rules] --> C
+    C --> D[Verified draft]
+    D -->|User confirms upload| E[Submitted artifact]
+    F[Read-only email or manual update] --> G[Review candidate]
+    G -->|Evidence accepted| H[Application timeline]
+```
+
+## Who it is for
+
+- **Codex users** who want a repository-aware Skill to configure and operate the workspace
+- **API and CLI users** who want deterministic local workflows with an optional OpenAI-compatible model
+- **Job seekers** who want application records, materials, and evidence together without handing their database to a hosted service
+
+## Install
+
+### Requirements
 
 - Node.js 24 or newer
 - Git for installation and updates
 - Optional capabilities only when you use their workflows
 
-## Quick Start
+### Quick Start
 
 Clone and initialize a private local data directory:
 

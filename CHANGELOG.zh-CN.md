@@ -8,7 +8,7 @@
 
 ### 新增
 
-- 发布 `v0.1.0-alpha.2` 公开标签的中英文 dogfood 验证记录
+- 无
 
 ### 变更
 
@@ -21,6 +21,27 @@
 ### 安全
 
 - 无
+
+## [0.1.0-alpha.3] - 2026-09-19
+
+### 新增
+
+- 增加使用虚构申请数据的界面预览，并为 SVG 提供无障碍标题和说明
+- 在中英文 README 中增加产品能力、核心工作流和适用人群章节
+- 增加发布门禁，强制 README 保持产品优先顺序并包含界面预览
+- 发布 `v0.1.0-alpha.2` 公开标签的中英文 dogfood 验证记录
+
+### 变更
+
+- 重组中英文 README 首页，让访客在安装说明前先理解产品并看到实际界面
+
+### 修复
+
+- 将安装优先的首页改为产品展示型项目介绍
+
+### 安全
+
+- 公开界面图只包含虚构公司、岗位、日期和状态
 
 ## [0.1.0-alpha.2] - 2026-09-19
 
@@ -80,6 +101,7 @@
 - 凭据通过环境变量引用，不会进入导出文件
 - 标记已提交材料时需要用户明确确认
 
-[尚未发布]: https://github.com/haowenchen0811/job-search-ops/compare/v0.1.0-alpha.2...HEAD
+[尚未发布]: https://github.com/haowenchen0811/job-search-ops/compare/v0.1.0-alpha.3...HEAD
+[0.1.0-alpha.3]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.1

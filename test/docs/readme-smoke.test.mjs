@@ -63,3 +63,19 @@ test('onboarding uses the computer timezone and documents built-in and personal 
   assert.match(english, /--material-rules/);
   assert.match(chinese, /--material-rules/);
 });
+
+test('README leads with the product, interface, and workflows before installation', async () => {
+  const [english, chinese] = await Promise.all([
+    readFile('README.md', 'utf8'),
+    readFile('README.zh-CN.md', 'utf8'),
+  ]);
+  for (const [readme, product, preview, install] of [
+    [english, '## What it does', '## Product preview', '## Install'],
+    [chinese, '## 它能做什么', '## 产品界面', '## 安装'],
+  ]) {
+    assert.ok(readme.indexOf(product) > 0, `missing ${product}`);
+    assert.ok(readme.indexOf(preview) > readme.indexOf(product), `${preview} must follow the product explanation`);
+    assert.ok(readme.indexOf(install) > readme.indexOf(preview), `${install} must follow the interface preview`);
+    assert.match(readme, /!\[[^\]]+\]\(docs\/assets\/dashboard-preview\.svg\)/);
+  }
+});

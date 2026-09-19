@@ -48,9 +48,10 @@ export async function checkRelease(root) {
   check('changelog', /### Added/.test(changelog) && /### Changed/.test(changelog) && /### Fixed/.test(changelog) && /### Security/.test(changelog), 'required changelog sections');
 
   try {
-    const [englishReadme, chineseReadme, chineseNotices, chineseBridge, englishResumeRules, chineseResumeRules, chineseChangelog, bugTemplate, dogfoodTemplate, pullRequestTemplate] = await Promise.all([
+    const [englishReadme, chineseReadme, dashboardPreview, chineseNotices, chineseBridge, englishResumeRules, chineseResumeRules, chineseChangelog, bugTemplate, dogfoodTemplate, pullRequestTemplate] = await Promise.all([
       read('README.md'),
       read('README.zh-CN.md'),
+      read('docs/assets/dashboard-preview.svg'),
       read('THIRD_PARTY_NOTICES.zh-CN.md'),
       read('docs/integrations/careerops-bridge.zh-CN.md'),
       read('config/material-rules/us-resume-default.md'),
@@ -62,7 +63,7 @@ export async function checkRelease(root) {
     ]);
     const bilingual = /\[简体中文\]\(README\.zh-CN\.md\)/.test(englishReadme)
       && /\[English\]\(README\.md\)/.test(chineseReadme)
-      && /## 快速开始/.test(chineseReadme)
+      && /### 快速开始/.test(chineseReadme)
       && /## 每日自动化/.test(chineseReadme)
       && /## 数据与隐私/.test(chineseReadme)
       && /career-ops-hq\/career-ops/.test(chineseNotices)
@@ -74,6 +75,18 @@ export async function checkRelease(root) {
       && /全新克隆/.test(dogfoodTemplate)
       && /问题与最终行为/.test(pullRequestTemplate);
     check('bilingual-docs', bilingual, 'English and Simplified Chinese onboarding, changelog, notices, integration docs, resume rules, and contribution templates');
+    const productReadme = englishReadme.indexOf('## What it does') > 0
+      && englishReadme.indexOf('## Product preview') > englishReadme.indexOf('## What it does')
+      && englishReadme.indexOf('## Install') > englishReadme.indexOf('## Product preview')
+      && chineseReadme.indexOf('## 它能做什么') > 0
+      && chineseReadme.indexOf('## 产品界面') > chineseReadme.indexOf('## 它能做什么')
+      && chineseReadme.indexOf('## 安装') > chineseReadme.indexOf('## 产品界面')
+      && /docs\/assets\/dashboard-preview\.svg/.test(englishReadme)
+      && /docs\/assets\/dashboard-preview\.svg/.test(chineseReadme)
+      && /<svg\b/.test(dashboardPreview)
+      && /<title\b[^>]*>[^<]+<\/title>/.test(dashboardPreview)
+      && /<desc\b[^>]*>[^<]+<\/desc>/.test(dashboardPreview);
+    check('product-readme', productReadme, 'product explanation, interface preview, workflows, and installation order in both languages');
   } catch (error) { check('bilingual-docs', false, error.message); }
 
   const files = await candidateFiles(root);
