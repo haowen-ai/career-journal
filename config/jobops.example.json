@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "timezone": "UTC",
+  "email": {
+    "setupState": "not-configured",
+    "accounts": []
+  },
+  "model": {
+    "provider": "none",
+    "baseUrl": null,
+    "model": null,
+    "secretRef": null
+  },
+  "jev": {
+    "accessState": "unavailable",
+    "model": "jev-latest",
+    "secretRef": null,
+    "mode": "off"
+  }
+}
+
