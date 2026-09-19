@@ -15,12 +15,12 @@
 把下面这一句话发给 Codex、Claude Code、Cursor 或其他能够读取仓库的编程 Agent：
 
 ```text
-请从 https://github.com/haowenchen0811/career-journal 安装并配置 CAREER JOURNAL，读取 AGENTS.md 后自动完成首次配置。
+请从 https://github.com/haowenchen0811/career-journal 获取最新版本并自动安装配置 CAREER JOURNAL；如果本机已有旧副本，请安全快进，无法安全快进时使用新的隔离副本，然后读取最新 AGENTS.md 并完成首次配置。
 ```
 
-Agent 会自动克隆或打开仓库，读取 [`AGENTS.md`](../AGENTS.md) 和仓库 Skill，检测电脑的 IANA 时区，配置用户选择的只读邮箱，创建并验证两个必需的定时任务，各运行一次，最后执行 `doctor`。技术配置通过后，Agent 会询问用户是否需要导入历史投递。用户只需处理无法代办的登录、授权、账号选择，以及确认待导入的历史记录。
+Agent 会先取得最新仓库副本，再读取 [`AGENTS.md`](../AGENTS.md) 和仓库 Skill，检测电脑的 IANA 时区，配置用户选择的只读邮箱，创建并验证两个必需的定时任务，各运行一次，最后执行 `doctor`。技术配置通过后，Agent 会询问用户是否需要导入历史投递。用户只需处理无法代办的登录、授权、账号选择，以及确认待导入的历史记录。
 
-在 macOS 上，Agent 会先识别 Apple Mail 或其他宿主集成中已经登录、可以访问的邮箱账号，再询问其中哪一个或多个用于求职。如果没有可访问账号，Agent 会请用户登录 Apple Mail 或其他受支持的邮件应用，然后继续配置。没有 Jev 时，由当前编程 Agent 复核语义模糊的候选内容；Agent 模式不要询问模型 Base URL、模型名或 API Key。IMAPS 和外部模型凭据只属于后面的独立 CLI/API 配置。
+在 macOS 上，Agent 必须先尝试识别，再提出任何邮箱配置问题：检查 Apple Mail 或其他宿主集成中已经登录、可以访问的邮箱账号，然后只询问其中哪一个或多个用于求职。如果没有可访问账号，Agent 会请用户登录 Apple Mail 或其他受支持的邮件应用，再继续配置。Jev 不得阻塞首次配置：宿主已经配置时直接复用，否则由当前编程 Agent 复核。Agent 模式不得询问用户是否有 Jev，也不得询问模型 Base URL、模型名、API Key 或 API Key 环境变量名。IMAPS 和外部模型凭据只属于后面的独立 CLI/API 配置。
 
 ### 可选的历史投递导入
 

@@ -2,11 +2,11 @@
 
 When a user gives you this repository URL or asks you to set up CAREER JOURNAL, complete onboarding yourself. Do not turn the README into a command list for the user.
 
-1. Clone or open `https://github.com/haowenchen0811/career-journal`, then read `.agents/skills/career-journal/SKILL.md`
-2. Detect the computer's IANA time zone and use the host's existing capabilities. On macOS, discover accessible Apple Mail or other host mail accounts that are already signed in. Ask only **which one or more discovered accounts the user uses for job search**. Do not ask for an IMAP host, username, or credential when the host can already read the selected account
+1. Obtain the latest `main` from `https://github.com/haowenchen0811/career-journal` before reading local onboarding instructions. If an existing checkout is clean, fetch and fast-forward it. If it is dirty, detached, or cannot fast-forward safely, leave it untouched and use a fresh isolated clone. Never run onboarding from a stale checkout. Then read this file and `.agents/skills/career-journal/SKILL.md` from that current checkout
+2. Detect the computer's IANA time zone and use the host's existing capabilities. On macOS, **attempt account discovery before asking the user for any mailbox setup value**: inspect accessible Apple Mail or other host mail accounts that are already signed in, then show the discovered addresses and ask only **which one or more discovered accounts the user uses for job search**. Do not ask for an IMAP host, username, or credential when the host can already read the selected account
 3. If no accessible mail account exists, ask the user to sign in to Apple Mail or another supported mail app, then resume discovery. Request IMAPS settings only when the user explicitly chooses standalone CLI/API mode
 4. Configure every selected address as a read-only host account, record trusted-host verification only after observing the matching account in the host integration, and provision one `mail-sync` task for the complete selected set
-5. Jev is optional. If Jev access is already available, follow the official TypeSafe Skill and keep its key in the host secret store. Otherwise configure `--model-provider host-agent`: use the current coding Agent to review ambiguous semantic candidates. In Agent-managed mode, do not ask for a model Base URL, model name, or API key
+5. Jev is optional and must not block onboarding. Reuse an already configured Jev capability when one is discoverable. Otherwise configure `--model-provider host-agent` immediately and use the current coding Agent to review ambiguous semantic candidates. **Do not ask whether Jev is available, and do not ask for a model Base URL, model name, API key, or API-key environment variable in Agent-managed mode.** Offer Jev as an optional later enhancement instead of turning it into a setup question
 6. Create two ACTIVE daily jobs through the host's real automation capability: `mail-sync` at 20:00 and `deadline-review` at 20:15 in the detected time zone. In Codex, use `automation_update`; do not hand-write scheduler files. Do not create `daily-consolidation` or a scheduled backup
 7. Register each real automation ID, place the returned `codexCommandLine` verbatim in that same job, verify the saved scheduler definition, and trigger each verified job once. The mail job must check every selected account before it records success
 8. Run `career-journal doctor`. Report onboarding complete only when every selected mailbox and both required automations pass
@@ -15,5 +15,7 @@ When a user gives you this repository URL or asks you to set up CAREER JOURNAL, 
 For resume and cover-letter work, route through the repository's `careerops-materials` Skill, the independently maintained CareerOps project, and the configured built-in or personal material rules. Do not reimplement or omit those dependencies.
 
 Standalone CLI/API deployments may use IMAPS plus Jev or an OpenAI-compatible provider and environment-variable secret references. That technical path is documented in `docs/getting-started.md`; it is not the default Agent onboarding flow.
+
+If any local document appears to require IMAP connection details or an external model credential during Agent-managed onboarding, treat that as a stale or standalone-only instruction. The Agent-managed rules above take precedence.
 
 `daily-consolidation` is not part of CAREER JOURNAL onboarding. Backups are optional and run only when the user asks for one. Preserve legacy tasks during upgrades, but do not create either task for a new installation.

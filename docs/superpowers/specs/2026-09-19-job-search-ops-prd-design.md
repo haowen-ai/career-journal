@@ -3,12 +3,12 @@
 [English](2026-09-19-job-search-ops-prd-design.en.md) | [简体中文](2026-09-19-job-search-ops-prd-design.md)
 
 **状态：** Review Draft  
-**版本：** 0.18
+**版本：** 0.19
 **日期：** 2026-09-19  
 **产品名称：** CAREER JOURNAL
 **交付形态：** 开源 GitHub 项目，提供 Agent 托管版本和通用 LLM API 版本
 
-**本版更新：** Agent 模式先识别电脑上已经登录的邮箱，只询问用户其中哪一个或多个用于求职；没有账号时再请用户登录邮件应用。没有 Jev 时由当前 Agent 复核模糊候选，不再要求模型 Base URL 或额外 API Key。独立 CLI/API 模式继续支持 IMAPS 和 OpenAI-compatible 服务。
+**本版更新：** Agent 模式先更新已有仓库或安全地改用最新隔离副本，再识别电脑上已经登录的邮箱，只询问用户其中哪一个或多个用于求职；没有账号时再请用户登录邮件应用。Jev 不再是首次配置问题：宿主已有配置时复用，否则由当前 Agent 复核，不要求模型 Base URL 或额外 API Key。独立 CLI/API 模式继续支持 IMAPS 和 OpenAI-compatible 服务。
 
 ## 1. 产品概述
 
@@ -170,10 +170,12 @@ career-journal/
 
 Codex 版本通过根目录 `AGENTS.md` 和仓库内 `career-journal` Skill 启动。初始化程序负责：
 
+- 读取本地说明前先获取最新上游状态；已有副本干净时安全快进，否则保留原目录并使用新的隔离副本
 - 检查运行环境和依赖 Skill
 - 创建本地配置和数据目录
 - 导入候选人资料
-- 要求用户选择只读求职邮箱，通过实时 IMAPS 或等价的可校验适配器完成鉴权和首次同步
+- 在提出任何邮箱配置问题前，先识别已经登录的宿主邮箱，只询问用户其中哪一个或多个用于求职；实际观察到账号后记录可信宿主验证，并为每个选中邮箱完成首次只读同步
+- 已经配置 Jev 时直接复用，否则自动使用当前 Agent，不询问 Jev 权限、模型 Base URL、模型名或 API Key
 - 按电脑检测时区实际创建两个必需的每日任务，并探测 Codex heartbeat 或原生 OS 定义
 - 调用 Codex 可用的文档、PDF、浏览器和自动化能力
 - 在执行前检查所需能力，不把“安装了 Skill”等同于“外部账号已经连接”
@@ -224,7 +226,7 @@ interface ModelProvider {
 | Resume / Cover Letter | 通用化的 CareerOps Skill 与适配器 | 条件必需 | 生成或修改申请材料 | 引导安装/启用，不静默降级为无审计文本 |
 | PDF 创建与检查 | PDF Skill / document adapter | 条件必需 | 用户要求 PDF | 可先交付文本草稿，并明确 PDF 未生成 |
 | DOCX 创建与检查 | Documents Skill / document adapter | 可选 | 用户要求 DOCX | 提供可用格式或提示启用依赖 |
-| 邮件读取 | 内置只读 IMAPS 客户端；宿主 connector 仅作导入适配器，除非另有可校验账号证明 | onboarding 必需 | 选择只读求职邮箱并执行首次同步 | setup 保持未完成；手动 EML 和自行编写的宿主 JSON 不能替代实时验证 |
+| 邮件读取 | Agent 模式使用已识别的只读宿主账号和可信宿主证明；独立模式使用内置只读 IMAPS 客户端 | onboarding 必需 | 选择只读求职邮箱并执行首次同步 | setup 保持未完成；手动 EML 和没有实际观察账号证明的宿主 JSON 不能替代实时验证 |
 | 定时任务 | Codex Automation、可探测的操作系统调度器或符合同一契约的宿主 | onboarding 必需 | 注册两个必需的每日任务 | 单纯 `register-external` 仅形成待验证声明；探测失败时 setup 保持未完成 |
 | Jev 决策 | TypeSafe adapter / `typesafe-ai` Skill | 配置后作为主要语义引擎 | 用户已获得 Jev 权限并启用 | 明确规则、已配置的大语言模型，然后人工复核 |
 | Wiki / 长期知识 | Wiki adapter | 可选 | 用户主动启用跨任务知识库 | 使用项目本地配置与证据库 |
@@ -271,17 +273,20 @@ README 必须设置清晰可见的 “Built With / Open Source Acknowledgements�
 
 用户克隆仓库后，可对 Codex 输入“初始化 CAREER JOURNAL”。系统执行：
 
-1. 检测操作系统、Codex 项目上下文和运行时
-2. 校验 repo-local Skills 与 dependency manifest
-3. 创建未提交到 Git 的用户配置和数据目录
-4. 询问或导入基础候选人资料、已有简历和目标方向
-5. 选择地区和语言，并检测当前电脑的 IANA 时区
-6. 要求用户明确选择一个只读求职邮箱，完成实时 IMAPS 验证或提供等价的可校验适配器
-7. 检查 CareerOps 与文档能力
-8. 在检测到的时区中创建两个必需的每日任务：20:00 `mail-sync` 和 20:15 `deadline-review`，记录真实 ID，并用 Codex `automation.toml`、launchd、cron 或 Windows Task Scheduler 的实时输出验证绑定命令
-9. 使用对应 ID 分别触发两个必需任务；IMAPS 邮件任务在 TLS 验证后只读抓取，并在事务提交后才推进 UID 游标
-10. 运行 `career-journal doctor` 作为 onboarding 门禁；任一邮箱实时验证、成功同步、调度器探测或匹配运行缺失时，setup 保持未完成
-11. 创建或导入第一条岗位记录
+1. 获取上游最新版本；已有副本干净时安全快进，存在修改或无法安全快进时使用新的隔离副本
+2. 检测操作系统、Codex 项目上下文和运行时
+3. 校验 repo-local Skills 与 dependency manifest
+4. 创建未提交到 Git 的用户配置和数据目录
+5. 询问或导入基础候选人资料、已有简历和目标方向
+6. 选择地区和语言，并检测当前电脑的 IANA 时区
+7. 在询问连接参数前先识别宿主邮箱，只询问用户哪些已识别账号用于求职；没有账号时请用户登录邮件应用后继续
+8. 实际观察到每个选中账号后记录可信宿主验证，并为全部选中邮箱完成首次只读同步
+9. 仅在宿主已经配置 Jev 时复用；否则自动选择 `host-agent`，不询问 Jev 权限、Base URL、模型名或 API Key
+10. 检查 CareerOps 与文档能力
+11. 在检测到的时区中创建两个必需的每日任务：20:00 `mail-sync` 和 20:15 `deadline-review`，记录真实 ID，并用 Codex `automation.toml`、launchd、cron 或 Windows Task Scheduler 的实时输出验证绑定命令
+12. 使用对应 ID 分别触发两个必需任务；邮件任务覆盖全部选中邮箱，并在本地事务提交后分别推进游标
+13. 运行 `career-journal doctor` 作为 onboarding 门禁；任一邮箱实时验证、成功同步、调度器探测或匹配运行缺失时，setup 保持未完成
+14. 创建或导入第一条岗位记录
 
 ### 9.2 API 版本
 
@@ -299,11 +304,11 @@ API 版本初始化增加以下步骤：
 
 ### 9.3 邮箱配置
 
-系统不能预设任何个人、学校或工作邮箱。用户必须在初始化中明确选择用于求职的邮箱，并看到 provider、脱敏账号标识和只读权限范围。公开 CLI 拒绝保留示例域邮箱；完整内置路径使用证书校验的 IMAPS、`EXAMINE` 和 `BODY.PEEK[]`。
+系统不能预设任何个人、学校或工作邮箱。Agent 模式先识别已经登录的账号，展示邮箱地址，再让用户选择其中一个或多个；不得询问 IMAP 参数。独立模式显示 provider、脱敏账号标识和只读权限范围。公开 CLI 拒绝保留示例域邮箱；独立模式的完整内置路径使用证书校验的 IMAPS、`EXAMINE` 和 `BODY.PEEK[]`。
 
 可选的实现包括 Gmail、Microsoft、通用 IMAPS 或支持的本地邮件客户端，但产品不假设用户必然拥有某一类账号。内置 IMAPS 凭据通过环境变量引用取得；宿主 connector 或 API client 负责 token、Cookie 和 OAuth 状态。CAREER JOURNAL 仅保存最少必要的 provider、账号标识、验证时间和同步游标，不保存实际凭据。
 
-用户选择邮箱后，必须完成一次成功的实时验证与只读初始同步。IMAPS 同步可以合法返回零封新邮件，但必须成功完成 TLS 鉴权、只读打开邮箱、UID 检索和游标提交。宿主 JSON 必须包含所选账号、connector、只读声明、同步前后游标、唯一 run ID、获取时间和已验证 mail 任务 ID，但它本身仍只是自我声明，不能单独证明邮箱真实存在。未选择邮箱、实时验证失败或首次同步失败时，setup 保持未完成，`career-journal doctor` 报告阻塞项和修复方法。
+用户选择邮箱后，每个账号都必须完成一次成功的实时验证与只读初始同步。Agent 模式只有在宿主集成实际显示对应账号后才能记录可信宿主验证；随后提交的只读批次包含所选账号、connector、只读声明、同步前后游标、唯一 run ID、获取时间和已验证 mail 任务 ID。单独的宿主 JSON 仍是自我声明，不能证明邮箱真实存在。独立模式的 IMAPS 同步可以合法返回零封新邮件，但必须成功完成 TLS 鉴权、只读打开邮箱、UID 检索和游标提交。任一账号未选择、验证失败或首次同步失败时，setup 保持未完成，`career-journal doctor` 报告阻塞项和修复方法。
 
 手动 EML 导入只是 connector 临时不可用时的 fallback，不能替代用户选择的邮箱、首次成功同步或每日 `mail-sync`，也不能让 doctor 通过。
 
@@ -314,12 +319,12 @@ API 版本初始化增加以下步骤：
 README 必须让一个没有项目背景的新用户仅按文档就能完成安装，不依赖作者口头说明。Quick Start 至少覆盖：
 
 1. 系统要求和支持的平台
-2. `git clone`、进入目录和安装依赖的准确命令
+2. 获取最新版本的规则：已有副本干净时安全快进，不能安全快进时使用新的隔离副本，再进入目录并安装依赖
 3. Codex 版本与 API 版本的选择方法
 4. 执行 `career-journal setup` 初始化配置
 5. 导入简历、候选人资料或从空白 profile 开始
-6. 配置模型 provider；API 版本说明如何使用 `.env.local` 或系统钥匙串
-7. 明确选择只读求职邮箱，通过实时 IMAPS 或等价可校验适配器完成鉴权和首次成功同步
+6. Agent 模式自动使用当前 Agent；只有独立 API 版本才说明如何配置模型 provider，以及如何使用 `.env.local` 或系统钥匙串
+7. Agent 模式先识别宿主邮箱，只询问用户其中哪一个或多个用于求职，并通过可信宿主验证完成首次同步；独立模式使用实时 IMAPS 或等价可校验适配器
 8. 使用电脑检测到的时区创建 20:00 `mail-sync` 和 20:15 `deadline-review`，对 Codex heartbeat 或原生调度器执行实时探测，并分别触发一次
 9. 执行 `career-journal doctor` 检查 Skill、数据库、过去 36 小时内的邮箱实时验证与成功同步、模型、两项必需调度器探测和匹配成功运行；doctor 通过后才能将 onboarding 标记为完成
 10. 执行 `career-journal start` 或对应命令打开本地 Dashboard
@@ -334,7 +339,7 @@ README 还必须解释：
 - 每个 Skill 的职责，以及主 Skill 会在什么场景调用它
 - 邮箱由谁鉴权、哪些元数据保存在本地，以及为什么完成 onboarding 要求成功同步、两项实时调度器验证和匹配运行
 - 模型 Key 和 Jev 权限是独立的可选配置项，不影响邮箱和定时任务门禁
-- 系统不得假设用户已有 Jev 权限；没有 Jev 时使用用户配置的大语言模型，模型也无法可靠判断时再进入人工复核
+- 系统不得假设用户已有 Jev 权限；Agent 模式没有 Jev 时使用当前 Agent，独立模式使用已配置的大语言模型，仍无法可靠判断时再进入人工复核
 - 如何查看当前版本、已启用依赖和第三方许可证
 
 ### 9.5 每日定时任务配置
@@ -466,7 +471,7 @@ README 首页必须以一句话安装指令开头。用户把这句话交给 Cod
 ### 11.3 邮箱
 
 - **FR-MAIL-01**：支持多邮箱，每个邮箱独立授权、游标和错误状态
-- **FR-MAIL-02**：onboarding 必须由用户明确选择一个只读求职邮箱，不得默认学校、工作或个人邮箱
+- **FR-MAIL-02**：onboarding 必须由用户明确选择一个或多个只读求职邮箱，不得默认学校、工作或个人邮箱
 - **FR-MAIL-03**：默认只读，任何写操作必须是独立功能并重新获得明确授权
 - **FR-MAIL-04**：营销邮件、人才社区推广和通用职位推荐不能更新申请状态
 - **FR-MAIL-05**：邮件服务不可用时必须报告未覆盖范围，不能写成“没有新邮件”
@@ -535,7 +540,7 @@ README 首页必须以一句话安装指令开头。用户把这句话交给 Cod
 
 ### 13.1 定位
 
-TypeSafe AI 于 2026 年 9 月 15 日开放 Jev early access。CAREER JOURNAL 已完成适配，并在用户配置后把 Jev 作为主要语义决策引擎，以便及时支持新出现的决策技术。固定规则先处理明确、可检查的场景；Jev 处理需要语义理解的模糊场景。没有 Jev，或者 Jev 无法给出可用结果时，系统自动改用用户配置的大语言模型。Jev 不替代生成 Resume、Cover Letter 或面试材料的大语言模型。
+TypeSafe AI 于 2026 年 9 月 15 日开放 Jev early access。CAREER JOURNAL 已完成适配，并在用户配置后把 Jev 作为主要语义决策引擎，以便及时支持新出现的决策技术。固定规则先处理明确、可检查的场景；Jev 处理需要语义理解的模糊场景。Agent 模式没有 Jev 或 Jev 无法给出可用结果时，由当前 Agent 复核；独立模式可以改用用户已配置的大语言模型。Jev 不替代生成 Resume、Cover Letter 或面试材料的大语言模型。
 
 适合的使用场景：
 
@@ -547,7 +552,7 @@ TypeSafe AI 于 2026 年 9 月 15 日开放 Jev early access。CAREER JOURNAL �
 
 ### 13.2 权限与配置
 
-系统不得假设用户已有 Jev API Key。设置流程先询问访问状态；已经获得权限的用户只配置保存 Key 的环境变量名称。没有 Jev 权限时，设置流程询问 OpenAI-compatible 服务的 base URL、模型名和保存 API Key 的环境变量名称。真实 Key 不得写入配置、prompt、日志或 Git。
+Agent 模式不得询问用户是否拥有 Jev。宿主已经存在可发现、已配置的 Jev 能力时直接复用，否则自动使用当前 Agent，并在不需要额外端点或 Key 的情况下完成首次配置。独立 CLI/API 模式可以询问是否启用 Jev；启用时只保存 Key 的环境变量名称，未启用时可以配置 OpenAI-compatible 服务的 Base URL、模型名和 API Key 环境变量名称。真实 Key 不得写入配置、prompt、日志或 Git。
 
 ```yaml
 decision_engine:
@@ -569,7 +574,7 @@ decision_engine:
 ### 13.3 Fallback 和安全门
 
 - 明确规则先运行，以减少费用并保持可解释性
-- 配置 Jev 后，模糊邮件优先交给 Jev；没有 Jev，或者 Jev 不可用、额度不足、格式错误、处于 `shadow` 模式、结果未知或置信度不足时，自动改用用户配置的大语言模型
+- 配置 Jev 后，模糊邮件优先交给 Jev；没有 Jev，或者 Jev 不可用、额度不足、格式错误、处于 `shadow` 模式、结果未知或置信度不足时，Agent 模式由当前 Agent 复核，独立模式改用已配置的大语言模型
 - 大语言模型未配置、返回格式错误、结果未知或置信度不足时，邮件进入人工复核
 - 429 和 529 按有限指数退避重试；401 不重试
 - Jev 和大语言模型输出只产生候选决策，必须通过 schema 和状态机验证
@@ -734,7 +739,7 @@ career-journal doctor
 
 ### Phase 2：邮件与自动化扩展
 
-- 在 MVP 的实时 IMAPS 验证之上扩展可独立校验的 Gmail、Microsoft 和本地邮箱适配器
+- 在 MVP 的可信宿主验证与实时 IMAPS 验证之上扩展可独立校验的 Gmail、Microsoft 和本地邮箱适配器
 - 只读同步、去重、截止日期和定时任务
 - 邮箱健康状态与未覆盖范围提示
 - Codex heartbeat、macOS、Windows 和 Linux 调度配置及卸载文档

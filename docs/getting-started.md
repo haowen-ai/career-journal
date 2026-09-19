@@ -15,12 +15,12 @@
 Paste this one sentence into Codex, Claude Code, Cursor, or another repository-aware coding Agent:
 
 ```text
-Set up CAREER JOURNAL from https://github.com/haowenchen0811/career-journal by reading AGENTS.md and completing onboarding automatically.
+Get the latest version of CAREER JOURNAL from https://github.com/haowenchen0811/career-journal and set it up automatically; if an existing checkout is present, fast-forward it safely or use a fresh isolated clone, then read the latest AGENTS.md and complete onboarding.
 ```
 
-The Agent clones or opens the repository, reads [`AGENTS.md`](../AGENTS.md) and the repository Skill, detects the computer's IANA time zone, configures the selected read-only mailboxes, creates the two required schedules, verifies them, runs them once, and finishes with `doctor`. It then asks the user whether they want to import existing applications. The user only handles an unavoidable login, authorization, account choice, or confirmation of proposed history records.
+The Agent first obtains a current checkout, then reads [`AGENTS.md`](../AGENTS.md) and the repository Skill, detects the computer's IANA time zone, configures the selected read-only mailboxes, creates the two required schedules, verifies them, runs them once, and finishes with `doctor`. It then asks the user whether they want to import existing applications. The user only handles an unavoidable login, authorization, account choice, or confirmation of proposed history records.
 
-On macOS, the Agent first discovers accessible Apple Mail or other host mail accounts and asks which one or more accounts the user uses for job search. If none are accessible, it asks the user to sign in to Apple Mail or another supported mail app and then resumes. When Jev is unavailable, the current coding Agent provides the semantic review. In Agent-managed mode, do not ask for a model Base URL, model name, or API key. IMAPS and external model credentials belong only to the standalone CLI/API path below.
+On macOS, the Agent attempts discovery before asking any mailbox setup question: it inspects accessible Apple Mail or other host mail accounts and asks only which one or more discovered accounts the user uses for job search. If none are accessible, it asks the user to sign in to Apple Mail or another supported mail app and then resumes. Jev does not block setup: reuse an already configured Jev capability when present; otherwise use the current coding Agent. In Agent-managed mode, do not ask whether the user has Jev, and do not ask for a model Base URL, model name, API key, or API-key environment variable. IMAPS and external model credentials belong only to the standalone CLI/API path below.
 
 ### Optional history import
 

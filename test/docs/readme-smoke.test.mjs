@@ -52,7 +52,7 @@ test('README is a concise product landing page with one Agent setup sentence', a
   assert.match(agentInstructions, /\.agents\/skills\/career-journal\/SKILL\.md/);
 });
 
-test('the repository-driven first run offers a review-before-write history import without changing the README prompt', async () => {
+test('the repository-driven first run offers a review-before-write history import from a current checkout', async () => {
   const [englishReadme, chineseReadme, agentInstructions, englishSkill, chineseSkill, englishGuide, chineseGuide] = await Promise.all([
     readFile('README.md', 'utf8'),
     readFile('README.zh-CN.md', 'utf8'),
@@ -63,8 +63,8 @@ test('the repository-driven first run offers a review-before-write history impor
     readFile('docs/getting-started.zh-CN.md', 'utf8'),
   ]);
 
-  assert.match(englishReadme, /Set up CAREER JOURNAL from https:\/\/github\.com\/haowenchen0811\/career-journal by reading AGENTS\.md and completing onboarding automatically\./);
-  assert.match(chineseReadme, /请从 https:\/\/github\.com\/haowenchen0811\/career-journal 安装并配置 CAREER JOURNAL，读取 AGENTS\.md 后自动完成首次配置。/);
+  assert.match(englishReadme, /Get the latest version of CAREER JOURNAL from https:\/\/github\.com\/haowenchen0811\/career-journal/);
+  assert.match(chineseReadme, /请从 https:\/\/github\.com\/haowenchen0811\/career-journal 获取最新版本并自动安装配置 CAREER JOURNAL/);
 
   for (const document of [agentInstructions, englishSkill, englishGuide]) {
     assert.match(document, /asks? (?:the user )?whether (?:they want to|to) import (?:their )?(?:existing|historical|past) applications/i);
@@ -86,12 +86,16 @@ test('the repository-driven first run offers a review-before-write history impor
 });
 
 test('Agent onboarding discovers and selects one or more host mailboxes without extra model credentials', async () => {
-  const [agentInstructions, englishSkill, chineseSkill, englishGuide, chineseGuide] = await Promise.all([
+  const [agentInstructions, englishSkill, chineseSkill, englishGuide, chineseGuide, englishPrd, chinesePrd, englishReadme, chineseReadme] = await Promise.all([
     readFile('AGENTS.md', 'utf8'),
     readFile('.agents/skills/career-journal/SKILL.md', 'utf8'),
     readFile('.agents/skills/career-journal/SKILL.zh-CN.md', 'utf8'),
     readFile('docs/getting-started.md', 'utf8'),
     readFile('docs/getting-started.zh-CN.md', 'utf8'),
+    readFile('docs/superpowers/specs/2026-09-19-job-search-ops-prd-design.en.md', 'utf8'),
+    readFile('docs/superpowers/specs/2026-09-19-job-search-ops-prd-design.md', 'utf8'),
+    readFile('README.md', 'utf8'),
+    readFile('README.zh-CN.md', 'utf8'),
   ]);
   for (const document of [agentInstructions, englishSkill, englishGuide]) {
     assert.match(document, /discover[^\n]*(?:Apple Mail|host)[^\n]*accounts/i);
@@ -105,8 +109,23 @@ test('Agent onboarding discovers and selects one or more host mailboxes without 
     assert.match(document, /一个或多个[^\n]*求职/);
     assert.match(document, /登录[^\n]*(?:Apple Mail|邮件应用)/);
     assert.match(document, /当前[^\n]*Agent[^\n]*(?:Jev|语义)/);
-    assert.match(document, /不要询问[^\n]*(?:Base URL|API Key)/i);
+    assert.match(document, /不(?:要|得)询问[^\n]*(?:Base URL|API Key)/i);
   }
+
+  for (const document of [agentInstructions, englishSkill, englishGuide, englishPrd]) {
+    assert.doesNotMatch(document, /without Jev[^\n]*asks? for an OpenAI-compatible/i);
+    assert.doesNotMatch(document, /without Jev[^\n]*(?:Base URL|API-key environment)/i);
+  }
+  for (const document of [chineseSkill, chineseGuide, chinesePrd]) {
+    assert.doesNotMatch(document, /没有 Jev[^\n]*(?:询问|提供)[^\n]*(?:Base URL|API Key|环境变量)/i);
+    assert.doesNotMatch(document, /没有 Jev 权限[^\n]*OpenAI-compatible/i);
+  }
+
+  assert.match(englishReadme, /latest version[^\n]*existing checkout[^\n]*(?:fast-forward|fresh isolated clone)/i);
+  assert.match(chineseReadme, /最新版本[^\n]*已有[^\n]*(?:安全快进|隔离副本)/);
+  assert.match(agentInstructions, /before reading local onboarding instructions[^\n]*(?:fetch|latest)/i);
+  assert.match(agentInstructions, /attempt account discovery before asking/i);
+  assert.match(agentInstructions, /do not ask whether Jev is available/i);
 });
 
 test('English and Chinese landing pages use matching-language product previews', async () => {

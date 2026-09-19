@@ -9,7 +9,7 @@ A local-first job-search workspace for people and AI agents. CAREER JOURNAL keep
 Paste this one sentence into **Codex, Claude Code, Cursor, or another repository-aware coding Agent**:
 
 ```text
-Set up CAREER JOURNAL from https://github.com/haowenchen0811/career-journal by reading AGENTS.md and completing onboarding automatically.
+Get the latest version of CAREER JOURNAL from https://github.com/haowenchen0811/career-journal and set it up automatically; if an existing checkout is present, fast-forward it safely or use a fresh isolated clone, then read the latest AGENTS.md and complete onboarding.
 ```
 
 The Agent handles cloning, setup, mailbox configuration, local time-zone detection, daily schedules, verification, and the first run. You only step in for an unavoidable login, authorization, or account choice. [Read the full setup guide →](docs/getting-started.md)

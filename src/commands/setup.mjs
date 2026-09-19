@@ -110,6 +110,15 @@ export async function setup(home, answers = {}) {
       secretRef: provider === 'host-agent' ? null : answers.model.secretRef === undefined ? config.model.secretRef : cleanModelSecretRef(answers.model.secretRef),
       threshold: cleanThreshold(answers.model.threshold ?? config.model.threshold ?? 0.8, 'Model threshold'),
     };
+  } else if (answers.email?.mode === 'configure' && answers.email.provider === 'host' && config.model.provider === 'none') {
+    config.model = {
+      ...config.model,
+      provider: 'host-agent',
+      baseUrl: null,
+      model: null,
+      secretRef: null,
+      threshold: cleanThreshold(config.model.threshold ?? 0.8, 'Model threshold'),
+    };
   }
   if (answers.jev?.accessState) {
     const allowed = new Set(['unavailable', 'waitlisted', 'enabled', 'disabled']);

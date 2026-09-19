@@ -22,6 +22,26 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.15] - 2026-09-19
+
+### Added
+
+- Added a current-checkout gate to the one-line Agent setup flow so an existing stale clone is safely fast-forwarded or replaced with an isolated fresh clone
+- Added release tests that reject Agent onboarding instructions which request IMAP connection details or external model credentials
+
+### Changed
+
+- Agent onboarding now attempts host mailbox discovery before asking any mailbox question and asks only which discovered account or accounts are used for job search
+- Missing Jev now selects the current Agent automatically; Jev access, model endpoints, and model keys are no longer first-run questions in Agent mode
+
+### Fixed
+
+- Removed contradictory PRD requirements that sent Agent-managed users into the standalone IMAPS and OpenAI-compatible setup path
+
+### Security
+
+- Existing modified checkouts are left untouched; onboarding uses a fresh isolated clone instead of overwriting local work
+
 ## [0.1.0-alpha.14] - 2026-09-19
 
 ### Added

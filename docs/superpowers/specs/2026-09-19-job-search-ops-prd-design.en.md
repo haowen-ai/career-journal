@@ -3,12 +3,12 @@
 [English](2026-09-19-job-search-ops-prd-design.en.md) | [简体中文](2026-09-19-job-search-ops-prd-design.md)
 
 **Status:** Review Draft
-**Version:** 0.18
+**Version:** 0.19
 **Date:** 2026-09-19
 **Product:** CAREER JOURNAL
 **Delivery:** Open-source GitHub project with an Agent-managed edition and a provider-neutral LLM API edition
 
-**Revision focus:** Agent-managed onboarding discovers mail accounts already signed in on the computer and asks only which one or more are used for job search. If no account is available, the user signs in to a mail app and the Agent resumes. Without Jev, the current Agent reviews ambiguous candidates; it does not request a model Base URL or another API key. Standalone CLI/API mode continues to support IMAPS and OpenAI-compatible services.
+**Revision focus:** Agent-managed onboarding first refreshes or safely replaces a stale local checkout, then discovers mail accounts already signed in on the computer and asks only which one or more are used for job search. If no account is available, the user signs in to a mail app and the Agent resumes. Jev is not an onboarding question: an existing configured capability is reused, otherwise the current Agent reviews ambiguous candidates without a model Base URL or another API key. Standalone CLI/API mode continues to support IMAPS and OpenAI-compatible services.
 
 ## 1. Product overview
 
@@ -129,7 +129,7 @@ The shared core contains deterministic behavior only:
 
 ### 7.2 Codex adapter
 
-The root instructions and repository-local `career-journal` Skill bootstrap the Codex edition. Initialization must inspect dependencies, create ignored local config and data, import candidate evidence, require the chosen read-only mailbox, complete a live IMAPS verification and initial sync, create and probe both required daily jobs in the computer-detected time zone, and use host PDF, Documents, browser, and automation capabilities when appropriate. Installed capability is not connected-account proof. Onboarding stays incomplete until `doctor` confirms fresh mailbox verification and sync plus two live scheduler probes and matching runs.
+The root instructions and repository-local `career-journal` Skill bootstrap the Codex edition. Before reading local instructions, the Agent must fetch the current upstream state and either fast-forward a clean checkout or use a fresh isolated clone. Initialization then inspects dependencies, creates ignored local config and data, discovers signed-in host mail accounts before asking any mailbox setup question, lets the user select one or more, records trusted-host evidence after observing each selected account, completes an initial read-only sync, creates and probes both required daily jobs in the computer-detected time zone, and uses host PDF, Documents, browser, and automation capabilities when appropriate. Onboarding stays incomplete until `doctor` confirms fresh verification and sync for every selected mailbox plus two live scheduler probes and matching runs.
 
 ### 7.3 General API adapter
 
@@ -163,9 +163,9 @@ It must not duplicate all CareerOps writing and review rules, claim a missing de
 | Resume / cover letter | Generalized CareerOps Skill and adapter | Conditionally required | Material generation or revision | Guide enablement; never silently return unaudited prose |
 | PDF creation and review | PDF Skill / document adapter | Conditionally required | PDF requested | A text draft is allowed only with clear PDF-not-created status |
 | DOCX creation and review | Documents Skill / adapter | Optional | DOCX requested | Offer an available format or enablement guidance |
-| Mail reading | Built-in read-only IMAPS; host connectors import only unless separately verified | Onboarding required | Mailbox selection and first sync | Keep setup incomplete; manual EML and host-authored JSON cannot replace live proof |
+| Mail reading | Agent mode: discovered read-only host account plus trusted-host proof; standalone mode: built-in read-only IMAPS | Onboarding required | Mailbox selection and first sync | Keep setup incomplete; manual EML and host-authored JSON without observed-account proof cannot replace live proof |
 | Scheduling | Codex Automation, probeable OS scheduler, or equivalent host | Onboarding required | Two required daily jobs | `register-external` creates only a pending claim; failed probe blocks setup |
-| Jev decisions | TypeSafe adapter / `typesafe-ai` Skill | Primary semantic engine when configured | User has access and enables it | Explicit rules, configured structured LLM, then manual review |
+| Jev decisions | TypeSafe adapter / `typesafe-ai` Skill | Primary semantic engine when configured | Existing capability is detected or a standalone user enables it | Explicit rules, current Agent in Agent mode, configured structured LLM in standalone mode, then manual review |
 | Wiki / durable knowledge | Wiki adapter | Optional | User enables cross-task knowledge | Project-local config and evidence store |
 
 Authoring tools such as Skill Creator, Skill Installer, or host product documentation Skills are development dependencies, not end-user runtime requirements. The installer must still record which runtime components it generated or installed.
@@ -184,17 +184,20 @@ The README must contain a visible Built With / Open Source Acknowledgements sect
 
 After clone, the user may ask Codex to initialize CAREER JOURNAL. The system must:
 
-1. Detect the operating system, repository context, and runtime
-2. Validate repository-local Skills and the dependency manifest
-3. Create ignored user configuration and a local data directory
-4. Ask for or import candidate evidence, existing resumes, and targets
-5. Choose locale and language, and detect the computer's current IANA time zone
-6. Require the user to select one exact read-only job-search mailbox and complete live IMAPS verification or an equivalent independently verifiable adapter
-7. Check CareerOps and document capabilities
-8. Create two real jobs in the detected time zone: `mail-sync` at 20:00 and `deadline-review` at 20:15; record real IDs and probe the saved Codex `automation.toml`, launchd, cron, or Windows Task Scheduler definition
-9. Trigger each job with its matching ID; the IMAPS job uses TLS and read-only retrieval, advancing its UID cursor only after the local transaction commits
-10. Run `career-journal doctor`; any missing mailbox proof, successful sync, scheduler probe, or matching run leaves setup incomplete
-11. Create or import the first application
+1. Fetch upstream and use the latest safe checkout: fast-forward a clean existing checkout or create a fresh isolated clone
+2. Detect the operating system, repository context, and runtime
+3. Validate repository-local Skills and the dependency manifest
+4. Create ignored user configuration and a local data directory
+5. Ask for or import candidate evidence, existing resumes, and targets
+6. Choose locale and language, and detect the computer's current IANA time zone
+7. Attempt host mailbox discovery before asking for connection details; ask only which one or more discovered accounts are used for job search, or ask the user to sign in when none is available
+8. Record trusted-host verification after observing each selected account and complete a successful read-only sync for every selected mailbox
+9. Reuse Jev only when already configured; otherwise select `host-agent` automatically without asking for Jev access, a Base URL, a model name, or an API key
+10. Check CareerOps and document capabilities
+11. Create two real jobs in the detected time zone: `mail-sync` at 20:00 and `deadline-review` at 20:15; record real IDs and probe the saved Codex `automation.toml`, launchd, cron, or Windows Task Scheduler definition
+12. Trigger each job with its matching ID; the mail task reads every selected account and advances each cursor only after the local transaction commits
+13. Run `career-journal doctor`; any missing mailbox proof, successful sync, scheduler probe, or matching run leaves setup incomplete
+14. Create or import the first application
 
 ### 9.2 API edition
 
@@ -202,19 +205,19 @@ The API path also selects a hosted or local model provider, stores only a refere
 
 ### 9.3 Mailbox contract
 
-No personal, school, or work account is a default. Setup shows provider, masked account identity, and read-only scope for the user's chosen account. The public CLI rejects reserved example-domain addresses. The built-in path uses certificate-verified TLS, IMAPS `EXAMINE`, and `BODY.PEEK[]`.
+No personal, school, or work account is a default. Agent setup discovers signed-in accounts, shows their addresses, and lets the user select one or more; it does not ask for IMAP settings. Standalone setup shows provider, masked account identity, and read-only scope for the user's chosen account. The public CLI rejects reserved example-domain addresses. The built-in standalone path uses certificate-verified TLS, IMAPS `EXAMINE`, and `BODY.PEEK[]`.
 
-An initial sync may validly find zero new messages, but it must complete authentication, read-only mailbox opening, UID retrieval, and cursor commit. Host JSON includes account, connector, read-only declaration, before and after cursors, unique run ID, fetch time, and verified mail-task ID, but remains self-attested and cannot prove that the mailbox exists. Missing selection, failed verification, or failed sync blocks setup and produces a repair action in `doctor`.
+An initial sync may validly find zero new messages. In Agent mode, trusted-host verification is recorded only after the host integration visibly exposes the matching selected account; the subsequent read-only batch includes account, connector, read-only declaration, before and after cursors, unique run ID, fetch time, and verified mail-task ID. Connector-authored JSON alone remains self-attested and cannot prove that the mailbox exists. In standalone mode, verification completes authentication, read-only mailbox opening, UID retrieval, and cursor commit. Missing selection, failed verification, or failed sync for any selected account blocks setup and produces a repair action in `doctor`.
 
 Manual EML is a one-message fallback only. Mailbox integrations are read-only: they never send, reply, delete, archive, modify labels, or click application, assessment, or authentication links.
 
 ### 9.4 README onboarding contract
 
-The README leads with one setup sentence that points an Agent at the GitHub repository. Codex, Claude Code, Cursor, or another repository-aware coding Agent then clones or opens the repository, reads root `AGENTS.md` and the repository Skill, installs or reads the official TypeSafe Skill using one supported method, asks only for unavoidable account information or authorization, completes setup, creates and verifies the two required schedules, runs them once, and finishes with `doctor`. The Agent performs the commands; the user is not turned into the installer.
+The README leads with one setup sentence that points an Agent at the GitHub repository and explicitly requires the latest version. Codex, Claude Code, Cursor, or another repository-aware coding Agent fetches and fast-forwards a clean existing checkout or uses a fresh isolated clone, reads the current root `AGENTS.md` and repository Skill, attempts host account discovery before asking any mailbox question, completes setup, creates and verifies the two required schedules, runs them once, and finishes with `doctor`. It reads the official TypeSafe Skill only when configuring or changing an enabled Jev integration. The Agent performs the commands; the user is not turned into the installer.
 
 After technical setup passes, the Agent asks whether the user wants to import existing applications. History import is optional and may use a user-bounded read-only mailbox review, an existing file or spreadsheet, or a guided interview. The Agent presents deduplicated candidate records for confirmation before it writes them. Missing dates, statuses, rejection reasons, and submitted-artifact identities remain unknown rather than being inferred, and the user may skip the step.
 
-The README must let a new user install without author explanation. Copyable instructions cover requirements, clone and dependency commands, Codex versus API choice, setup, profile import or blank start, provider configuration, live read-only mailbox verification and first sync, creation and probing of both required jobs in the detected time zone, one run per job, `doctor`, dashboard start, first application, update, uninstall, backup, and local-data removal.
+The README must let a new user install without author explanation. Copyable instructions cover requirements, current-checkout handling, clone and dependency commands, Agent versus standalone API choice, setup, profile import or blank start, Agent-native mailbox discovery or standalone provider configuration, live read-only mailbox verification and first sync, creation and probing of both required jobs in the detected time zone, one run per job, `doctor`, dashboard start, first application, update, uninstall, backup, and local-data removal.
 
 It must explain which functions are fully local, what minimal information optional external APIs receive, each Skill's responsibility, credential ownership, why completed onboarding requires live mailbox and scheduler proof, how Jev is configured without storing its key, and how to inspect versions and third-party licenses.
 
@@ -274,7 +277,7 @@ The CLI and local dashboard expose filters, timelines, evidence, next actions, a
 
 ### 11.3 Email
 
-- Setup requires one exact user-selected read-only mailbox
+- Setup requires one or more exact user-selected read-only mailboxes
 - Built-in IMAPS uses verified TLS, read-only opening, non-mutating fetch, UIDVALIDITY plus UID cursor, bounded oldest-first pages, and atomic cursor commit
 - A failed account does not advance its cursor or corrupt another account
 - Host batches use account and external-task binding, compare-and-swap cursors, unique run IDs, size bounds, and atomic evidence writes, but cannot self-certify mailbox health
@@ -329,11 +332,11 @@ Attachments use SHA-256 content-addressed references. Secrets remain outside the
 
 ## 13. Jev integration
 
-TypeSafe AI released Jev in early access on September 15, 2026. CAREER JOURNAL supports it as the primary semantic decision engine after a user configures access, keeping the project current with newly available decision technology. Deterministic rules run first for explicit, reviewable cases; Jev handles ambiguous cases that need semantic judgment. A configured structured LLM is the default semantic path when Jev is absent and the automatic fallback when Jev cannot return a usable decision. Jev does not replace generative models used to draft resumes, cover letters, or interview materials.
+TypeSafe AI released Jev in early access on September 15, 2026. CAREER JOURNAL supports it as the primary semantic decision engine after access is configured, keeping the project current with newly available decision technology. Deterministic rules run first for explicit, reviewable cases; Jev handles ambiguous cases that need semantic judgment. In Agent mode, the current Agent reviews candidates when Jev is absent or cannot return a usable decision. In standalone mode, an already configured structured LLM provides that fallback. Jev does not replace generative models used to draft resumes, cover letters, or interview materials.
 
-Setup never assumes that a user has a Jev API key. It asks for access state and, when access exists, stores only an environment reference such as `env:TYPESAFE_API_KEY`. Without Jev, setup asks for an OpenAI-compatible base URL, model name, and API-key environment reference. Literal keys never enter config, prompts, logs, or Git. Before Jev questions, criteria, or thresholds change, the implementation reads the official TypeSafe Agent Skill and current API documentation.
+Agent-managed setup does not ask whether the user has Jev. It reuses an already configured Jev capability when discoverable; otherwise it selects the current Agent as the semantic reviewer and finishes without another endpoint or key. Standalone CLI/API setup may ask whether Jev is enabled and, when it is, stores only an environment reference such as `env:TYPESAFE_API_KEY`; if Jev is absent, that standalone path may configure an OpenAI-compatible base URL, model name, and API-key environment reference. Literal keys never enter config, prompts, logs, or Git. Before Jev questions, criteria, or thresholds change, the implementation reads the official TypeSafe Agent Skill and current API documentation.
 
-The v1 request uses `state`, `model`, and `questions`. Email classification uses one Choice question and reads `answers.classification.choice` plus `confidence`. Explicit rules avoid unnecessary API cost. Ambiguous messages go to Jev first when configured. Missing access, unavailable service, exhausted quota, malformed or unknown output, shadow mode, or low confidence falls back to the configured structured LLM. If that result is also missing, malformed, unknown, or below threshold, the message goes to manual review. HTTP 429 and 529 receive bounded backoff retries; 401 does not retry.
+The v1 request uses `state`, `model`, and `questions`. Email classification uses one Choice question and reads `answers.classification.choice` plus `confidence`. Explicit rules avoid unnecessary API cost. Ambiguous messages go to Jev first when configured. Missing access, unavailable service, exhausted quota, malformed or unknown output, shadow mode, or low confidence falls back to the current Agent in Agent mode or the configured structured LLM in standalone mode. If that result is also missing, malformed, unknown, or below threshold, the message goes to manual review. HTTP 429 and 529 receive bounded backoff retries; 401 does not retry.
 
 Jev and structured-LLM outputs remain proposed decisions until schema and state validation. Consequential events require original evidence or user confirmation. Thresholds live in one reviewable configuration and must be evaluated against representative messages before limited automation. Pricing, credits, purchase requirements, and access state are not hard-coded because they can change. Release validation covers the v1 contract, Jev priority, structured-LLM fallback, low confidence, malformed output, 401, 429/529, missing credentials, rule bypass, manual review, and one controlled live Jev API smoke test.
 
@@ -369,7 +372,7 @@ Jev and structured-LLM outputs remain proposed decisions until schema and state 
 8. One mailbox failure does not advance its cursor or damage successful accounts
 9. Draft artifacts never become submitted without explicit evidence
 10. Rejection, interview, and offer states require original evidence or user confirmation
-11. Missing Jev access keeps basic tracking available and routes ambiguous semantic decisions to the configured structured LLM, then to manual review if no reliable model result is available
+11. Missing Jev access keeps basic tracking available and routes ambiguous semantic decisions to the current Agent in Agent mode or the configured structured LLM in standalone mode, then to manual review if no reliable result is available
 12. Consequential external writes require an explicit user action and post-action verification
 13. A clean environment passes the documented Quick Start smoke test
 14. README and third-party notices fully credit CareerOps, TypeSafe's Agent Skill, and every actual dependency
@@ -444,7 +447,7 @@ Each run records version, commit, system, runtime mode, fresh-install or upgrade
 | Misclassified email changes state | Read-only access, retained evidence, confidence gates, and pending review |
 | Generated material is mistaken for submitted | Separate draft/submitted lifecycle and exact-artifact confirmation |
 | Personal data leaks to GitHub | Ignore secrets, scan releases, and use synthetic fixtures |
-| Jev access is unavailable or its API changes | Versioned contract tests, structured-LLM fallback, manual review, and a controlled live smoke test |
+| Jev access is unavailable or its API changes | Versioned contract tests, current-Agent or standalone structured-LLM fallback, manual review, and a controlled live smoke test |
 | Generalization weakens customization | Profile and policy overlays plus importable personal rules |
 | Upstream credit or license is missed | Manifest, notices, license files, and a release gate |
 | README commands drift | Clean-environment smoke tests and versioned docs |

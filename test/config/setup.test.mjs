@@ -112,6 +112,17 @@ test('Agent-managed setup needs no separate model endpoint or key', async () => 
   });
 }));
 
+test('a host mailbox selects the current Agent automatically when no semantic provider is configured', async () => withHome(async (home) => {
+  const result = await setup(home, {
+    timezone: 'UTC',
+    email: { mode: 'configure', provider: 'host', address: 'candidate@school.edu', settings: { connector: 'apple-mail' } },
+  });
+  assert.deepEqual(result.config.model, {
+    provider: 'host-agent', baseUrl: null, model: null, secretRef: null, threshold: 0.8,
+  });
+  assert.equal(result.config.jev.accessState, 'unavailable');
+}));
+
 test('setup binds one mail-sync task to every selected job-search mailbox', async () => withHome(async (home) => {
   await setup(home, {
     timezone: 'UTC',
@@ -274,6 +285,9 @@ test('first CLI setup provisions only the two job-search automations', async () 
     const config = await loadConfig(home);
     assert.equal(config.email.setupState, 'pending-verification');
     assert.equal(config.automation.setupState, 'pending-registration');
+    assert.equal(config.model.provider, 'host-agent');
+    assert.equal(config.model.baseUrl, null);
+    assert.equal(config.model.secretRef, null);
   } finally { context.db.close(); }
 }));
 
@@ -381,7 +395,7 @@ test('stores explicit personal material-rule files without replacing built-in de
   assert.deepEqual(untouched.config.materials.ruleFiles, []);
 }));
 
-test('CLI setup enables Jev with an environment-only key reference and active mode', async () => withHome(async (home) => {
+test('CLI host setup enables Jev and keeps the current Agent as its credential-free fallback', async () => withHome(async (home) => {
   await setupCommand({ options: {
     home,
     'email-provider': 'host',
@@ -398,7 +412,8 @@ test('CLI setup enables Jev with an environment-only key reference and active mo
     mode: 'active',
     threshold: 0.8,
   });
-  assert.equal(config.model.provider, 'none');
+  assert.equal(config.model.provider, 'host-agent');
+  assert.equal(config.model.secretRef, null);
 }));
 
 test('CLI setup rejects a literal Jev key', async () => withHome(async (home) => {
