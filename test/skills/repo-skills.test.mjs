@@ -23,6 +23,43 @@ test('orchestrator names required and optional capabilities explicitly', async (
   assert.match(text, /career-journal doctor/);
   assert.match(text, /draft/i);
   assert.match(text, /submitted artifact/i);
+  assert.match(text, /host-managed/i);
+  assert.match(text, /register-external/);
+  assert.match(text, /email sync-host/);
+  assert.match(text, /manual EML[^\n]*fallback/i);
+  assert.match(text, /doctor[^\n]*pass/i);
+  assert.match(text, /node \.\/bin\/career-journal\.mjs/);
+  assert.match(text, /codexCommandLine/);
+  assert.match(text, /automation_update/);
+  assert.match(text, /Native `mail-sync` installation is deliberately blocked/i);
+});
+
+test('career-journal skill has paired English and Simplified Chinese contracts', async () => {
+  const [english, chinese] = await Promise.all([
+    readFile('.agents/skills/career-journal/SKILL.md', 'utf8'),
+    readFile('.agents/skills/career-journal/SKILL.zh-CN.md', 'utf8'),
+  ]);
+
+  assert.match(english, /\[简体中文\]\(SKILL\.zh-CN\.md\)/);
+  assert.match(chinese, /\[English\]\(SKILL\.md\)/);
+
+  for (const text of [english, chinese]) {
+    assert.match(text, /IMAPS/i);
+    assert.match(text, /careerops-materials/i);
+    assert.match(text, /career-ops-hq\/career-ops|Santiago Fernández de Valderrama/i);
+    assert.match(text, /Jev[^\n]*(?:optional|可选)|(?:optional|可选)[^\n]*Jev/i);
+    assert.match(text, /Semantic Versioning|SemVer|语义化版本/i);
+    assert.match(text, /Git tag/i);
+    assert.match(text, /GitHub Release/i);
+    assert.match(text, /CHANGELOG/i);
+    assert.match(text, /fresh[- ]clone/i);
+    for (const contract of [
+      /mail-sync[^\n]*20:00|20:00[^\n]*mail-sync/i,
+      /deadline-review[^\n]*20:15|20:15[^\n]*deadline-review/i,
+      /daily-consolidation[^\n]*22:00|22:00[^\n]*daily-consolidation/i,
+      /local-backup[^\n]*23:00|23:00[^\n]*local-backup/i,
+    ]) assert.match(text, contract);
+  }
 });
 
 test('CareerOps routing skill keeps facts and submitted evidence gated', async () => {
@@ -42,4 +79,15 @@ test('dependency manifest pins CareerOps and keeps Jev optional', async () => {
   assert.match(text, /career-ops[^]*version: "1\.32\.0"/);
   assert.match(text, /jev[^]*required: false/);
   assert.match(text, /access_state: waitlisted/);
+  assert.match(text, /  email:\n    required: true/);
+  assert.match(text, /  automation:\n    required: true/);
+});
+
+test('example config represents pending live IMAPS onboarding without mailbox credentials', async () => {
+  const config = JSON.parse(await readFile('config/career-journal.example.json', 'utf8'));
+  assert.equal(config.email.setupState, 'pending-verification');
+  assert.equal(config.email.accounts[0].provider, 'imap');
+  assert.equal(config.email.accounts[0].readOnly, true);
+  assert.equal(config.automation.setupState, 'pending-registration');
+  assert.equal(JSON.stringify(config.email).includes('secret'), false);
 });

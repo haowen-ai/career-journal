@@ -118,6 +118,39 @@ export async function checkRelease(root) {
     check('product-readme', productReadme && screenshotOk, 'product explanation, real browser preview, workflows, and installation order in both languages');
   } catch (error) { check('bilingual-docs', false, error.message); }
 
+  try {
+    const [englishSkill, chineseSkill, chinesePrd, englishPrd] = await Promise.all([
+      read('.agents/skills/career-journal/SKILL.md'),
+      read('.agents/skills/career-journal/SKILL.zh-CN.md'),
+      read('docs/superpowers/specs/2026-09-19-job-search-ops-prd-design.md'),
+      read('docs/superpowers/specs/2026-09-19-job-search-ops-prd-design.en.md'),
+    ]);
+    const paired = /\[简体中文\]\(SKILL\.zh-CN\.md\)/.test(englishSkill)
+      && /\[English\]\(SKILL\.md\)/.test(chineseSkill)
+      && /\[English\]\(2026-09-19-job-search-ops-prd-design\.en\.md\)/.test(chinesePrd)
+      && /\[简体中文\]\(2026-09-19-job-search-ops-prd-design\.md\)/.test(englishPrd);
+    const contractPatterns = [
+      /IMAPS/i,
+      /(?:mailbox|email|邮箱)[^\n]*(?:required|must|必须|不得)|(?:required|must|必须|不得)[^\n]*(?:mailbox|email|邮箱)/i,
+      /careerops-materials/i,
+      /career-ops-hq\/career-ops|Santiago Fernández de Valderrama/i,
+      /Jev[^\n]*(?:optional|可选)|(?:optional|可选)[^\n]*Jev/i,
+      /mail-sync[^\n]*20:00|20:00[^\n]*mail-sync/i,
+      /deadline-review[^\n]*20:15|20:15[^\n]*deadline-review/i,
+      /daily-consolidation[^\n]*22:00|22:00[^\n]*daily-consolidation/i,
+      /local-backup[^\n]*23:00|23:00[^\n]*local-backup/i,
+      /IANA/i,
+      /Semantic Versioning|SemVer|语义化版本/i,
+      /Git tag/i,
+      /GitHub Release/i,
+      /CHANGELOG/i,
+      /fresh[- ]clone/i,
+    ];
+    const complete = [englishSkill, chineseSkill, chinesePrd, englishPrd]
+      .every((text) => contractPatterns.every((pattern) => pattern.test(text)));
+    check('bilingual-core-contracts', paired && complete, 'paired Skill and PRD languages preserve mailbox, automation, CareerOps, Jev, timezone, and release contracts');
+  } catch (error) { check('bilingual-core-contracts', false, error.message); }
+
   const files = await candidateFiles(root);
   const textFiles = files.filter((file) => /\.(?:mjs|js|json|md|yml|yaml|txt|html|css)$/.test(file));
   const secretPatterns = [

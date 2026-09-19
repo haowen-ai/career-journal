@@ -20,10 +20,33 @@ dependencies:
     required_for:
       - docx-generation
   email:
-    required: false
+    required: true
+    required_for:
+      - completed-onboarding
+      - daily-progress-review
+    providers:
+      verified: imap-tls
+      import_only: host-managed
     access: read-only
+    account_verification: live-required
+    initial_sync: required
+    execution_envelope: required
+    freshness_hours: 36
+    credential_storage: environment-reference-only
   automation:
-    required: false
+    required: true
+    required_for:
+      - completed-onboarding
+      - daily-progress-review
+    external_registration: required
+    matching_external_run: required
+    freshness_hours: 36
+    default_schedule:
+      mail-sync: "20:00"
+      deadline-review: "20:15"
+      daily-consolidation: "22:00"
+      local-backup: "23:00"
+    timezone: computer-detected-iana
   wiki:
     required: false
   jev:

@@ -1,10 +1,38 @@
 import { access, mkdir, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { loadConfig, workspaceDirectory } from '../config/store.mjs';
 import { detectCareerOps } from '../integrations/careerops.mjs';
+import { openReadOnlyDatabase, migrate } from '../storage/database.mjs';
+import { isLiveVerifiedEmailAccount, listEmailAccounts } from '../email/accounts.mjs';
+import { isCurrentTaskRegistration, listTasks } from '../automation/registry.mjs';
+import { probeTaskRegistration } from '../automation/probe.mjs';
 
 const major = (version) => Number(String(version).replace(/^v/, '').split('.')[0]);
+const DAILY_HEALTH_WINDOW_MS = 36 * 60 * 60 * 1000;
+
+function timestamp(value) {
+  const parsed = Date.parse(value ?? '');
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function recent(value, now) {
+  const parsed = timestamp(value);
+  return parsed !== null && parsed <= now + 5 * 60 * 1000 && now - parsed <= DAILY_HEALTH_WINDOW_MS;
+}
+
+function externallyObserved(task, now) {
+  if (!isCurrentTaskRegistration(task) || task.error) return false;
+  const registration = task.config.registration;
+  const registeredAt = timestamp(registration.registeredAt);
+  const externalRunAt = timestamp(registration.lastExternalRunAt);
+  return registeredAt !== null
+    && externalRunAt !== null
+    && externalRunAt >= registeredAt
+    && recent(registration.lastExternalRunAt, now)
+    && recent(task.lastSuccessAt, now);
+}
 
 function envReferenceState(secretRef, env) {
   if (!secretRef) return { ok: true, detail: 'no credential reference configured' };
@@ -15,6 +43,8 @@ function envReferenceState(secretRef, env) {
 
 export async function doctor(home, capabilities = {}) {
   const checks = [];
+  const now = timestamp(capabilities.now ?? new Date().toISOString());
+  if (now === null) throw new Error('doctor now must be an ISO date-time');
   const nodeVersion = capabilities.nodeVersion ?? process.versions.node;
   checks.push({ id: 'node', severity: major(nodeVersion) >= 24 ? 'pass' : 'fail', detail: nodeVersion });
   let config;
@@ -41,9 +71,100 @@ export async function doctor(home, capabilities = {}) {
   const careerOpsCheck = capabilities.careerOps ?? (() => detectCareerOps(config.careerOps));
   const careerOps = await careerOpsCheck();
   checks.push({ id: 'careerops', severity: careerOps.ok ? 'pass' : 'warn', detail: careerOps.detail ?? '' });
-  const emailProviders = config.email.accounts.map((item) => item.provider);
-  const emailUsable = emailProviders.length > 0 && emailProviders.every((provider) => provider === 'manual-eml');
-  checks.push({ id: 'email', severity: emailUsable ? 'pass' : 'warn', detail: emailUsable ? 'configured read-only manual-eml adapter' : emailProviders.length ? 'unsupported email adapter; configure manual-eml' : `${config.email.setupState}; run career-journal email configure` });
+  let accounts = [];
+  let tasks = [];
+  const databasePath = path.resolve(home, config.data.database);
+  let databaseReady = false;
+  if (!existsSync(databasePath)) {
+    checks.push({ id: 'migration', severity: 'fail', detail: 'database is missing; complete setup before running doctor' });
+  } else try {
+    const db = openReadOnlyDatabase(databasePath);
+    try {
+      const pending = migrate(db, { dryRun: true }).pending;
+      if (pending.length) {
+        checks.push({ id: 'migration', severity: 'fail', detail: `pending versions ${pending.join(', ')}; run migrate --dry-run, back up, then migrate --apply` });
+      } else {
+        databaseReady = true;
+        checks.push({ id: 'migration', severity: 'pass', detail: 'schema is current' });
+        accounts = listEmailAccounts(db);
+        tasks = listTasks(db);
+      }
+    } finally { db.close(); }
+  } catch (error) {
+    checks.push({ id: 'migration', severity: 'fail', detail: `cannot inspect database schema: ${error.message}` });
+  }
+  if (!databaseReady) {
+    checks.push({ id: 'email', severity: 'fail', detail: 'mailbox health is unavailable until the database schema is current' });
+  } else {
+    const hostAccounts = accounts.filter((item) => item.provider === 'host' && item.readOnly && item.settings?.connector);
+    const imapAccounts = accounts.filter((item) => item.provider === 'imap' && item.readOnly && item.settings?.host);
+    const verifiedImapAccounts = imapAccounts.filter((item) => isLiveVerifiedEmailAccount(item, new Date(now).toISOString())
+      && item.lastSuccessAt
+      && item.lastFetchedAt
+      && !item.error
+      && recent(item.lastSuccessAt, now)
+      && recent(item.lastFetchedAt, now));
+    const emailUsable = verifiedImapAccounts.length > 0;
+    const freshHostBatch = hostAccounts.some((item) => item.lastSuccessAt
+      && item.lastFetchedAt
+      && !item.error
+      && recent(item.lastSuccessAt, now)
+      && recent(item.lastFetchedAt, now));
+    checks.push({
+      id: 'email',
+      severity: emailUsable ? 'pass' : 'fail',
+      detail: emailUsable
+        ? `${verifiedImapAccounts.length} live-verified read-only IMAPS mailbox${verifiedImapAccounts.length === 1 ? '' : 'es'} synced in the last 36 hours`
+        : freshHostBatch
+          ? 'host connector batch is self-attested; caller JSON cannot prove mailbox identity. Pair the connector with a live verifier adapter or configure IMAPS'
+          : hostAccounts.length
+            ? 'host mailbox is configured but remains self-attested; connect a live verifier adapter or configure IMAPS'
+            : imapAccounts.length
+              ? 'IMAPS mailbox needs a successful live verification and read-only sync in the last 36 hours'
+          : accounts.length ? 'manual or unsupported email account cannot provide daily sync' : 'no job-search email account configured',
+    });
+  }
+  const requiredTasks = ['mail-sync', 'deadline-review', 'daily-consolidation', 'local-backup'];
+  const schedulerProbe = capabilities.schedulerProbe ?? ((task) => probeTaskRegistration(task, {
+    codexHome: capabilities.codexHome,
+  }));
+  const schedulerProbes = new Map(await Promise.all(tasks
+    .filter((task) => requiredTasks.includes(task.type) && task.enabled)
+    .map(async (task) => {
+      try {
+        const result = await schedulerProbe(task);
+        return [task.id, typeof result === 'boolean' ? { ok: result, detail: result ? 'verified' : 'not found' } : result];
+      } catch (error) {
+        return [task.id, { ok: false, detail: error.message }];
+      }
+    })));
+  const registeredTasks = new Map(tasks
+    .filter((task) => requiredTasks.includes(task.type)
+      && task.enabled
+      && externallyObserved(task, now)
+      && schedulerProbes.get(task.id)?.ok === true)
+    .map((task) => [task.type, task]));
+  const mailTask = registeredTasks.get('mail-sync');
+  const accountIds = new Set(accounts
+    .filter((account) => isLiveVerifiedEmailAccount(account, new Date(now).toISOString())
+      && !account.error
+      && recent(account.lastSuccessAt, now)
+      && recent(account.lastFetchedAt, now))
+    .map((account) => account.id));
+  const automationUsable = requiredTasks.every((type) => registeredTasks.has(type))
+    && Boolean(mailTask?.accountId && accountIds.has(mailTask.accountId));
+  const failedSchedulerProbes = tasks
+    .filter((task) => requiredTasks.includes(task.type) && task.enabled && schedulerProbes.get(task.id)?.ok !== true)
+    .map((task) => `${task.type}: ${schedulerProbes.get(task.id)?.detail ?? 'not probed'}`);
+  checks.push({
+    id: 'automation',
+    severity: automationUsable ? 'pass' : 'fail',
+    detail: automationUsable
+      ? 'daily mailbox, deadline, consolidation, and backup tasks are live-probed and have run successfully within 36 hours'
+      : failedSchedulerProbes.length
+        ? `scheduler probe failed (${failedSchedulerProbes.join('; ')}); install or verify every real schedule, then observe one matching successful run within 36 hours`
+        : 'daily tasks are not fully healthy; verify every real schedule and observe one matching successful run for each task within 36 hours',
+  });
 
   const env = capabilities.env ?? process.env;
   const model = config.model ?? { provider: 'none' };

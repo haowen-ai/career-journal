@@ -2,8 +2,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { migration001 } from './migrations/001-initial.mjs';
+import { migration002 } from './migrations/002-email-account-settings.mjs';
 
-export const schemaMigrations = [migration001];
+export const schemaMigrations = [migration001, migration002];
 
 export function openDatabase(file) {
   const resolved = file === ':memory:' ? file : path.resolve(file);
@@ -11,6 +12,17 @@ export function openDatabase(file) {
   const db = new DatabaseSync(resolved);
   db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
   return db;
+}
+
+export function openReadOnlyDatabase(file) {
+  const resolved = path.resolve(file);
+  const db = new DatabaseSync(resolved, { readOnly: true });
+  db.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+  return db;
+}
+
+export function pendingMigrationError(pending) {
+  return new Error(`Database migrations pending: ${pending.join(', ')}. Run career-journal migrate --dry-run, create a backup, then run career-journal migrate --apply.`);
 }
 
 function appliedVersions(db) {

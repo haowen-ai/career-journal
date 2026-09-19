@@ -1,7 +1,7 @@
 import { access, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { loadConfig } from '../config/store.mjs';
-import { migrate, openDatabase, schemaMigrations } from '../storage/database.mjs';
+import { migrate, openDatabase, openReadOnlyDatabase, schemaMigrations } from '../storage/database.mjs';
 
 async function exists(file) {
   try { await access(file); return true; } catch { return false; }
@@ -16,7 +16,7 @@ export async function migrateHome(home, options = {}) {
   if (options.dryRun && !existed) return { database, pending: candidates.map((item) => item.version), applied: [], dryRun: true };
 
   if (options.dryRun) {
-    const db = openDatabase(database);
+    const db = openReadOnlyDatabase(database);
     try { return { database, ...migrate(db, { dryRun: true, migrations: candidates }), dryRun: true }; }
     finally { db.close(); }
   }

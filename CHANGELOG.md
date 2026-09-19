@@ -29,6 +29,11 @@ All notable changes are documented here. This project follows Semantic Versionin
 - Added `career-journal` as the primary CLI, repository Skill, launcher, package binary, and fresh-install identity
 - Added upgrade coverage for legacy `.jobops` workspaces, `jobops-*` automations, and the `jobops` CLI alias
 - Added a reproducible synthetic dashboard fixture and a SHA-256 manifest gate for the published product screenshot
+- Added bounded host-managed email batches with deterministic matching, deduplication, independent cursors, and retry-safe ingestion
+- Added a built-in certificate-verified IMAPS client for live account verification and read-only `EXAMINE` / `BODY.PEEK[]` sync
+- Added direct `email verify-imap` and `email sync-imap` commands
+- Added live scheduler probes for Codex heartbeats, launchd, cron, and Windows Task Scheduler, plus matching external-run evidence for all four daily tasks
+- Added paired English and Simplified Chinese orchestration Skills and product requirements, with release checks for both language contracts
 
 ### Changed
 
@@ -36,18 +41,44 @@ All notable changes are documented here. This project follows Semantic Versionin
 - New workspaces now store configuration, data, artifacts, backups, and scheduler definitions under `.career-journal/`
 - New workspaces use `career-journal-*`, `io.career-journal.*`, and `CareerJournal-*` scheduler identifiers; upgraded tasks retain their existing platform identities
 - Replaced the product preview records with recognizable big-company examples, each visibly marked `Demo` with a `DEMO-*` identifier
+- Completed onboarding now requires a user-selected read-only mailbox plus a successful sync and one matching successful run for all four daily tasks within 36 hours
+- Manual EML import remains available as a one-off fallback but no longer satisfies daily mailbox health
+- Re-running setup now preserves custom schedules, notification policies, enabled state, and valid registrations unless the user explicitly changes them
+- Backups now retain an explicit artifact metadata index while omitting artifact payloads by default
+- Email onboarding now passes only after live IMAPS verification and a successful read-only sync within the freshness window; host connector JSON remains import-only and self-attested
 
 ### Fixed
 
 - Added an explicit conflict error when both configurations exist, preventing a new workspace from silently shadowing a valid legacy workspace
 - Preserved legacy automation IDs during reconfiguration so upgrades do not create duplicate scheduled tasks
 - Kept the published `jobops-adapter.mjs` CareerOps bridge as a fallback while preferring `career-journal-adapter.mjs` for new setups
+- Doctor no longer treats an email address, manual EML import, or generated scheduler definition as proof of a working daily workflow
+- Changing a mailbox connector or task schedule now invalidates the old verification until the sync or external registration succeeds again
+- Rebinding `mail-sync` to a different mailbox now clears the old cursor and execution health, and onboarding status follows the currently bound mailbox
+- Existing databases with pending migrations are reported without being modified by setup, doctor, or ordinary runtime commands
+- Migration dry-runs now inspect existing databases read-only without changing their journal mode
+- Host batches now reject stale cursors, out-of-order fetches, changed replays, account or connector mismatches, and scheduler ID mismatches
+- IMAP pagination now consumes the oldest bounded UID page and advances only to the highest fetched UID, preventing permanent gaps when more than 200 messages match
+- Host batch evidence, events, and both cursors now commit atomically, so a stale or competing batch leaves no partial writes
+- Scheduler verification now rejects pending claims, mismatched commands, malformed cron marker blocks, and unverified external runs
+- Codex, launchd, cron, and Windows probes now reject malformed or duplicate definitions, extra recurrence fields, extra triggers or actions, and schedules that do not run exactly once per day at the configured local time
+- Launchd verification now checks the schedule and time zone loaded by `launchd` as well as the on-disk plist, preventing an edited but unreloaded file from satisfying the gate
+- Windows task creation now uses correct command-line quoting, refuses to overwrite a task created during a race, and deletes only a task that CAREER JOURNAL successfully created before verification failed
+- Caller-authored host batches can no longer target an IMAPS account or establish live mailbox health; only a successful direct TLS fetch can advance IMAP verification and sync state
+- Direct mailbox synchronization no longer counts as an observed scheduler run; only `automation run` with the verified external ID can establish that evidence
+- Windows scheduler discovery and failed-install rollback now fail closed when the query is ambiguous or cleanup cannot be confirmed
+- Generated OS scheduler commands now carry the registered external ID; native `mail-sync` installation is blocked until a secure scheduler credential provider is available
 
 ### Security
 
 - Workspace conflict detection prevents writes from being split across two local data roots
 - Existing loopback-only dashboard, credential-reference, and redacted-export boundaries remain unchanged
 - README disclaimers and preview tests make clear that the example companies do not represent real applications, outcomes, affiliations, or endorsements
+- CAREER JOURNAL stores only the host connector label and normalized evidence; mailbox passwords, OAuth tokens, cookies, and connector credentials remain with the host
+- Failed email batches keep both mailbox and task cursors unchanged, and input size limits bound the host-sync surface
+- Host mailbox setup rejects credential references, account listings omit them, and backups remove mailbox verification, sync health, and scheduler attestations so restores must verify again
+- Secret-free backups no longer copy arbitrary artifact files, which may contain credentials or other private payloads
+- Public setup rejects reserved or example email domains, and IMAP credentials remain environment-variable references rather than config, export, heartbeat prompt, or backup values
 
 ## [0.1.0-alpha.5] - 2026-09-19
 

@@ -32,6 +32,9 @@ test -f "$data_home/.jobops/config.json"
 test ! -e "$data_home/.career-journal/config.json"
 "$node_bin" "$primary_cli" backup create --home "$data_home" --output "$backup_dir"
 test -f "$backup_dir/jobops.db"
+test -f "$backup_dir/artifacts-index.json"
+test ! -d "$backup_dir/artifacts"
+"$node_bin" -e "const fs=require('node:fs');const rows=JSON.parse(fs.readFileSync(process.argv[1]));if(rows.length!==1||rows[0].applicationId!=='upgradeco-preservedrole'||rows[0].fileName!=='resume.txt'||!rows[0].sha256)process.exit(1)" "$backup_dir/artifacts-index.json"
 "$node_bin" "$primary_cli" migrate --home "$data_home" --dry-run
 "$node_bin" "$primary_cli" migrate --home "$data_home" --apply
 "$node_bin" "$primary_cli" application show --home "$data_home" --id upgradeco-preservedrole >"$scratch/application.json"
@@ -42,17 +45,12 @@ grep -q 'resume.txt' "$scratch/application.json"
 "$node_bin" "$primary_cli" automation configure --home "$data_home" --task local-backup --time 22:45 --timezone UTC --enabled
 "$node_bin" "$primary_cli" automation run --home "$data_home" --task local-backup --dry-run >/dev/null
 "$node_bin" "$primary_cli" automation run --home "$data_home" --id jobops-local-backup --dry-run >/dev/null
-"$node_bin" "$primary_cli" automation install --home "$data_home" --task local-backup >/dev/null
-find "$data_home/.jobops/schedulers" -type f -print | grep -Eq '/(io\.job-search-ops\.local-backup\.plist|jobops-local-backup\.(cron|txt))$'
-if find "$data_home/.jobops/schedulers" -type f -print | grep -Eq '/(io\.career-journal\.local-backup\.plist|career-journal-local-backup\.(cron|txt))$'; then
-  echo 'legacy upgrade created a parallel CAREER JOURNAL scheduler definition' >&2
-  exit 1
-fi
+# Scheduler installation is covered by injected unit tests. The upgrade smoke must
+# never mutate the developer's real launchd, cron, or Task Scheduler state.
 "$node_bin" "$primary_cli" automation list --home "$data_home" >"$scratch/automations.json"
 "$node_bin" -e "const fs=require('node:fs');const rows=JSON.parse(fs.readFileSync(process.argv[1]));if(rows.length!==1||rows[0].id!=='jobops-local-backup'||rows[0].schedule!=='22:45')process.exit(1)" "$scratch/automations.json"
 grep -q 'env:MODEL_KEY' "$data_home/.jobops/config.json"
 grep -q 'env:JEV_KEY' "$data_home/.jobops/config.json"
 grep -q 'env:MODEL_KEY' "$backup_dir/config.json"
 grep -q 'env:JEV_KEY' "$backup_dir/config.json"
-find "$backup_dir/artifacts" -type f -name '*resume.txt' | grep -q .
 printf 'UPGRADE_SMOKE_OK from=%s to=%s\n' "$from_ref" "$(git -C "$checkout" rev-parse HEAD)"

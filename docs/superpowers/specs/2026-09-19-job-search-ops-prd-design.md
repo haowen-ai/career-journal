@@ -1,18 +1,20 @@
-# Job Search Ops 产品需求文档（PRD）
+# CAREER JOURNAL 产品需求文档（PRD）
+
+[English](2026-09-19-job-search-ops-prd-design.en.md) | [简体中文](2026-09-19-job-search-ops-prd-design.md)
 
 **状态：** Review Draft  
-**版本：** 0.11  
+**版本：** 0.14
 **日期：** 2026-09-19  
-**工作名称：** Job Search Ops  
+**产品名称：** CAREER JOURNAL
 **交付形态：** 开源 GitHub 项目，提供 Codex 原生版本和通用 LLM API 版本
 
-**本版更新：** 将第三方 Skill/开源项目署名、许可证保留、可执行 README Quick Start、每日定时任务配置，以及 GitHub 发布后的全新用户实测和版本管理提升为发布前强制要求。
+**本版更新：** 将“配置已填写”与“外部能力已验证”分开：邮箱必须经过实时只读 IMAPS 验证或等价的可校验适配器，四项调度必须被 Codex 或操作系统实时探测，并且每项都有一次匹配 ID 的成功运行，`career-journal doctor` 才能通过。占位 ID、手工调用和宿主自行编写的 JSON 不能单独满足门禁。
 
 ## 1. 产品概述
 
-Job Search Ops 是一个本地优先、证据驱动的求职工作系统。它把岗位分析、申请材料生成、投递记录、邮件进展识别、面试准备和复盘放进同一条可追踪工作流，同时保留每个事实的来源、日期和材料版本。
+CAREER JOURNAL 是一个本地优先、证据驱动的求职工作系统。它把岗位分析、申请材料生成、投递记录、邮件进展识别、面试准备和复盘放进同一条可追踪工作流，同时保留每个事实的来源、日期和材料版本。
 
-项目面向不同国家、行业、岗位和职业阶段，不预设学校邮箱、固定简历结构、特定求职网站或单一模型供应商。用户可以只使用基础记录功能，也可以按需连接邮件、CareerOps、文档工具、自动化和第三方决策模型。
+项目面向不同国家、行业、岗位和职业阶段，不预设学校、工作或个人邮箱，也不预设固定简历结构、特定求职网站或单一模型供应商。完成 onboarding 前，用户必须明确选择一个只读求职邮箱、完成实时验证与首次只读同步，并实际注册且探测四项每日任务。内置通用路径使用环境变量引用中的 IMAPS 凭据；宿主 connector 可导入邮件，但在独立实时验证适配器确认账号前仍属于自我声明。CAREER JOURNAL 不保存密码、Token 或 Cookie。
 
 系统提供两个运行版本：
 
@@ -40,7 +42,8 @@ Job Search Ops 是一个本地优先、证据驱动的求职工作系统。它�
 - 用统一记录关联公司、岗位、申请状态、事件、材料版本和面试信息
 - 根据 JD 和经过验证的候选人证据生成或修改 Resume、Cover Letter 等材料
 - 让每个关键事实和状态变更可追溯、可复核、可撤销
-- 邮箱未配置时主动引导配置，同时允许用户跳过并继续使用其他功能
+- 将用户明确选择的只读求职邮箱和首次成功同步作为 onboarding 完成条件
+- 按电脑检测到的 IANA 时区实际注册四项每日任务，并用 `career-journal doctor` 作为完成门禁
 - 让 Codex 用户通过克隆仓库获得最少配置体验
 - 让 API 用户自由选择模型供应商，并通过相同工作流获得一致结果
 - 通过独立 Skill 和能力适配器复用 CareerOps、PDF、Documents、邮件及其他能力
@@ -68,9 +71,9 @@ Job Search Ops 是一个本地优先、证据驱动的求职工作系统。它�
 
 使用 Cursor、其他 Agent IDE、CLI 或自建应用，希望通过自己的 API Key 调用任意兼容模型，并保留本地记录与可替换的模型适配层。
 
-### 4.3 手动优先用户
+### 4.3 隐私优先用户
 
-不愿连接邮箱或配置自动化，只希望导入 JD、生成材料、记录投递和查看本地看板。
+希望求职记录与材料保留在本地，同时使用自己明确选择的只读求职邮箱和本机调度能力；邮箱凭据由宿主 connector 或 API client 持有，不写入 CAREER JOURNAL。
 
 ## 5. 产品原则
 
@@ -80,7 +83,7 @@ Job Search Ops 是一个本地优先、证据驱动的求职工作系统。它�
 4. **人控制外部动作**：发送、提交、删除、归档和联系招聘方均由用户控制
 5. **能力组合**：主 Skill 编排流程，专业 Skill 执行专业任务
 6. **通用配置**：个人偏好、地区规则和简历模板属于用户配置，不写死在公共 Skill
-7. **可降级运行**：邮件、Jev、特定模型或文档工具不可用时，基础系统仍可工作
+7. **明确的部分状态**：Jev、特定模型或文档工具不可用时，可显式降级；邮箱同步或定时任务缺失时，本地手动功能可用，但 setup 必须保持未完成且 doctor 不得通过
 8. **幂等与可审计**：相同邮件或事件重复导入不能造成重复记录或状态回退
 9. **尊重上游产出**：引用、调用、修改或分发第三方 Skill 和开源项目时，必须清楚署名、链接原项目并履行其许可证要求
 10. **真实新用户验证**：发布版本必须从公开 GitHub 仓库重新 clone 到干净目录验证，不能以开发工作区可运行代替用户体验
@@ -97,7 +100,7 @@ Job Search Ops 是一个本地优先、证据驱动的求职工作系统。它�
 
 ```mermaid
 flowchart TB
-    U[用户 / Codex / API Client] --> O[job-search-ops 编排 Skill]
+    U[用户 / Codex / API Client] --> O[career-journal 编排 Skill]
     O --> C[共享核心与状态机]
     O --> CO[CareerOps Materials]
     O --> EM[Email Adapters]
@@ -114,11 +117,11 @@ flowchart TB
 ```
 
 ```text
-job-search-ops/
+career-journal/
 ├── AGENTS.md
 ├── .agents/
 │   └── skills/
-│       ├── job-search-ops/
+│       ├── career-journal/
 │       │   └── SKILL.md
 │       └── careerops-materials/
 │           └── SKILL.md
@@ -163,14 +166,16 @@ job-search-ops/
 
 ### 7.2 Codex 适配器
 
-Codex 版本通过根目录 `AGENTS.md` 和仓库内 `job-search-ops` Skill 启动。初始化程序负责：
+Codex 版本通过根目录 `AGENTS.md` 和仓库内 `career-journal` Skill 启动。初始化程序负责：
 
 - 检查运行环境和依赖 Skill
 - 创建本地配置和数据目录
 - 导入候选人资料
-- 检测邮箱与模型配置
+- 要求用户选择只读求职邮箱，通过实时 IMAPS 或等价的可校验适配器完成鉴权和首次同步
+- 按电脑检测时区实际创建四项每日任务，并探测 Codex heartbeat 或原生 OS 定义
 - 调用 Codex 可用的文档、PDF、浏览器和自动化能力
 - 在执行前检查所需能力，不把“安装了 Skill”等同于“外部账号已经连接”
+- 在 `career-journal doctor` 确认邮箱实时验证、成功同步、四项调度器实时探测和匹配运行之前，不将 onboarding 标记为完成
 
 ### 7.3 通用 API 适配器
 
@@ -188,7 +193,7 @@ interface ModelProvider {
 
 ## 8. Skill 编排与依赖
 
-### 8.1 主 Skill：`job-search-ops`
+### 8.1 主 Skill：`career-journal`
 
 主 Skill 是工作流路由器，职责包括：
 
@@ -213,12 +218,12 @@ interface ModelProvider {
 
 | 能力 | 默认实现 | 级别 | 触发条件 | 缺失时处理 |
 |---|---|---|---|---|
-| 工作流编排 | `job-search-ops` | 必需 | 所有任务 | 阻止启动并报告安装错误 |
+| 工作流编排 | `career-journal` | 必需 | 所有任务 | 阻止启动并报告安装错误 |
 | Resume / Cover Letter | 通用化的 CareerOps Skill 与适配器 | 条件必需 | 生成或修改申请材料 | 引导安装/启用，不静默降级为无审计文本 |
 | PDF 创建与检查 | PDF Skill / document adapter | 条件必需 | 用户要求 PDF | 可先交付文本草稿，并明确 PDF 未生成 |
 | DOCX 创建与检查 | Documents Skill / document adapter | 可选 | 用户要求 DOCX | 提供可用格式或提示启用依赖 |
-| 邮件读取 | Gmail、Microsoft、IMAP 或本地邮件适配器 | 可选 | 用户启用邮件同步 | 保留手动更新流程 |
-| 定时任务 | 宿主 Automation adapter | 可选 | 用户启用定时检查 | 提供手动命令 |
+| 邮件读取 | 内置只读 IMAPS 客户端；宿主 connector 仅作导入适配器，除非另有可校验账号证明 | onboarding 必需 | 选择只读求职邮箱并执行首次同步 | setup 保持未完成；手动 EML 和自行编写的宿主 JSON 不能替代实时验证 |
+| 定时任务 | Codex Automation、可探测的操作系统调度器或符合同一契约的宿主 | onboarding 必需 | 注册四项每日任务 | 单纯 `register-external` 仅形成待验证声明；探测失败时 setup 保持未完成 |
 | Jev 决策 | TypeSafe adapter / `typesafe-ai` Skill | 实验性可选 | 用户已获得 Jev 权限并启用 | 规则与 LLM Structured Output fallback |
 | Wiki / 长期知识 | Wiki adapter | 可选 | 用户主动启用跨任务知识库 | 使用项目本地配置与证据库 |
 
@@ -243,7 +248,7 @@ README 必须设置清晰可见的 “Built With / Open Source Acknowledgements�
 
 | 项目或 Skill | 上游项目 | 作者/维护者 | 许可证 | 本项目用途 | 集成方式 |
 |---|---|---|---|---|---|
-| CareerOps | `santifer/career-ops` | Santiago Fernández de Valderrama / santifer | MIT | 岗位分析、材料生成、事实门和求职流程能力 | 固定版本依赖、适配器或经许可修改的代码 |
+| CareerOps | `career-ops-hq/career-ops` | Santiago Fernández de Valderrama and contributors | MIT | 岗位分析、材料生成、事实门和求职流程能力 | 固定版本依赖、适配器或经许可修改的代码 |
 | TypeSafe Agent Skill | `typesafe-ai/skills` | TypeSafe AI | MIT | Jev 工作流设计与 API 集成参考 | 实验性可选 Skill/adapter |
 | 其他运行时 Skill 与库 | 对应官方仓库 | 对应作者 | 实际许可证 | 按真实用途填写 | 按真实方式填写 |
 
@@ -262,18 +267,19 @@ README 必须设置清晰可见的 “Built With / Open Source Acknowledgements�
 
 ### 9.1 Codex 版本
 
-用户克隆仓库后，可对 Codex 输入“初始化 Job Search Ops”。系统执行：
+用户克隆仓库后，可对 Codex 输入“初始化 CAREER JOURNAL”。系统执行：
 
 1. 检测操作系统、Codex 项目上下文和运行时
 2. 校验 repo-local Skills 与 dependency manifest
 3. 创建未提交到 Git 的用户配置和数据目录
 4. 询问或导入基础候选人资料、已有简历和目标方向
-5. 选择地区、语言和时区
-6. 检查邮箱配置
+5. 选择地区和语言，并检测当前电脑的 IANA 时区
+6. 要求用户明确选择一个只读求职邮箱，完成实时 IMAPS 验证或提供等价的可校验适配器
 7. 检查 CareerOps 与文档能力
-8. 可选配置定时任务
-9. 运行 health check
-10. 创建或导入第一条岗位记录
+8. 在检测到的时区中创建四项每日任务，默认为 20:00 `mail-sync`、20:15 `deadline-review`、22:00 `daily-consolidation` 和 23:00 `local-backup`，记录真实 ID，并用 Codex `automation.toml`、launchd、cron 或 Windows Task Scheduler 的实时输出验证绑定命令
+9. 使用对应 ID 分别触发四项任务；IMAPS 邮件任务在 TLS 验证后只读抓取，并在事务提交后才推进 UID 游标
+10. 运行 `career-journal doctor` 作为 onboarding 门禁；任一邮箱实时验证、成功同步、调度器探测或匹配运行缺失时，setup 保持未完成
+11. 创建或导入第一条岗位记录
 
 ### 9.2 API 版本
 
@@ -284,24 +290,22 @@ API 版本初始化增加以下步骤：
 - 运行结构化输出能力测试
 - 设置预算或调用上限
 - 选择是否启用 Jev 决策适配器
+- 使用内置 IMAPS 只读客户端，或由 API client 完成邮箱鉴权并提供独立可校验的账号证明；单纯结构化 JSON 只能导入，不能让 doctor 通过
+- 通过可探测的操作系统调度器或符合同一契约的常驻 worker 实际注册与 Codex 版本相同的四项任务
 
-API Key 只保存在操作系统钥匙串、受保护的本地 secret store 或 `.env.local`；配置文件只保存供应商名称、模型、Base URL 引用和功能开关。
+模型 API Key 只保存在操作系统钥匙串、受保护的本地 secret store 或运行时环境中；配置文件只保存供应商名称、模型、Base URL 引用和功能开关。IMAPS 仅保存 `env:VARIABLE` 引用；邮箱 OAuth token、密码、Cookie 和其他凭据不写入 CAREER JOURNAL 数据库、日志或备份。
 
 ### 9.3 邮箱配置
 
-系统不能预设任何个人、学校或工作邮箱。
+系统不能预设任何个人、学校或工作邮箱。用户必须在初始化中明确选择用于求职的邮箱，并看到 provider、脱敏账号标识和只读权限范围。公开 CLI 拒绝保留示例域邮箱；完整内置路径使用证书校验的 IMAPS、`EXAMINE` 和 `BODY.PEEK[]`。
 
-若没有可用邮箱，初始化必须显示以下选择：
+可选的实现包括 Gmail、Microsoft、通用 IMAPS 或支持的本地邮件客户端，但产品不假设用户必然拥有某一类账号。内置 IMAPS 凭据通过环境变量引用取得；宿主 connector 或 API client 负责 token、Cookie 和 OAuth 状态。CAREER JOURNAL 仅保存最少必要的 provider、账号标识、验证时间和同步游标，不保存实际凭据。
 
-- 连接 Gmail
-- 连接 Microsoft 邮箱
-- 配置通用 IMAP
-- 检测支持的本地邮件客户端
-- 暂时跳过
+用户选择邮箱后，必须完成一次成功的实时验证与只读初始同步。IMAPS 同步可以合法返回零封新邮件，但必须成功完成 TLS 鉴权、只读打开邮箱、UID 检索和游标提交。宿主 JSON 必须包含所选账号、connector、只读声明、同步前后游标、唯一 run ID、获取时间和已验证 mail 任务 ID，但它本身仍只是自我声明，不能单独证明邮箱真实存在。未选择邮箱、实时验证失败或首次同步失败时，setup 保持未完成，`career-journal doctor` 报告阻塞项和修复方法。
 
-跳过邮箱后，JD 导入、材料生成、手动进展记录、面试准备和看板仍可使用。系统可以在设置页提示邮箱功能尚未启用，但不得反复阻塞用户。
+手动 EML 导入只是 connector 临时不可用时的 fallback，不能替代用户选择的邮箱、首次成功同步或每日 `mail-sync`，也不能让 doctor 通过。
 
-邮箱默认只读。系统不发送、回复、删除、归档或修改标签，也不点击申请、测评或登录链接。
+邮箱始终只读。系统不发送、回复、删除、归档或修改标签，也不点击申请、测评或登录链接。
 
 ### 9.4 README 首次配置指南
 
@@ -310,13 +314,13 @@ README 必须让一个没有项目背景的新用户仅按文档就能完成安�
 1. 系统要求和支持的平台
 2. `git clone`、进入目录和安装依赖的准确命令
 3. Codex 版本与 API 版本的选择方法
-4. 执行 `jobops setup` 初始化配置
+4. 执行 `career-journal setup` 初始化配置
 5. 导入简历、候选人资料或从空白 profile 开始
 6. 配置模型 provider；API 版本说明如何使用 `.env.local` 或系统钥匙串
-7. 检测邮箱，未配置时选择连接或跳过
-8. 配置时区、通知方式和每日任务
-9. 执行 `jobops doctor` 检查 Skill、数据库、邮件、模型和自动化状态
-10. 执行 `jobops start` 或对应命令打开本地 Dashboard
+7. 明确选择只读求职邮箱，通过实时 IMAPS 或等价可校验适配器完成鉴权和首次成功同步
+8. 使用电脑检测到的时区创建 20:00 `mail-sync`、20:15 `deadline-review`、22:00 `daily-consolidation` 和 23:00 `local-backup`，对 Codex heartbeat 或原生调度器执行实时探测，并分别触发一次
+9. 执行 `career-journal doctor` 检查 Skill、数据库、过去 36 小时内的邮箱实时验证与成功同步、模型、四项调度器探测和匹配成功运行；doctor 通过后才能将 onboarding 标记为完成
+10. 执行 `career-journal start` 或对应命令打开本地 Dashboard
 11. 创建第一条岗位记录的完整示例
 12. 更新、卸载、备份和清除本地数据的方法
 
@@ -326,40 +330,48 @@ README 还必须解释：
 
 - 哪些功能完全本地运行，哪些功能会把最少必要内容发送到外部 API
 - 每个 Skill 的职责，以及主 Skill 会在什么场景调用它
-- 邮件连接、模型 Key、Jev 权限和定时任务都是独立配置项
+- 邮箱由谁鉴权、哪些元数据保存在本地，以及为什么完成 onboarding 要求成功同步、四项实时调度器验证和匹配运行
+- 模型 Key 和 Jev 权限是独立的可选配置项，不影响邮箱和定时任务门禁
 - Jev 仍可能处于 waitlist；没有 Jev 不影响基本功能
 - 如何查看当前版本、已启用依赖和第三方许可证
 
 ### 9.5 每日定时任务配置
 
-初始化向导必须逐项展示所有内置每日任务，让用户为每一项明确选择启用、禁用或稍后配置，并在启用时选择本地时区、执行时间、通知策略和使用的邮箱账号。向导不能静默跳过任务配置；公共项目也不得写死作者当前使用的时间、邮箱或任务名称。
+初始化向导必须按当前电脑检测到的 IANA 时区实际创建以下四项每日任务。时间是可编辑默认值，用户可在注册前修改；但任一任务未注册、实时探测失败或没有匹配的近期成功运行时，setup 必须保持未完成，`career-journal doctor` 也不得通过。`register-external` 只保存待验证声明；Codex 路径必须回读有界限的 ACTIVE `automation.toml` 并核对时间、时区和命令，原生路径必须回读 launchd、cron 或 Windows Task Scheduler 中的实际定义。单纯生成文件、填写占位 ID 或直接手工调用不算完成。
 
-首版支持以下可选任务：
+公共项目不得写死作者的邮箱或时区；默认执行时间按每位用户电脑检测到的时区解释。
 
 | 任务 | 用途 | 默认行为 |
 |---|---|---|
-| `mail-sync` | 只读检查求职邮件并更新待确认事件 | 未连接邮箱时不创建，并引导配置 |
-| `deadline-review` | 检查测评、面试和申请截止日期 | 仅在临近截止或需要行动时通知 |
-| `daily-consolidation` | 合并当日新增求职知识、偏好和复盘并去重 | 只整理本项目可访问内容，不读取未授权目录 |
-| `local-backup` | 备份数据库、配置快照和材料索引 | 不备份 secrets，可由用户关闭 |
+| `mail-sync` | 只读检查用户选定的求职邮箱并更新待确认事件 | 20:00；绑定 onboarding 中选定的邮箱 |
+| `deadline-review` | 检查测评、面试和 Offer 阶段中需要行动的申请 | 20:15；仅在有变化或需要行动时通知 |
+| `daily-consolidation` | 合并当日新增求职知识、偏好和复盘并去重 | 22:00；只整理本项目可访问内容，不读取未授权目录 |
+| `local-backup` | 备份数据库、非敏感配置快照和材料元数据索引 | 23:00；默认不复制材料 payload 或 secrets |
 
 Codex 环境优先使用宿主提供的 Automation/heartbeat；通用 API 版本使用操作系统调度器或常驻本地 worker。两者必须实现同一任务契约。
+
+alpha.6 的原生 `automation install` 只安装并探测不需要邮箱凭据的 `deadline-review`、`daily-consolidation` 和 `local-backup`。`mail-sync` 必须由能够安全注入 `secret-ref` 所指环境变量的 Codex 或其他可信外部调度器执行；在没有跨平台安全 secret provider 时，CLI 必须拒绝原生安装，不得把密钥写入 launchd、cron 或 Windows Task Scheduler 定义。Codex 登记命令必须返回包含绝对 Node、CLI、数据目录、任务 ID 和外部 ID 的 `codexCommandLine`；heartbeat prompt 必须原样单独保存该行，实时探测再核对 ACTIVE 状态、时间、时区和准确 argv。
 
 目标 CLI：
 
 ```sh
-jobops automation configure
-jobops automation list
-jobops automation run mail-sync --dry-run
-jobops automation update mail-sync
-jobops automation disable mail-sync
-jobops automation remove mail-sync
+career-journal automation configure --task mail-sync --time 20:00 --enabled
+career-journal automation configure --task deadline-review --time 20:15 --enabled
+career-journal automation configure --task daily-consolidation --time 22:00 --enabled
+career-journal automation configure --task local-backup --time 23:00 --enabled
+career-journal automation list
+career-journal automation install --task deadline-review
+career-journal automation verify --task deadline-review
+career-journal automation run --id career-journal-deadline-review --home /absolute/data-home --external-id io.career-journal.deadline-review
+career-journal automation uninstall --task deadline-review
 ```
 
 自动化要求：
 
 - 使用 IANA 时区并正确处理夏令时
+- 默认使用当前电脑检测到的时区，不预设某个城市或作者时区
 - 创建与更新必须幂等，重复运行 setup 不得生成重复任务
+- setup 必须记录四项真实 ID，探测实际调度定义，并观测每项使用匹配 ID 的成功运行；仅生成配置、调度文件或手工填入占位 ID 不算完成
 - 每项任务保存最后成功时间、最后尝试时间、游标和错误状态
 - 失败任务不推进成功游标
 - 没有实质新进展时保持安静
@@ -373,7 +385,7 @@ jobops automation remove mail-sync
 
 测试分为两条路径：
 
-1. **Fresh install**：没有历史配置的新用户完成 clone、setup、依赖检查、邮箱选择、自动化配置、第一条岗位记录和 Dashboard 启动
+1. **Fresh install**：没有历史配置的新用户完成 clone、setup、依赖检查、显式选择只读求职邮箱、首次成功同步、四项每日任务的实时调度器验证与匹配运行、doctor 门禁、第一条岗位记录和 Dashboard 启动
 2. **Upgrade**：上一稳定版本的用户执行 pull/update、配置迁移、数据库迁移和 doctor，原有数据及 secrets 引用保持有效
 
 用户本人将作为首位 dogfooding 用户，在独立目录中完整体验公开版本。发现的问题必须记录到 GitHub Issue 或版本化 dogfood 记录中，包含环境、版本、复现步骤、预期、实际结果、截图/日志的脱敏引用和严重程度。
@@ -450,11 +462,15 @@ jobops automation remove mail-sync
 ### 11.3 邮箱
 
 - **FR-MAIL-01**：支持多邮箱，每个邮箱独立授权、游标和错误状态
-- **FR-MAIL-02**：未配置邮箱时主动提示一次，并允许跳过
+- **FR-MAIL-02**：onboarding 必须由用户明确选择一个只读求职邮箱，不得默认学校、工作或个人邮箱
 - **FR-MAIL-03**：默认只读，任何写操作必须是独立功能并重新获得明确授权
 - **FR-MAIL-04**：营销邮件、人才社区推广和通用职位推荐不能更新申请状态
 - **FR-MAIL-05**：邮件服务不可用时必须报告未覆盖范围，不能写成“没有新邮件”
 - **FR-MAIL-06**：截止日期需要保留原时区并显示用户本地换算
+- **FR-MAIL-07**：onboarding 只能在所选邮箱完成首次只读同步并成功提交游标后继续
+- **FR-MAIL-08**：IMAPS 密码或 app password 只通过 `env:VARIABLE` 引用获取；宿主 connector 或 API client 持有自身 token、Cookie 或 OAuth 凭据；CAREER JOURNAL 不保存实际凭据
+- **FR-MAIL-09**：手动 EML 仅作故障 fallback，不能满足首次同步或 doctor 门禁
+- **FR-MAIL-10**：宿主编写的 JSON 批次属于自我声明；如无独立可校验的账号证明，不能让 doctor 通过
 
 ### 11.4 Dashboard 与检索
 
@@ -469,17 +485,18 @@ jobops automation remove mail-sync
 - **FR-DOC-01**：README 必须提供从 clone 到第一条岗位记录的可执行 Quick Start
 - **FR-DOC-02**：README 必须列出所有直接使用或修改的第三方 Skill、项目、作者、链接、许可证和用途
 - **FR-DOC-03**：发行物必须包含适用的第三方版权与许可证原文
-- **FR-DOC-04**：`jobops doctor` 必须报告配置状态、缺失依赖和修复步骤，不输出 secrets
+- **FR-DOC-04**：`career-journal doctor` 必须报告配置状态、缺失依赖和修复步骤，不输出 secrets；邮箱实时验证、近 36 小时成功同步、四项调度器探测或匹配运行缺失时必须以非成功状态结束并阻止 onboarding 完成
 - **FR-DOC-05**：README 示例命令必须由 CI 在干净环境中执行 smoke test
 
 ### 11.6 自动化
 
-- **FR-AUTO-01**：初始化时允许配置、跳过或稍后启用每日任务
-- **FR-AUTO-02**：每个任务独立配置时区、时间、账号、通知和启用状态
+- **FR-AUTO-01**：完成 onboarding 必须实际注册 `mail-sync`、`deadline-review`、`daily-consolidation` 和 `local-backup` 四项每日任务
+- **FR-AUTO-02**：默认使用电脑检测到的 IANA 时区，执行时间分别为 20:00、20:15、22:00 和 23:00；用户可在注册前修改
 - **FR-AUTO-03**：重复配置相同任务必须更新原任务，不能创建副本
-- **FR-AUTO-04**：提供 list、dry-run、update、disable 和 remove 操作
+- **FR-AUTO-04**：提供 list、dry-run、install、verify、update、disable、uninstall、remove、register-external 和 unregister-external 操作；`register-external` 只保存 pending claim，`verify` 必须回读已支持调度器的实际定义
 - **FR-AUTO-05**：Codex 与通用 API 版本必须遵守同一任务行为和游标规则
 - **FR-AUTO-06**：README 必须提供各支持平台的安装、验证与卸载步骤
+- **FR-AUTO-07**：任一任务仅保存为配置或调度定义、实时探测失败，或没有近 36 小时内使用匹配 ID 的成功运行时，doctor 必须阻止 onboarding 完成
 
 ### 11.7 发布、升级与反馈
 
@@ -582,8 +599,8 @@ TypeSafe 在 2026-09-15 公布的 early-access 价格为每百万输入 tokens 0
 
 ## 16. MVP 验收标准
 
-1. 新用户克隆仓库后，可在十分钟内完成初始化并创建第一条岗位记录
-2. 未配置邮箱的用户会得到一次明确提示，选择跳过后其他功能正常
+1. 新用户克隆仓库后，可在十分钟内完成邮箱选择、实时验证、首次只读同步、四项每日任务的调度器探测与匹配运行、doctor 门禁和第一条岗位记录
+2. 未选择只读求职邮箱、近 36 小时实时验证或同步未成功、四项任务调度器探测未齐全或没有匹配运行时，setup 保持未完成且 doctor 以非成功状态结束
 3. 仓库、示例配置和测试中不存在默认个人邮箱或真实个人信息
 4. Codex 和 API 版本使用同一 fixtures 时，产生相同的事件去重和状态转换结果
 5. Resume/Cover Letter 请求实际调用 CareerOps 能力，并保存验证状态和文件哈希
@@ -596,8 +613,8 @@ TypeSafe 在 2026-09-15 公布的 early-access 价格为每百万输入 tokens 0
 12. 所有外部写操作均需要用户明确触发并在操作后验证结果
 13. README 在全新环境中通过自动化 smoke test，用户可按文档完成 clone、setup、doctor 和启动
 14. README 与 `THIRD_PARTY_NOTICES.md` 完整列出 CareerOps、TypeSafe Agent Skill 及其他实际依赖的来源和许可证
-15. 初始化可创建至少一个每日任务；重复执行不会产生重复任务，并可通过 dry-run 验证
-16. 用户可暂停和移除每日任务，移除后调度器中不存在残留任务
+15. 初始化按电脑检测时区实际创建四项任务，默认时间为 20:00、20:15、22:00 和 23:00；重复执行不会产生副本，也不会覆盖用户自定义时间和策略；调度器探测摘要、真实 ID 与匹配成功运行均可审计
+16. 用户完成 onboarding 后可暂停、修改和移除每日任务；任务不再满足完整基线时，doctor 必须如实报告非完整状态，移除后调度器中不存在残留任务
 17. 发布候选版本从 GitHub 远端全新 clone 后通过完整 Quick Start，不依赖开发机未提交文件
 18. 用户完成一次独立的新用户 dogfood 流程，发现的问题具有可复现记录并进入版本计划
 19. 从上一稳定版本升级后，Application、事件、材料索引、配置和自动化状态保持正确
@@ -662,15 +679,15 @@ README 必须给出类似以下的完整更新路径，最终命令以实现为�
 
 ```sh
 git pull --ff-only
-jobops update --check
-jobops migrate --dry-run
-jobops migrate
-jobops doctor
+career-journal update --check
+career-journal migrate --dry-run
+career-journal migrate
+career-journal doctor
 ```
 
 迁移要求：
 
-- 更新前自动备份数据库、非敏感配置和材料索引
+- 更新前自动备份数据库、非敏感配置和材料元数据索引；默认不复制材料原文件
 - migration 按 schema version 顺序执行并保持幂等
 - dry-run 显示将修改的对象数量和风险，不写入真实数据
 - 失败时恢复上一版本数据，并保留可脱敏的诊断信息
@@ -708,11 +725,12 @@ jobops doctor
 - Application、Event、Artifact 和 Dashboard
 - 手动 JD 导入、材料生成与进展记录
 - Codex bootstrap 和 repo-local Skill
+- 用户选定只读求职邮箱、实时验证与成功同步、四项调度器探测、匹配运行与 doctor 门禁
 - 发布首个 prerelease，并完成用户 fresh-clone dogfood
 
-### Phase 2：邮件和自动化
+### Phase 2：邮件与自动化扩展
 
-- Gmail、Microsoft 和至少一个通用/本地邮箱方案
+- 在 MVP 的实时 IMAPS 验证之上扩展可独立校验的 Gmail、Microsoft 和本地邮箱适配器
 - 只读同步、去重、截止日期和定时任务
 - 邮箱健康状态与未覆盖范围提示
 - Codex heartbeat、macOS、Windows 和 Linux 调度配置及卸载文档
@@ -739,7 +757,8 @@ jobops doctor
 - CareerOps 事实门阻止的不受支持陈述数量
 - 面试前能够定位对应 JD、材料和准备包的成功率
 - 不同运行版本的核心行为一致率
-- 邮件、模型和 Jev 未配置时的流程完成率
+- 邮箱选择、首次只读同步、四项任务实际注册和 doctor 门禁的完成率
+- 模型和 Jev 未配置时的非必需流程完成率
 - fresh-clone Quick Start 成功率及完成时间
 - 从上一稳定版升级的成功率、迁移失败率和回滚成功率
 - 每个版本中具有完整复现和验证说明的修复占比

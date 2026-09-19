@@ -20,16 +20,30 @@ git -C "$checkout" checkout --quiet "$source_ref"
 cli="$checkout/bin/career-journal.mjs"
 legacy_cli="$checkout/bin/jobops.mjs"
 
-"$node_bin" "$cli" setup --home "$data_home" --timezone UTC --skip-email
+"$node_bin" "$cli" setup --home "$data_home" --timezone UTC --email-provider host --email-address candidate@school.edu --email-connector gmail
 test -f "$data_home/.career-journal/config.json"
 test ! -e "$data_home/.jobops/config.json"
-"$node_bin" -e "const fs=require('node:fs');const c=JSON.parse(fs.readFileSync(process.argv[1]));if(c.data.database!=='.career-journal/career-journal.db'||c.careerOps.entrypoint!=='career-journal-adapter.mjs')process.exit(1)" "$data_home/.career-journal/config.json"
-"$node_bin" "$cli" doctor --home "$data_home"
+"$node_bin" -e "const fs=require('node:fs');const c=JSON.parse(fs.readFileSync(process.argv[1]));if(c.data.database!=='.career-journal/career-journal.db'||c.careerOps.entrypoint!=='career-journal-adapter.mjs'||c.email.setupState!=='pending-verification'||c.automation.setupState!=='pending-registration')process.exit(1)" "$data_home/.career-journal/config.json"
+for task in mail-sync deadline-review daily-consolidation local-backup; do
+  "$node_bin" "$cli" automation register-external --home "$data_home" --task "$task" --driver codex --external-id "smoke-$task" >/dev/null
+done
 "$node_bin" "$cli" application add --home "$data_home" --company DogfoodCo --role TestEngineer
-"$node_bin" "$cli" automation configure --home "$data_home" --task deadline-review --time 20:00 --timezone UTC --enabled
+"$node_bin" "$cli" email list --home "$data_home" >"$scratch/email-accounts.json"
+"$node_bin" "$cli" automation list --home "$data_home" >"$scratch/automations.json"
+"$node_bin" "$cli" application show --home "$data_home" --id dogfoodco-testengineer >"$scratch/application.json"
+"$node_bin" -e "const fs=require('node:fs');const accounts=JSON.parse(fs.readFileSync(process.argv[1]));const tasks=JSON.parse(fs.readFileSync(process.argv[2]));const app=JSON.parse(fs.readFileSync(process.argv[3]));if(accounts.length!==1||accounts[0].settings.connector!=='gmail'||accounts[0].lastSuccessAt!==null)process.exit(1);if(tasks.length!==4||tasks.some((task)=>task.config.registration?.externalId!=='smoke-'+task.type||task.config.registration?.verified!==false||task.config.registration?.status!=='pending-verification'||task.config.registration?.lastExternalRunAt))process.exit(1);if(app.events.length!==0)process.exit(1)" "$scratch/email-accounts.json" "$scratch/automations.json" "$scratch/application.json"
+if "$node_bin" "$cli" automation run --home "$data_home" --task deadline-review --external-id smoke-deadline-review >"$scratch/unverified-run.txt" 2>&1; then
+  echo "unverified scheduler claim unexpectedly ran" >&2
+  exit 1
+fi
+if "$node_bin" "$cli" doctor --home "$data_home" >"$scratch/doctor.txt"; then
+  echo "self-attested mailbox and scheduler claims unexpectedly passed doctor" >&2
+  exit 1
+fi
+grep -q '^FAIL email:' "$scratch/doctor.txt"
+grep -q '^FAIL automation:' "$scratch/doctor.txt"
+"$node_bin" -e "const fs=require('node:fs');const c=JSON.parse(fs.readFileSync(process.argv[1]));if(c.email.setupState!=='pending-verification'||c.automation.setupState!=='pending-registration')process.exit(1)" "$data_home/.career-journal/config.json"
 "$node_bin" "$cli" automation run --home "$data_home" --task deadline-review --dry-run
-"$node_bin" "$cli" automation install --home "$data_home" --task deadline-review
-find "$data_home/.career-journal/schedulers" -type f -print | grep -Eq '/(io\.career-journal\.deadline-review\.plist|career-journal-deadline-review\.(cron|txt))$'
 "$node_bin" "$legacy_cli" --version >/dev/null
 
 server_log="$scratch/server.log"

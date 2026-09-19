@@ -79,3 +79,20 @@ test('ambiguous email uses the configured decision router and persists its engin
     context.db.close();
   } finally { await rm(home, { recursive: true, force: true }); }
 });
+
+test('marketing email keeps its decision trace without creating an application event', async () => {
+  const db = openDatabase(':memory:'); migrate(db);
+  const message = path.join(os.tmpdir(), `career-journal-marketing-${process.pid}.eml`);
+  try {
+    configureEmailAccount(db, { provider: 'manual-eml', address: 'candidate@example.test' });
+    createApplication(db, { company: 'Acme', role: 'Analyst' });
+    await writeFile(message, 'Message-ID: <marketing@example.test>\nSubject: Acme Analyst newsletter\n\nRecommended jobs for you');
+    const result = await importEml(db, message, {
+      accountId: 'manual-eml:candidate@example.test', applicationId: 'acme-analyst', recordedAt: '2026-09-19T02:00:00Z',
+    });
+    assert.equal(result.classification, 'marketing');
+    assert.equal(db.prepare('SELECT COUNT(*) count FROM decision_traces').get().count, 1);
+    assert.equal(db.prepare('SELECT application_id applicationId FROM decision_traces').get().applicationId, 'acme-analyst');
+    assert.equal(db.prepare('SELECT COUNT(*) count FROM application_events').get().count, 0);
+  } finally { db.close(); await rm(message, { force: true }); }
+});

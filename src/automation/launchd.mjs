@@ -3,7 +3,8 @@ const xml = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;'
 export function renderLaunchd(task, runtime) {
   const [hour, minute] = task.schedule.split(':').map(Number);
   const label = task.id.startsWith('jobops-') ? `io.job-search-ops.${task.type}` : `io.career-journal.${task.type}`;
-  const args = [runtime.node, runtime.cli, 'automation', 'run', '--id', task.id, '--home', runtime.home];
+  const args = [runtime.node, runtime.cli, 'automation', 'run', '--id', task.id, '--home', runtime.home,
+    '--external-id', task.config.registration.externalId];
   return {
     kind: 'launchd',
     fileName: `${label}.plist`,

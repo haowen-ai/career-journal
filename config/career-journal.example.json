@@ -6,8 +6,15 @@
     "artifacts": ".career-journal/artifacts"
   },
   "email": {
-    "setupState": "not-configured",
-    "accounts": []
+    "setupState": "pending-verification",
+    "accounts": [
+      {
+        "id": "imap:you@your-domain.edu",
+        "provider": "imap",
+        "address": "you@your-domain.edu",
+        "readOnly": true
+      }
+    ]
   },
   "model": {
     "provider": "none",
@@ -28,5 +35,8 @@
   },
   "materials": {
     "ruleFiles": []
+  },
+  "automation": {
+    "setupState": "pending-registration"
   }
 }

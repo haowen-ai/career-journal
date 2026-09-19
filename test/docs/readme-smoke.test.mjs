@@ -104,3 +104,38 @@ test('public onboarding uses the friendly localhost dashboard URL', async () => 
     assert.doesNotMatch(readme, /dashboard runs locally on `127\.0\.0\.1`|看板在本机 `127\.0\.0\.1` 运行/i);
   }
 });
+
+test('public onboarding requires a mailbox and verified daily scheduler registrations', async () => {
+  const [english, chinese] = await Promise.all([
+    readFile('README.md', 'utf8'),
+    readFile('README.zh-CN.md', 'utf8'),
+  ]);
+  for (const readme of [english, chinese]) {
+    assert.doesNotMatch(readme, /--skip-email/);
+    assert.match(readme, /--email-provider imap/);
+    assert.match(readme, /--email-provider host/);
+    assert.match(readme, /--email-address/);
+    assert.match(readme, /email verify-imap/);
+    assert.match(readme, /email sync-host/);
+    assert.match(readme, /automation register-external/);
+    assert.match(readme, /automation verify/);
+    assert.match(readme, /automation run[^\n]*--external-id/);
+    assert.match(readme, /codexCommandLine/);
+    for (const task of ['mail-sync', 'deadline-review', 'daily-consolidation', 'local-backup']) {
+      assert.match(readme, new RegExp(task));
+    }
+    for (const time of ['20:00', '20:15', '22:00', '23:00']) {
+      assert.match(readme, new RegExp(time.replace(':', '\\:')));
+    }
+  }
+  assert.match(english, /manual EML[^\n]*(fallback|one-off)/i);
+  assert.match(chinese, /手动 EML[^\n]*(备用|临时|单次)/i);
+  assert.match(english, /doctor[^\n]*pass/i);
+  assert.match(chinese, /doctor[^\n]*通过/i);
+  assert.match(english, /36 hours/i);
+  assert.match(chinese, /36 小时/i);
+  assert.match(english, /native `mail-sync` installation is deliberately blocked/i);
+  assert.match(chinese, /主动阻止原生安装 `mail-sync`/);
+  assert.doesNotMatch(english, /`mail-sync` is supported when its selected account uses IMAPS/i);
+  assert.doesNotMatch(chinese, /当所选邮箱是 IMAPS 时，`mail-sync` 也受支持/);
+});

@@ -1,31 +1,54 @@
 ---
 name: career-journal
-description: Use when tracking job applications, reviewing recruiting updates, checking deadlines, or coordinating application materials in this repository
+description: Use when tracking job applications, reviewing recruiting updates, checking deadlines, configuring daily job-search routines, or coordinating application materials in this repository
 ---
 
 # CAREER JOURNAL
 
-Keep job-search facts, evidence, and artifacts auditable. Run `career-journal doctor` before capability-dependent work and continue with core local tracking when optional capabilities are unavailable.
+[English](SKILL.md) | [简体中文](SKILL.zh-CN.md)
+
+Keep job-search facts, evidence, and artifacts auditable. A read-only mailbox and all four daily tasks are required onboarding gates. A new workspace is configured only after one user-selected mailbox has completed an initial sync, all four tasks are truly registered in the host scheduler, every task has one observed run with its matching external ID, and `career-journal doctor` passes.
+
+## First-run contract
+
+1. Obtain the exact email address from the user. Never infer a school, work, or personal account. Prefer the built-in live IMAPS path when the provider permits it. Store an app password or provider credential only in a secret environment variable. If IMAPS is unavailable, a host-managed connector may import read-only mail, but its JSON is self-attested and onboarding remains incomplete until an independent live verifier adapter exists; do not substitute manual EML.
+2. From the clone, run `node ./bin/career-journal.mjs setup --home <absolute-home> --email-provider imap --email-address <address> --imap-host <host> --imap-user <username> --secret-ref env:<VARIABLE>`. Keep the computer-detected IANA time zone unless explicitly overridden. Do not use a reserved example address. Run repo commands as `node ./bin/career-journal.mjs ...` or `./career-journal ...`; do not assume a global `career-journal` command exists.
+3. Run `node ./bin/career-journal.mjs email verify-imap --home <absolute-home> --account imap:<address>`. Report a real authentication or mailbox error; never replace it with connector JSON.
+4. Use the host automation capability to create real ACTIVE daily jobs in the same time zone: `mail-sync` 20:00, `deadline-review` 20:15, `daily-consolidation` 22:00, and `local-backup` 23:00. In Codex desktop, use `automation_update` rather than hand-writing `automation.toml`. Do not create a second set when matching jobs already exist.
+5. After each Codex heartbeat returns its ID, run `node ./bin/career-journal.mjs automation register-external --home <absolute-home> --task <task> --driver codex --external-id <real-id>`. Read `codexCommandLine` from the JSON result. Update that same heartbeat so its prompt contains `codexCommandLine` verbatim as a standalone line and states the detected IANA time zone. Do not reconstruct the command or put any secret value in the prompt. The mail heartbeat's host environment must securely expose the variable named by `secret-ref`.
+6. Run `node ./bin/career-journal.mjs automation verify --home <absolute-home> --task <task>` for each job. Verification must read the actual saved scheduler definition and match its ACTIVE state, schedule, time zone, executable, CLI, task ID, data home, and external ID. A registration claim, generated file, screenshot, placeholder ID, or lookalike command is not verification.
+7. Trigger every verified job once with the exact returned `codexCommandLine`. The initial IMAPS sync may contain zero relevant messages. Direct sync refreshes mailbox verification and advances the UID cursor only after all local evidence commits.
+8. Run `node ./bin/career-journal.mjs doctor --home <absolute-home>`; finish only when email and automation pass. Email PASS requires live IMAPS verification and a successful read-only sync within 36 hours. Automation PASS requires a successful live scheduler probe and one matching run for every task in that window.
+
+For API or CLI-only hosts, `automation install` may install and probe `deadline-review`, `daily-consolidation`, and `local-backup` with launchd, cron, or Windows Task Scheduler. Native `mail-sync` installation is deliberately blocked in alpha.6 because the generated definitions do not have a secure cross-platform secret provider. Use a trusted external scheduler that injects the referenced environment variable, then register, verify, and run it through the same gate.
+
+Manual EML is a one-off fallback. It does not replace daily access or satisfy setup. Never store mailbox credentials or literal secrets in config, batches, records, logs, exports, or prompts.
 
 ## Route the request
 
-- Application, event, deadline, status, or dashboard: use the `career-journal` CLI
-- Resume or cover letter: read `careerops-materials`; CareerOps is required for verified generation, and the built-in plus configured personal material rules must be loaded
+- Application, event, deadline, status, or dashboard: use the CLI
+- Resume or cover letter: read `careerops-materials`; verified generation requires CareerOps plus built-in and personal rules
 - Rendered PDF inspection: use the host PDF capability when available
 - DOCX work: use the host Documents capability when available
-- Recruiting email: use only a configured read-only email adapter; manual EML remains valid
-- Scheduled checks: use `career-journal automation`; install OS scheduling only when requested
+- Email: use live IMAPS and the verified `career-journal-mail-sync` command; host `email sync-host` batches are import-only and self-attested, while manual EML is one-off fallback only
+- Scheduled checks: create real host automation, record it with `automation register-external`, trigger it with the same external ID, and verify it with `doctor`
 - Durable cross-project knowledge: use the host Wiki capability when requested
-- Jev: optional decision support only; respect access state and keep rules/model fallbacks
+- Jev: optional decision support; respect access state and keep fallbacks
+
+CareerOps is the independently maintained MIT-licensed [career-ops-hq/career-ops](https://github.com/career-ops-hq/career-ops) project. CAREER JOURNAL routes material work through the repository's `careerops-materials` adapter and must preserve upstream attribution. Jev is experimental and optional; no Jev access or key is required for the core workflow.
 
 ## Evidence rules
 
-Append events instead of rewriting history. Distinguish observed, occurred, and recorded time. If the actual event time is unknown, store `occurred_at = null`; never substitute the email or current date. A user statement that an application was sent supports a submitted-status event for an unambiguous application, but it does not identify the submitted artifact. If several roles could match, obtain the application ID instead of guessing. Keep every generated file as a draft until the exact uploaded file is known and explicitly recorded as a submitted artifact. Never infer rejection from silence or turn a recruiting newsletter into an application update.
+Append events instead of rewriting history. Distinguish observed, occurred, and recorded time; use `occurred_at = null` when unknown. A user-reported submission supports a status event for one unambiguous application, but does not identify the submitted artifact. If roles could match, obtain the application ID. Keep generated files as a draft until the exact uploaded file is recorded. Never infer rejection from silence or treat a recruiting newsletter as progress.
 
 ## Capability failure
 
-State which check is unavailable and what remains unverified. Do not invent a successful email check, CareerOps run, rendered-file audit, or Jev decision. Never include credentials in records, logs, exports, or prompts.
+State the failed check and what remains unverified. Preserve the last successful cursor after a failed email batch. Never invent successful email, automation, CareerOps, rendered-file, or Jev results.
+
+## Release discipline
+
+Use Semantic Versioning. A public version is complete only when the same version appears in the CLI metadata and CHANGELOG, its immutable Git tag and GitHub Release exist, and the published tag passes a remote fresh-clone test plus the documented previous-version upgrade test. Never describe an unpushed commit or a dirty local checkout as published.
 
 ## Legacy upgrade compatibility
 
-Use `jobops`, `.jobops/`, or an explicitly configured `jobops-adapter.mjs` only when reading or upgrading an installation created by v0.1.0-alpha.5 or earlier. Do not discover the legacy adapter for a new workspace. Preserve a legacy automation's stored ID and platform registration name when regenerating its definition; replace the existing OS registration instead of adding a parallel CAREER JOURNAL task. Use the CAREER JOURNAL names for every new workspace, command, integration, and scheduler definition.
+Use `jobops`, `.jobops/`, and `jobops-adapter.mjs` only for v0.1.0-alpha.5-or-earlier upgrades. Preserve legacy scheduler identities; use CAREER JOURNAL names for new workspaces.
