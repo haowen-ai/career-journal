@@ -54,5 +54,5 @@ All notable changes are documented here. This project follows Semantic Versionin
 - Credentials are referenced through environment variables and excluded from exports
 - Submitted artifacts require explicit confirmation
 
-[Unreleased]: https://github.com/OWNER/job-search-ops/compare/v0.1.0-alpha.1...HEAD
-[0.1.0-alpha.1]: https://github.com/OWNER/job-search-ops/releases/tag/v0.1.0-alpha.1
+[Unreleased]: https://github.com/haowenchen0811/job-search-ops/compare/v0.1.0-alpha.1...HEAD
+[0.1.0-alpha.1]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.1

@@ -15,6 +15,13 @@
   "engines": {
     "node": ">=24.0.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/haowenchen0811/job-search-ops.git"
+  },
+  "homepage": "https://github.com/haowenchen0811/job-search-ops#readme",
+  "bugs": {
+    "url": "https://github.com/haowenchen0811/job-search-ops/issues"
+  },
   "license": "MIT"
 }
-

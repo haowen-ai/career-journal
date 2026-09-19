@@ -15,7 +15,7 @@ This is an alpha release. Core tracking is usable without an email account, mode
 Clone and initialize a private local data directory:
 
 ```sh
-git clone https://github.com/OWNER/job-search-ops.git
+git clone https://github.com/haowenchen0811/job-search-ops.git
 cd job-search-ops
 node ./bin/jobops.mjs setup --home "$HOME/job-search" --timezone America/Chicago --skip-email
 node ./bin/jobops.mjs doctor --home "$HOME/job-search"
