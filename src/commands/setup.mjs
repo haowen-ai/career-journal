@@ -47,6 +47,10 @@ export async function setup(home, answers = {}) {
     if (!allowed.has(answers.jev.accessState)) throw new Error('Invalid Jev access state');
     config.jev.accessState = answers.jev.accessState;
   }
+  if (answers.careerOps?.root !== undefined) {
+    config.careerOps ??= { root: null, pinnedVersion: '1.32.0', entrypoint: 'jobops-adapter.mjs' };
+    config.careerOps.root = answers.careerOps.root ? String(answers.careerOps.root) : null;
+  }
   config.updatedAt = new Date().toISOString();
   await saveConfig(home, config);
   return { created, config };
@@ -56,6 +60,7 @@ export async function setupCommand(parsed, io, runtime) {
   const answers = {
     timezone: parsed.options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC',
     email: parsed.options['skip-email'] ? { mode: 'skip' } : undefined,
+    careerOps: parsed.options['careerops-root'] !== undefined ? { root: parsed.options['careerops-root'] } : undefined,
   };
   const result = await setup(parsed.options.home ?? process.cwd(), answers);
   io.out(result.created ? 'Configuration created.' : 'Configuration updated.');
@@ -63,4 +68,3 @@ export async function setupCommand(parsed, io, runtime) {
   io.out(`Email: ${result.config.email.setupState}`);
   return 0;
 }
-

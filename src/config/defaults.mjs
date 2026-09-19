@@ -10,6 +10,7 @@ export function defaultConfig(now = new Date().toISOString()) {
     email: { setupState: 'not-configured', accounts: [] },
     model: { provider: 'none', baseUrl: null, model: null, secretRef: null },
     jev: { accessState: 'unavailable', model: 'jev-latest', secretRef: null, mode: 'off' },
+    careerOps: { root: null, pinnedVersion: '1.32.0', entrypoint: 'jobops-adapter.mjs' },
     automation: { setupState: 'not-configured' },
   };
 }
@@ -20,4 +21,3 @@ export function validateTimezone(value) {
   catch { throw new Error(`Invalid IANA timezone: ${value}`); }
   return value;
 }
-

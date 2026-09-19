@@ -1,6 +1,7 @@
 import { access, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { loadConfig } from '../config/store.mjs';
+import { detectCareerOps } from '../integrations/careerops.mjs';
 
 const major = (version) => Number(String(version).replace(/^v/, '').split('.')[0]);
 
@@ -26,10 +27,9 @@ export async function doctor(home, capabilities = {}) {
     const storage = await storageCheck();
     checks.push({ id: 'storage', severity: storage.ok ? 'pass' : 'fail', detail: storage.detail ?? '' });
   } catch (error) { checks.push({ id: 'storage', severity: 'fail', detail: error.message }); }
-  if (capabilities.careerOps) {
-    const result = await capabilities.careerOps();
-    checks.push({ id: 'careerops', severity: result.ok ? 'pass' : 'warn', detail: result.detail ?? '' });
-  } else checks.push({ id: 'careerops', severity: 'warn', detail: 'not checked' });
+  const careerOpsCheck = capabilities.careerOps ?? (() => detectCareerOps(config.careerOps));
+  const careerOps = await careerOpsCheck();
+  checks.push({ id: 'careerops', severity: careerOps.ok ? 'pass' : 'warn', detail: careerOps.detail ?? '' });
   checks.push({ id: 'email', severity: config.email.accounts.length ? 'pass' : 'warn', detail: config.email.setupState });
   checks.push({ id: 'jev', severity: config.jev.accessState === 'enabled' ? 'pass' : 'warn', detail: config.jev.accessState });
   return { ok: !checks.some((item) => item.severity === 'fail'), checks };
@@ -40,4 +40,3 @@ export async function doctorCommand(parsed, io) {
   for (const check of report.checks) io.out(`${check.severity.toUpperCase()} ${check.id}: ${check.detail}`);
   return report.ok ? 0 : 1;
 }
-

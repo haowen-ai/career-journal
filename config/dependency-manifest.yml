@@ -1,0 +1,31 @@
+schema_version: 1
+dependencies:
+  career-ops:
+    required: false
+    required_for:
+      - resume-generation
+      - cover-letter-generation
+    source: https://github.com/career-ops-hq/career-ops
+    version: "1.32.0"
+    license: MIT
+    adapter_entrypoint: jobops-adapter.mjs
+  pdf:
+    required: false
+    required_for:
+      - rendered-pdf-verification
+  documents:
+    required: false
+    required_for:
+      - docx-generation
+  email:
+    required: false
+    access: read-only
+  automation:
+    required: false
+  wiki:
+    required: false
+  jev:
+    required: false
+    source: https://github.com/typesafe-ai/skills
+    access_state: waitlisted
+    fallback: deterministic-rules-then-structured-llm
