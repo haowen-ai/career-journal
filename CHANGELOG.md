@@ -38,7 +38,7 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Fixed
 
-- None; this is the first public alpha
+- Upgrade dogfood resolves the target revision before checking out the older source revision, so `HEAD` cannot drift to the old commit
 
 ### Security
 
