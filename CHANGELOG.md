@@ -8,7 +8,7 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Added
 
-- Published bilingual dogfood evidence for the `v0.1.0-alpha.3` public tag
+- None
 
 ### Changed
 
@@ -21,6 +21,27 @@ All notable changes are documented here. This project follows Semantic Versionin
 ### Security
 
 - None
+
+## [0.1.0-alpha.4] - 2026-09-19
+
+### Added
+
+- Added the reserved `job-search-ops.localhost` browser hostname without requiring DNS or hosts-file configuration
+- Added integration coverage for the friendly dashboard URL, matching Origin hostname, and valid IPv6 loopback URL formatting
+- Published bilingual dogfood evidence for the `v0.1.0-alpha.3` public tag
+
+### Changed
+
+- The default `jobops start` output and public onboarding now use `http://job-search-ops.localhost:<port>` instead of a raw loopback IP
+- The product preview now displays the friendly local URL
+
+### Fixed
+
+- Replaced the developer-oriented `127.0.0.1` address in the new-user experience with a readable local product address
+
+### Security
+
+- The server continues to bind only to a loopback interface and accepts only the existing loopback hosts plus the exact `job-search-ops.localhost` Host and Origin
 
 ## [0.1.0-alpha.3] - 2026-09-19
 
@@ -101,7 +122,8 @@ All notable changes are documented here. This project follows Semantic Versionin
 - Credentials are referenced through environment variables and excluded from exports
 - Submitted artifacts require explicit confirmation
 
-[Unreleased]: https://github.com/haowenchen0811/job-search-ops/compare/v0.1.0-alpha.3...HEAD
+[Unreleased]: https://github.com/haowenchen0811/job-search-ops/compare/v0.1.0-alpha.4...HEAD
+[0.1.0-alpha.4]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.4
 [0.1.0-alpha.3]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.1

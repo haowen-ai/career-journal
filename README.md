@@ -19,7 +19,7 @@ This is an alpha release. Core tracking is usable without an email account, mode
 
 ![Job Search Ops dashboard showing example applications](docs/assets/dashboard-preview.svg)
 
-*Synthetic example data. The dashboard runs locally on `127.0.0.1` and can be searched or filtered by application status.*
+*Synthetic example data. The dashboard opens at `http://job-search-ops.localhost:<port>` and can be searched or filtered by application status.*
 
 ## Core workflows
 
@@ -78,6 +78,8 @@ node ./bin/jobops.mjs start --home "$HOME/job-search"
 Use `node ./bin/jobops.mjs ...` or the included `./jobops ...` launcher from the clone. To install the bare `jobops` command globally, run `npm link` with a Node.js installation that includes npm.
 
 On first setup, Job Search Ops detects the computer's IANA time zone. Later setup runs preserve the saved value unless the user explicitly passes `--timezone <IANA-zone>`.
+
+The dashboard URL uses the reserved `.localhost` domain, so it needs no purchased domain, DNS record, or hosts-file change. The server still binds only to the local loopback interface and is not exposed to the LAN.
 
 `--skip-email` is useful for a first trial. To use email evidence, configure an account explicitly; setup never assumes a school, work, or personal address:
 

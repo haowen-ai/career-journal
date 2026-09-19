@@ -79,3 +79,14 @@ test('README leads with the product, interface, and workflows before installatio
     assert.match(readme, /!\[[^\]]+\]\(docs\/assets\/dashboard-preview\.svg\)/);
   }
 });
+
+test('public onboarding uses the friendly localhost dashboard URL', async () => {
+  const [english, chinese] = await Promise.all([
+    readFile('README.md', 'utf8'),
+    readFile('README.zh-CN.md', 'utf8'),
+  ]);
+  for (const readme of [english, chinese]) {
+    assert.match(readme, /http:\/\/job-search-ops\.localhost:<port>/);
+    assert.doesNotMatch(readme, /dashboard runs locally on `127\.0\.0\.1`|看板在本机 `127\.0\.0\.1` 运行/i);
+  }
+});

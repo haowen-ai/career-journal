@@ -62,3 +62,28 @@ test('rejects cross-origin, invalid-host, and non-JSON mutation requests', async
   assert.equal(nonJson.status, 415);
   assert.equal((await (await fetch(`${baseUrl}/api/applications`)).json()).length, 0);
 }));
+
+test('accepts the friendly localhost Host and matching Origin hostname', async () => withServer(async (baseUrl) => {
+  const target = new URL(`${baseUrl}/api/applications`);
+  const body = JSON.stringify({ company: 'Friendly Host', role: 'Local User' });
+  const result = await new Promise((resolve, reject) => {
+    const request = http.request({
+      hostname: target.hostname,
+      port: target.port,
+      path: target.pathname,
+      method: 'POST',
+      headers: {
+        host: `job-search-ops.localhost:${target.port}`,
+        origin: `http://job-search-ops.localhost:${target.port}`,
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(body),
+      },
+    }, (response) => {
+      response.resume();
+      response.once('end', () => resolve(response.statusCode));
+    });
+    request.once('error', reject);
+    request.end(body);
+  });
+  assert.equal(result, 201);
+}));

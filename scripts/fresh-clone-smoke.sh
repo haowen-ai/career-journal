@@ -29,7 +29,7 @@ server_log="$scratch/server.log"
 HOME="$scratch/isolated-home" "$node_bin" "$cli" start --home "$data_home" --port 0 >"$server_log" 2>&1 &
 server_pid=$!
 i=0
-while [ "$i" -lt 50 ] && ! grep -q 'http://127.0.0.1:' "$server_log"; do
+while [ "$i" -lt 50 ] && ! grep -q 'http://job-search-ops.localhost:' "$server_log"; do
   sleep 0.1
   i=$((i + 1))
 done

@@ -83,6 +83,8 @@ export async function checkRelease(root) {
       && chineseReadme.indexOf('## 安装') > chineseReadme.indexOf('## 产品界面')
       && /docs\/assets\/dashboard-preview\.svg/.test(englishReadme)
       && /docs\/assets\/dashboard-preview\.svg/.test(chineseReadme)
+      && /http:\/\/job-search-ops\.localhost:<port>/.test(englishReadme)
+      && /http:\/\/job-search-ops\.localhost:<port>/.test(chineseReadme)
       && /<svg\b/.test(dashboardPreview)
       && /<title\b[^>]*>[^<]+<\/title>/.test(dashboardPreview)
       && /<desc\b[^>]*>[^<]+<\/desc>/.test(dashboardPreview);

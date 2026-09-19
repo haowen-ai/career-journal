@@ -8,7 +8,7 @@
 
 ### 新增
 
-- 发布 `v0.1.0-alpha.3` 公开标签的中英文 dogfood 验证记录
+- 无
 
 ### 变更
 
@@ -21,6 +21,27 @@
 ### 安全
 
 - 无
+
+## [0.1.0-alpha.4] - 2026-09-19
+
+### 新增
+
+- 增加保留域名 `job-search-ops.localhost`，无需配置 DNS 或修改 hosts 文件
+- 增加友好看板地址、匹配的 Origin hostname 和有效 IPv6 环回 URL 格式的集成测试
+- 发布 `v0.1.0-alpha.3` 公开标签的中英文 dogfood 验证记录
+
+### 变更
+
+- `jobops start` 默认输出和公开入门文档现在使用 `http://job-search-ops.localhost:<port>`，不再向用户展示原始环回 IP
+- 产品界面预览改为显示友好的本地地址
+
+### 修复
+
+- 在新用户体验中以易读的本地产品地址取代面向开发者的 `127.0.0.1`
+
+### 安全
+
+- 服务仍然只监听环回接口；Host 和 Origin 仅允许原有环回地址以及准确的 `job-search-ops.localhost`
 
 ## [0.1.0-alpha.3] - 2026-09-19
 
@@ -101,7 +122,8 @@
 - 凭据通过环境变量引用，不会进入导出文件
 - 标记已提交材料时需要用户明确确认
 
-[尚未发布]: https://github.com/haowenchen0811/job-search-ops/compare/v0.1.0-alpha.3...HEAD
+[尚未发布]: https://github.com/haowenchen0811/job-search-ops/compare/v0.1.0-alpha.4...HEAD
+[0.1.0-alpha.4]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.4
 [0.1.0-alpha.3]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.1

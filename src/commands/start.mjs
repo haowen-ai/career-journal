@@ -1,7 +1,7 @@
 import { once } from 'node:events';
 import path from 'node:path';
 import { openHomeDatabase } from '../runtime/home.mjs';
-import { createServer } from '../server/app.mjs';
+import { createServer, FRIENDLY_DASHBOARD_HOST } from '../server/app.mjs';
 
 export async function startCommand(parsed, io, runtime) {
   const context = await openHomeDatabase(parsed.options.home ?? process.cwd());
@@ -13,7 +13,9 @@ export async function startCommand(parsed, io, runtime) {
   server.listen(port, host);
   await once(server, 'listening');
   const address = server.address();
-  io.out(`Job Search Ops dashboard: http://${host}:${address.port}`);
+  const dashboardHost = parsed.options.host ? host : FRIENDLY_DASHBOARD_HOST;
+  const urlHost = dashboardHost.includes(':') ? `[${dashboardHost}]` : dashboardHost;
+  io.out(`Job Search Ops dashboard: http://${urlHost}:${address.port}`);
   server.on('close', () => context.db.close());
   return 0;
 }

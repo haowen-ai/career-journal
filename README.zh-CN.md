@@ -19,7 +19,7 @@ Job Search Ops 是一个本地优先、证据驱动的求职进度管理工具�
 
 ![展示示例申请记录的 Job Search Ops 本地看板](docs/assets/dashboard-preview.svg)
 
-*界面使用虚构示例数据。看板在本机 `127.0.0.1` 运行，可以搜索并按申请状态筛选。*
+*界面使用虚构示例数据。看板通过 `http://job-search-ops.localhost:<port>` 打开，可以搜索并按申请状态筛选。*
 
 ## 核心工作流
 
@@ -78,6 +78,8 @@ node ./bin/jobops.mjs start --home "$HOME/job-search"
 可以在仓库中使用 `node ./bin/jobops.mjs ...` 或随项目提供的 `./jobops ...` 启动器。如果当前 Node.js 安装包含 npm，可运行 `npm link` 全局安装 `jobops` 命令。
 
 首次初始化时，Job Search Ops 会自动读取当前电脑的 IANA 时区。之后重新运行 setup 会保留已保存的时区，除非用户明确传入 `--timezone <IANA-zone>`。
+
+看板使用专门为本机保留的 `.localhost` 域名，不需要购买域名、配置 DNS 或修改 hosts 文件。服务底层仍然只监听本机环回接口，不会开放到局域网。
 
 `--skip-email` 仅适合首次试用。如果你希望使用邮件证据，应当显式配置账户，系统不会默认使用学校、公司或个人邮箱：
 

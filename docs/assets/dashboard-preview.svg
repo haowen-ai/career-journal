@@ -79,6 +79,6 @@
       <text x="972" y="704" class="mono muted" font-size="13">orbit-systems-ai-product-intern</text>
     </g>
 
-    <text x="112" y="808" class="muted" font-size="14">Example data · Dashboard runs locally on 127.0.0.1</text>
+    <text x="112" y="808" class="muted" font-size="14">Example data · http://job-search-ops.localhost:4173</text>
   </g>
 </svg>

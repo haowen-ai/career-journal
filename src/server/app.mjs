@@ -10,7 +10,8 @@ const assets = new Map([
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
 ]);
 
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
+export const FRIENDLY_DASHBOARD_HOST = 'job-search-ops.localhost';
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1', FRIENDLY_DASHBOARD_HOST]);
 
 function requestHost(value) {
   if (!value) return null;
