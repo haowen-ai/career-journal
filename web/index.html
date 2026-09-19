@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Job Search Ops</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">LOCAL WORKSPACE</p>
+      <h1>Job Search Ops</h1>
+      <p class="subtitle">Applications, evidence, materials, and next actions in one place</p>
+    </div>
+    <div class="legend" aria-label="Artifact status legend">
+      <span class="badge badge-draft">Draft</span>
+      <span class="badge badge-submitted">Submitted</span>
+    </div>
+  </header>
+  <main>
+    <section class="controls" aria-label="Application filters">
+      <label>Search <input id="search" type="search" placeholder="Company or role"></label>
+      <label>Status <select id="status"><option value="">All statuses</option></select></label>
+      <button id="refresh" type="button">Refresh</button>
+    </section>
+    <section aria-live="polite">
+      <p id="summary" class="summary">Loading applications…</p>
+      <div id="applications" class="application-grid"></div>
+      <p id="empty" class="empty" hidden>No applications match these filters.</p>
+    </section>
+  </main>
+  <template id="application-template">
+    <article class="application-card">
+      <div class="card-heading"><div><p class="company"></p><h2 class="role"></h2></div><span class="status"></span></div>
+      <dl><div><dt>Stage</dt><dd class="stage"></dd></div><div><dt>Applied</dt><dd class="applied"></dd></div></dl>
+      <p class="application-id"></p>
+    </article>
+  </template>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
+
