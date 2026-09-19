@@ -1,0 +1,29 @@
+name: Fresh-clone dogfood report
+description: Report onboarding or upgrade friction from a clean checkout
+title: "[Dogfood] "
+labels: [dogfood]
+body:
+  - type: dropdown
+    id: path
+    attributes:
+      label: Path tested
+      options: [Fresh clone, Upgrade]
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: From and to versions
+  - type: textarea
+    id: commands
+    attributes:
+      label: Commands and first failing step
+      description: Redact private paths, personal data, and credentials
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Result and suggested fix
+    validations:
+      required: true
