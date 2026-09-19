@@ -37,7 +37,7 @@ export async function migrateHome(home, options = {}) {
 }
 
 export async function migrateCommand(parsed, io) {
-  if (parsed.subcommand && !['plan', 'apply'].includes(parsed.subcommand)) throw new Error('Usage: jobops migrate [--dry-run|--apply]');
+  if (parsed.subcommand && !['plan', 'apply'].includes(parsed.subcommand)) throw new Error('Usage: career-journal migrate [--dry-run|--apply]');
   const apply = parsed.options.apply === true || parsed.subcommand === 'apply';
   const dryRun = parsed.options['dry-run'] === true || parsed.subcommand === 'plan' || !apply;
   const result = await migrateHome(parsed.options.home ?? process.cwd(), { dryRun });

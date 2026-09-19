@@ -50,7 +50,7 @@ export async function setup(home, answers = {}) {
     config.jev.accessState = answers.jev.accessState;
   }
   if (answers.careerOps?.root !== undefined) {
-    config.careerOps ??= { root: null, pinnedVersion: '1.32.0', entrypoint: 'jobops-adapter.mjs' };
+    config.careerOps ??= { root: null, pinnedVersion: '1.32.0', entrypoint: 'career-journal-adapter.mjs' };
     config.careerOps.root = answers.careerOps.root ? String(answers.careerOps.root) : null;
   }
   config.materials ??= { ruleFiles: [] };

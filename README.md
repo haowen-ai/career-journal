@@ -17,9 +17,9 @@ This is an alpha release. Core tracking is usable without an email account, mode
 
 ## Product preview
 
-![CAREER JOURNAL dashboard showing example applications](docs/assets/dashboard-preview.png)
+![CAREER JOURNAL dashboard showing synthetic example applications](docs/assets/dashboard-preview.png)
 
-*Real browser capture of the running dashboard with synthetic example data. The dashboard opens at `http://career-journal.localhost:<port>` and can be searched or filtered by application status.*
+*Real browser capture of the running dashboard with synthetic big-company examples. Company names are illustrative: they do not represent real applications, outcomes, affiliations, or endorsements. No personal data is included. The dashboard opens at `http://career-journal.localhost:<port>` and can be searched or filtered by application status.*
 
 ## Core workflows
 
@@ -68,14 +68,14 @@ flowchart LR
 Clone and initialize a private local data directory:
 
 ```sh
-git clone https://github.com/haowenchen0811/job-search-ops.git
-cd job-search-ops
-node ./bin/jobops.mjs setup --home "$HOME/job-search" --skip-email
-node ./bin/jobops.mjs doctor --home "$HOME/job-search"
-node ./bin/jobops.mjs start --home "$HOME/job-search"
+git clone https://github.com/haowenchen0811/career-journal.git
+cd career-journal
+node ./bin/career-journal.mjs setup --home "$HOME/job-search" --skip-email
+node ./bin/career-journal.mjs doctor --home "$HOME/job-search"
+node ./bin/career-journal.mjs start --home "$HOME/job-search"
 ```
 
-Use `node ./bin/jobops.mjs ...` or the included `./jobops ...` launcher from the clone. To install the bare `jobops` command globally, run `npm link` with a Node.js installation that includes npm.
+Use `node ./bin/career-journal.mjs ...` or the included `./career-journal ...` launcher from the clone. To install the bare `career-journal` command globally, run `npm link` with a Node.js installation that includes npm.
 
 On first setup, CAREER JOURNAL detects the computer's IANA time zone. Later setup runs preserve the saved value unless the user explicitly passes `--timezone <IANA-zone>`.
 
@@ -84,19 +84,19 @@ The dashboard URL uses the reserved `.localhost` domain, so it needs no purchase
 `--skip-email` is useful for a first trial. To use email evidence, configure an account explicitly; setup never assumes a school, work, or personal address:
 
 ```sh
-node ./bin/jobops.mjs email configure --home "$HOME/job-search" --provider manual-eml --address candidate@example.com
+node ./bin/career-journal.mjs email configure --home "$HOME/job-search" --provider manual-eml --address candidate@example.com
 ```
 
 The commands below are executed by the documentation test against a new temporary home:
 
 <!-- quickstart-smoke:start -->
 ```sh
-$REPO/bin/jobops.mjs setup --home $JOBOPS_HOME --timezone UTC --skip-email
-$REPO/bin/jobops.mjs doctor --home $JOBOPS_HOME
-$REPO/bin/jobops.mjs application add --home $JOBOPS_HOME --company ExampleCorp --role DataScientist
-$REPO/bin/jobops.mjs event add --home $JOBOPS_HOME --id examplecorp-datascientist --event-id example-submit --type application_submitted --title Submitted --status-after applied
-$REPO/bin/jobops.mjs application list --home $JOBOPS_HOME --json
-$REPO/bin/jobops.mjs automation configure --home $JOBOPS_HOME --task daily-consolidation --time 22:00 --enabled
+$REPO/bin/career-journal.mjs setup --home $CAREER_JOURNAL_HOME --timezone UTC --skip-email
+$REPO/bin/career-journal.mjs doctor --home $CAREER_JOURNAL_HOME
+$REPO/bin/career-journal.mjs application add --home $CAREER_JOURNAL_HOME --company ExampleCorp --role DataScientist
+$REPO/bin/career-journal.mjs event add --home $CAREER_JOURNAL_HOME --id examplecorp-datascientist --event-id example-submit --type application_submitted --title Submitted --status-after applied
+$REPO/bin/career-journal.mjs application list --home $CAREER_JOURNAL_HOME --json
+$REPO/bin/career-journal.mjs automation configure --home $CAREER_JOURNAL_HOME --task daily-consolidation --time 22:00 --enabled
 ```
 <!-- quickstart-smoke:end -->
 
@@ -104,21 +104,21 @@ $REPO/bin/jobops.mjs automation configure --home $JOBOPS_HOME --task daily-conso
 
 ### Codex-native
 
-Open the cloned repository in Codex and ask it to set up CAREER JOURNAL. Codex discovers the repo-local `job-search-ops` Skill, runs `jobops doctor`, and routes resume or cover-letter work through the separate `careerops-materials` Skill. The Skills name every dependency and preserve the difference between status evidence and submitted-artifact evidence.
+Open the cloned repository in Codex and ask it to set up CAREER JOURNAL. Codex discovers the repo-local `career-journal` Skill, runs `career-journal doctor`, and routes resume or cover-letter work through the separate `careerops-materials` Skill. The Skills name every dependency and preserve the difference between status evidence and submitted-artifact evidence.
 
 ### Local API and OpenAI-compatible models
 
-Run `jobops start --home <data-directory>` for the loopback dashboard and JSON API. Deterministic rules work without a model. An optional OpenAI-compatible provider can point to a hosted, local, or self-managed endpoint through `.jobops/config.json`; credentials must be environment-variable references such as `env:MODEL_API_KEY`, never literal secrets.
+Run `career-journal start --home <data-directory>` for the loopback dashboard and JSON API. Deterministic rules work without a model. An optional OpenAI-compatible provider can point to a hosted, local, or self-managed endpoint through `.career-journal/config.json`; credentials must be environment-variable references such as `env:MODEL_API_KEY`, never literal secrets.
 
 ## Common Commands
 
 ```sh
-jobops application add --home ~/job-search --company "Example" --role "Engineer"
-jobops event add --home ~/job-search --id example-engineer --type application_submitted --title "Application submitted" --status-after applied
-jobops email configure --home ~/job-search --provider manual-eml --address candidate@example.com
-jobops email import-eml --home ~/job-search --account manual-eml:candidate@example.com --id example-engineer --file message.eml
-jobops export json --home ~/job-search --output applications.json
-jobops start --home ~/job-search
+career-journal application add --home ~/job-search --company "Example" --role "Engineer"
+career-journal event add --home ~/job-search --id example-engineer --type application_submitted --title "Application submitted" --status-after applied
+career-journal email configure --home ~/job-search --provider manual-eml --address candidate@example.com
+career-journal email import-eml --home ~/job-search --account manual-eml:candidate@example.com --id example-engineer --file message.eml
+career-journal export json --home ~/job-search --output applications.json
+career-journal start --home ~/job-search
 ```
 
 Email access is optional and read-only. Setup never invents or defaults to a personal, work, or school address. The alpha supports explicit manual EML import; future OAuth adapters must preserve the same read-only boundary.
@@ -128,11 +128,11 @@ Email access is optional and read-only. Setup never invents or defaults to a per
 [career-ops](https://github.com/career-ops-hq/career-ops) is an independent MIT-licensed project by Santiago Fernández de Valderrama. It is optional for core tracking and required for a verified resume or cover-letter workflow.
 
 1. Install the pinned CareerOps version listed in `config/dependency-manifest.yml`
-2. Configure its root during setup: `jobops setup --home ~/job-search --careerops-root /path/to/career-ops`
-3. Run `jobops doctor --home ~/job-search`
-4. In Codex, use the `careerops-materials` Skill; API clients can call `jobops material prepare|verify --request request.json`
+2. Configure its root during setup: `career-journal setup --home ~/job-search --careerops-root /path/to/career-ops`
+3. Run `career-journal doctor --home ~/job-search`
+4. In Codex, use the `careerops-materials` Skill; API clients can call `career-journal material prepare|verify --request request.json`
 
-The alpha child-process adapter expects the configured CareerOps installation to expose the documented `jobops-adapter.mjs` JSON bridge. If the bridge or pinned version is missing, material verification stays unavailable and any fallback must remain an **Unverified Draft**.
+The alpha child-process adapter expects the configured CareerOps installation to expose the documented `career-journal-adapter.mjs` JSON bridge. If the bridge or pinned version is missing, material verification stays unavailable and any fallback must remain an **Unverified Draft**.
 
 ### Built-in and personal resume rules
 
@@ -141,7 +141,7 @@ CAREER JOURNAL ships the project author's reusable resume rules in [`config/mate
 The built-in rules apply to U.S. English resumes and can be overridden by a user's explicit instruction. A user can also add a personal Skill or rule file without editing the repository:
 
 ```sh
-jobops setup --home ~/job-search --material-rules /path/to/personal-resume-skill/SKILL.md
+career-journal setup --home ~/job-search --material-rules /path/to/personal-resume-skill/SKILL.md
 ```
 
 The `careerops-materials` Skill loads the built-in defaults and every configured personal rule file, then records any overrides in the artifact audit. Resume-only rules never apply automatically to cover-letter prose.
@@ -158,42 +158,48 @@ The `careerops-materials` Skill loads the built-in defaults and every configured
 Four portable tasks are included: `mail-sync`, `deadline-review`, `daily-consolidation`, and `local-backup`.
 
 ```sh
-jobops automation configure --home ~/job-search --task deadline-review --time 20:00 --enabled
-jobops automation configure --home ~/job-search --task daily-consolidation --time 22:00 --enabled
-jobops automation list --home ~/job-search
-jobops automation run --home ~/job-search --task deadline-review --dry-run
-jobops automation install --home ~/job-search --task deadline-review
+career-journal automation configure --home ~/job-search --task deadline-review --time 20:00 --enabled
+career-journal automation configure --home ~/job-search --task daily-consolidation --time 22:00 --enabled
+career-journal automation list --home ~/job-search
+career-journal automation run --home ~/job-search --task deadline-review --dry-run
+career-journal automation install --home ~/job-search --task deadline-review
 ```
 
-When `--timezone` is omitted, automation uses the workspace time zone detected during setup. `install` prepares a platform-specific scheduler definition under `.jobops/schedulers/`; it does not register it with the operating system. Review it, then load it with `launchctl` on macOS, `crontab` on Linux, or `schtasks` on Windows. Each task keeps its own cursor, advances it only after success, and stays quiet when nothing actionable changed. In this alpha, `local-backup` has an executable handler; tasks whose adapters are unavailable fail visibly and do not record a successful run.
+When `--timezone` is omitted, automation uses the workspace time zone detected during setup. `install` prepares a platform-specific scheduler definition under `.career-journal/schedulers/`; it does not register it with the operating system. Review it, then load it with `launchctl` on macOS, `crontab` on Linux, or `schtasks` on Windows. Each task keeps its own cursor, advances it only after success, and stays quiet when nothing actionable changed. In this alpha, `local-backup` has an executable handler; tasks whose adapters are unavailable fail visibly and do not record a successful run.
 
 If you manually registered a definition, remove the OS registration before deleting its file:
 
 ```sh
 # macOS: use the exact plist path you loaded
-launchctl bootout "gui/$(id -u)" "/path/to/io.job-search-ops.deadline-review.plist"
-# Linux: remove the exact jobops-deadline-review line from the current crontab
-crontab -l | grep -v 'jobops-deadline-review' | crontab -
+launchctl bootout "gui/$(id -u)" "/path/to/io.career-journal.deadline-review.plist"
+# Linux: remove the exact career-journal-deadline-review line from the current crontab
+crontab -l | grep -v 'career-journal-deadline-review' | crontab -
 # Windows
-schtasks /Delete /TN "JobSearchOps-deadline-review" /F
+schtasks /Delete /TN "CareerJournal-deadline-review" /F
 ```
 
-Then run `jobops automation uninstall --home ~/job-search --task deadline-review` to remove the prepared definition. Its result deliberately distinguishes definition removal from OS scheduler removal.
+Then run `career-journal automation uninstall --home ~/job-search --task deadline-review` to remove the prepared definition. Its result deliberately distinguishes definition removal from OS scheduler removal.
 
 ## Data and Privacy
 
-Data stays under the home you choose. `.jobops/` contains configuration, SQLite data, immutable artifact copies, and prepared scheduler files. Exports omit secret references. Authentication links from imported mail are redacted. The project does not submit applications, send email, or contact recruiters.
+Data stays under the home you choose. `.career-journal/` contains configuration, SQLite data, immutable artifact copies, and prepared scheduler files. Exports omit secret references. Authentication links from imported mail are redacted. The project does not submit applications, send email, or contact recruiters.
 
 ## Update, Migration, Backup, and Uninstall
 
 ```sh
-jobops update --check
-jobops backup create --home ~/job-search --output ~/job-search-backup
-jobops migrate --home ~/job-search --dry-run
-jobops migrate --home ~/job-search --apply
+career-journal update --check
+career-journal backup create --home ~/job-search --output ~/job-search-backup
+career-journal migrate --home ~/job-search --dry-run
+career-journal migrate --home ~/job-search --apply
 ```
 
-Back up before an upgrade, pull a tagged release, run `jobops update --check`, and apply only the reported migration. To uninstall, run `jobops automation uninstall` for each installed task, preserve or export the selected data home, then delete the cloned repository. Delete the data home only when you also want to remove all local records and archived artifacts.
+Back up before an upgrade, pull a tagged release, run `career-journal update --check`, and apply only the reported migration. To uninstall, run `career-journal automation uninstall` for each installed task, preserve or export the selected data home, then delete the cloned repository. Delete the data home only when you also want to remove all local records and archived artifacts.
+
+### Compatibility with v0.1.0-alpha.5 and earlier
+
+The legacy `jobops` CLI, `.jobops/` data directory, `jobops-adapter.mjs` bridge name, and related scheduler identifiers are recognized only to upgrade installations created by v0.1.0-alpha.5 or earlier. A legacy config that explicitly names `jobops-adapter.mjs` remains supported; a new config never falls back to that bridge automatically. New installations and integrations must use `career-journal`, `.career-journal/`, `career-journal-adapter.mjs`, and CAREER JOURNAL scheduler identifiers.
+
+Legacy automation rows keep their existing `jobops-*`, `io.job-search-ops.*`, and `JobSearchOps-*` identities when definitions are regenerated, so installing an upgrade does not create a parallel OS task. Because scheduler definitions contain the clone's absolute path, unload the existing registration, run `career-journal automation install` after moving or renaming the clone, and reload the regenerated definition under the same legacy identity. On Linux, replace the existing `jobops-*` crontab line with the regenerated line. `automation uninstall` removes prepared legacy and current files but does not unload an OS registration.
 
 ## Architecture
 

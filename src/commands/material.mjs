@@ -23,7 +23,7 @@ export async function materialCommand(parsed, io, runtime = {}) {
   const context = await openHomeDatabase(parsed.options.home ?? process.cwd());
   try {
     if (['prepare', 'verify'].includes(parsed.subcommand)) {
-      if (!parsed.options.request) throw new Error('Usage: jobops material prepare|verify --request <json-file>');
+      if (!parsed.options.request) throw new Error('Usage: career-journal material prepare|verify --request <json-file>');
       const requestFile = path.resolve(parsed.options.request);
       const request = JSON.parse(await readFile(requestFile, 'utf8'));
       request.action = parsed.subcommand;
@@ -65,6 +65,6 @@ export async function materialCommand(parsed, io, runtime = {}) {
       io.out(JSON.stringify(record, null, 2));
       return 0;
     }
-    throw new Error('Usage: jobops material prepare|verify|mark-submitted');
+    throw new Error('Usage: career-journal material prepare|verify|mark-submitted');
   } finally { context.db.close(); }
 }

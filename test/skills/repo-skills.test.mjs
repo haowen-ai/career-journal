@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const files = [
-  '.agents/skills/job-search-ops/SKILL.md',
+  '.agents/skills/career-journal/SKILL.md',
   '.agents/skills/careerops-materials/SKILL.md',
 ];
 
@@ -20,7 +20,7 @@ test('orchestrator names required and optional capabilities explicitly', async (
   for (const name of ['careerops-materials', 'PDF', 'Documents', 'email', 'automation', 'Wiki', 'Jev']) {
     assert.match(text, new RegExp(name, 'i'));
   }
-  assert.match(text, /jobops doctor/);
+  assert.match(text, /career-journal doctor/);
   assert.match(text, /draft/i);
   assert.match(text, /submitted artifact/i);
 });
@@ -30,7 +30,7 @@ test('CareerOps routing skill keeps facts and submitted evidence gated', async (
   assert.match(text, /CareerOps.*required/i);
   assert.match(text, /never (invent|fabricate)/i);
   assert.match(text, /prototype.*production/i);
-  assert.match(text, /jobops material (prepare|verify)/i);
+  assert.match(text, /career-journal material (prepare|verify)/i);
   assert.match(text, /exact.*artifact/i);
   assert.match(text, /personal.*(?:skill|rule)/i);
   assert.match(text, /materialRules|ruleFiles|material-rules/i);

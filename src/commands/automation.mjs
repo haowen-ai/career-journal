@@ -5,8 +5,10 @@ import { upsertTask, listTasks, disableTask, removeTask, runTask } from '../auto
 import { renderScheduler } from '../automation/platform.mjs';
 import { createBackup } from './backup.mjs';
 import { randomUUID } from 'node:crypto';
+import { workspaceDirectory } from '../config/store.mjs';
 
-const automationId = (parsed) => parsed.options.id ?? (parsed.options.task ? `jobops-${parsed.options.task}` : null);
+const automationId = (parsed, tasks = []) => parsed.options.id
+  ?? (parsed.options.task ? tasks.find((task) => task.type === parsed.options.task)?.id ?? `career-journal-${parsed.options.task}` : null);
 
 export async function automationCommand(parsed, io, runtime) {
   const context = await openHomeDatabase(parsed.options.home ?? process.cwd());
@@ -29,23 +31,23 @@ export async function automationCommand(parsed, io, runtime) {
       return 0;
     }
     if (parsed.subcommand === 'disable') {
-      io.out(JSON.stringify(disableTask(context.db, automationId(parsed)), null, 2));
+      io.out(JSON.stringify(disableTask(context.db, automationId(parsed, listTasks(context.db))), null, 2));
       return 0;
     }
     if (parsed.subcommand === 'remove') {
-      io.out(JSON.stringify({ removed: removeTask(context.db, automationId(parsed)) }));
+      io.out(JSON.stringify({ removed: removeTask(context.db, automationId(parsed, listTasks(context.db))) }));
       return 0;
     }
     if (parsed.subcommand === 'run') {
       const handlers = {
         'local-backup': async (task) => {
           const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-          const output = path.join(context.root, '.jobops', 'backups', `${stamp}-${randomUUID().slice(0, 8)}`);
+          const output = path.join(workspaceDirectory(context.root), 'backups', `${stamp}-${randomUUID().slice(0, 8)}`);
           await createBackup(context.root, output, { version: runtime.version });
           return { cursor: task.cursor, changed: 1, message: `Backup created at ${output}` };
         },
       };
-      const result = await runTask(context.db, automationId(parsed), {
+      const result = await runTask(context.db, automationId(parsed, listTasks(context.db)), {
         dryRun: parsed.options['dry-run'] === true,
         handler: async (task) => {
           const handler = handlers[task.type];
@@ -57,10 +59,11 @@ export async function automationCommand(parsed, io, runtime) {
       return 0;
     }
     if (parsed.subcommand === 'install') {
-      const task = listTasks(context.db).find((item) => item.id === automationId(parsed));
+      const tasks = listTasks(context.db);
+      const task = tasks.find((item) => item.id === automationId(parsed, tasks));
       if (!task) throw new Error('Unknown automation');
-      const artifact = renderScheduler(task, { node: process.execPath, cli: path.join(runtime.root, 'bin', 'jobops.mjs'), home: context.root });
-      const directory = path.join(context.root, '.jobops', 'schedulers');
+      const artifact = renderScheduler(task, { node: process.execPath, cli: path.join(runtime.root, 'bin', 'career-journal.mjs'), home: context.root });
+      const directory = path.join(workspaceDirectory(context.root), 'schedulers');
       await mkdir(directory, { recursive: true, mode: 0o700 });
       const destination = path.join(directory, artifact.fileName);
       await writeFile(destination, artifact.content, { mode: 0o600 });
@@ -68,9 +71,16 @@ export async function automationCommand(parsed, io, runtime) {
       return 0;
     }
     if (parsed.subcommand === 'uninstall') {
-      const id = automationId(parsed);
-      const directory = path.join(context.root, '.jobops', 'schedulers');
-      const candidates = [`io.job-search-ops.${id.replace(/^jobops-/, '')}.plist`, `${id}.cron`, `${id}.txt`];
+      const tasks = listTasks(context.db);
+      const id = automationId(parsed, tasks);
+      const type = parsed.options.task ?? tasks.find((task) => task.id === id)?.type ?? id?.replace(/^(?:career-journal|jobops)-/, '');
+      const directory = path.join(workspaceDirectory(context.root), 'schedulers');
+      const candidateIds = new Set([id, `career-journal-${type}`, `jobops-${type}`].filter(Boolean));
+      const candidates = [
+        `io.career-journal.${type}.plist`,
+        `io.job-search-ops.${type}.plist`,
+        ...[...candidateIds].flatMap((candidate) => [`${candidate}.cron`, `${candidate}.txt`]),
+      ];
       for (const file of candidates) await rm(path.join(directory, file), { force: true });
       io.out(JSON.stringify({
         definitionRemoved: true,
@@ -80,6 +90,6 @@ export async function automationCommand(parsed, io, runtime) {
       }));
       return 0;
     }
-    throw new Error('Usage: jobops automation configure|list|run|update|disable|remove|install|uninstall');
+    throw new Error('Usage: career-journal automation configure|list|run|update|disable|remove|install|uninstall');
   } finally { context.db.close(); }
 }

@@ -1,10 +1,43 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { setup } from '../../src/commands/setup.mjs';
 import { doctor } from '../../src/commands/doctor.mjs';
+import { defaultConfig } from '../../src/config/defaults.mjs';
+
+test('checks storage in the selected primary workspace without creating legacy state', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-doctor-storage-'));
+  try {
+    await setup(home, { timezone: 'UTC', email: { mode: 'skip' } });
+    const report = await doctor(home, {
+      nodeVersion: '24.19.0',
+      careerOps: async () => ({ ok: false, detail: 'not installed' }),
+    });
+    assert.equal(report.checks.find((item) => item.id === 'storage').severity, 'pass');
+    await access(path.join(home, '.career-journal'));
+    await assert.rejects(() => access(path.join(home, '.jobops')), { code: 'ENOENT' });
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test('checks storage in an existing legacy workspace without creating primary state', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-doctor-legacy-'));
+  try {
+    const legacyDirectory = path.join(home, '.jobops');
+    await mkdir(legacyDirectory, { recursive: true });
+    const config = defaultConfig('2026-09-19T00:00:00Z', 'UTC');
+    config.data = { database: '.jobops/jobops.db', artifacts: '.jobops/artifacts' };
+    config.careerOps.entrypoint = 'jobops-adapter.mjs';
+    await writeFile(path.join(legacyDirectory, 'config.json'), `${JSON.stringify(config)}\n`);
+    const report = await doctor(home, {
+      nodeVersion: '24.19.0',
+      careerOps: async () => ({ ok: false, detail: 'not installed' }),
+    });
+    assert.equal(report.checks.find((item) => item.id === 'storage').severity, 'pass');
+    await assert.rejects(() => access(path.join(home, '.career-journal')), { code: 'ENOENT' });
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
 
 test('reports configured core and optional capability warnings', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'jobops-doctor-'));

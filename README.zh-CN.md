@@ -17,9 +17,9 @@ CAREER JOURNAL 是一个本地优先、证据驱动的求职进度管理工具�
 
 ## 产品界面
 
-![展示示例申请记录的 CAREER JOURNAL 本地看板](docs/assets/dashboard-preview.png)
+![展示合成演示申请记录的 CAREER JOURNAL 本地看板](docs/assets/dashboard-preview.png)
 
-*由真实运行的本地看板在浏览器中截取，界面使用虚构示例数据。看板通过 `http://career-journal.localhost:<port>` 打开，可以搜索并按申请状态筛选。*
+*由真实运行的本地看板在浏览器中截取，使用大厂名称作为合成演示数据。公司名称只用于展示，不代表真实投递、结果、关联或背书；截图不含个人数据。看板通过 `http://career-journal.localhost:<port>` 打开，可以搜索并按申请状态筛选。*
 
 ## 核心工作流
 
@@ -68,14 +68,14 @@ flowchart LR
 克隆仓库，并初始化一个私有的本地数据目录：
 
 ```sh
-git clone https://github.com/haowenchen0811/job-search-ops.git
-cd job-search-ops
-node ./bin/jobops.mjs setup --home "$HOME/job-search" --skip-email
-node ./bin/jobops.mjs doctor --home "$HOME/job-search"
-node ./bin/jobops.mjs start --home "$HOME/job-search"
+git clone https://github.com/haowenchen0811/career-journal.git
+cd career-journal
+node ./bin/career-journal.mjs setup --home "$HOME/job-search" --skip-email
+node ./bin/career-journal.mjs doctor --home "$HOME/job-search"
+node ./bin/career-journal.mjs start --home "$HOME/job-search"
 ```
 
-可以在仓库中使用 `node ./bin/jobops.mjs ...` 或随项目提供的 `./jobops ...` 启动器。如果当前 Node.js 安装包含 npm，可运行 `npm link` 全局安装 `jobops` 命令。
+可以在仓库中使用 `node ./bin/career-journal.mjs ...` 或随项目提供的 `./career-journal ...` 启动器。如果当前 Node.js 安装包含 npm，可运行 `npm link` 全局安装 `career-journal` 命令。
 
 首次初始化时，CAREER JOURNAL 会自动读取当前电脑的 IANA 时区。之后重新运行 setup 会保留已保存的时区，除非用户明确传入 `--timezone <IANA-zone>`。
 
@@ -84,28 +84,28 @@ node ./bin/jobops.mjs start --home "$HOME/job-search"
 `--skip-email` 仅适合首次试用。如果你希望使用邮件证据，应当显式配置账户，系统不会默认使用学校、公司或个人邮箱：
 
 ```sh
-node ./bin/jobops.mjs email configure --home "$HOME/job-search" --provider manual-eml --address candidate@example.com
+node ./bin/career-journal.mjs email configure --home "$HOME/job-search" --provider manual-eml --address candidate@example.com
 ```
 
 ## 两种运行模式
 
 ### Codex 原生模式
 
-在 Codex 中打开克隆后的仓库，要求 Codex 配置 CAREER JOURNAL。Codex 会发现仓库内的 `job-search-ops` Skill，运行 `jobops doctor`，并将简历或求职信任务交给独立的 `careerops-materials` Skill。这些 Skill 会明确标记依赖项，并区分“招聘状态证据”和“已提交材料证据”。
+在 Codex 中打开克隆后的仓库，要求 Codex 配置 CAREER JOURNAL。Codex 会发现仓库内的 `career-journal` Skill，运行 `career-journal doctor`，并将简历或求职信任务交给独立的 `careerops-materials` Skill。这些 Skill 会明确标记依赖项，并区分“招聘状态证据”和“已提交材料证据”。
 
 ### 本地 API 与 OpenAI-compatible 模型
 
-运行 `jobops start --home <数据目录>` 可启动只监听本机环回地址的看板和 JSON API。确定性规则不需要模型。可选的 OpenAI-compatible provider 可以在 `.jobops/config.json` 中指向托管、本地或自行管理的端点。凭据必须使用 `env:MODEL_API_KEY` 这类环境变量引用，不能写入真实密钥。
+运行 `career-journal start --home <数据目录>` 可启动只监听本机环回地址的看板和 JSON API。确定性规则不需要模型。可选的 OpenAI-compatible provider 可以在 `.career-journal/config.json` 中指向托管、本地或自行管理的端点。凭据必须使用 `env:MODEL_API_KEY` 这类环境变量引用，不能写入真实密钥。
 
 ## 常用命令
 
 ```sh
-jobops application add --home ~/job-search --company "Example" --role "Engineer"
-jobops event add --home ~/job-search --id example-engineer --type application_submitted --title "Application submitted" --status-after applied
-jobops email configure --home ~/job-search --provider manual-eml --address candidate@example.com
-jobops email import-eml --home ~/job-search --account manual-eml:candidate@example.com --id example-engineer --file message.eml
-jobops export json --home ~/job-search --output applications.json
-jobops start --home ~/job-search
+career-journal application add --home ~/job-search --company "Example" --role "Engineer"
+career-journal event add --home ~/job-search --id example-engineer --type application_submitted --title "Application submitted" --status-after applied
+career-journal email configure --home ~/job-search --provider manual-eml --address candidate@example.com
+career-journal email import-eml --home ~/job-search --account manual-eml:candidate@example.com --id example-engineer --file message.eml
+career-journal export json --home ~/job-search --output applications.json
+career-journal start --home ~/job-search
 ```
 
 邮箱功能是可选的，而且必须只读。初始化过程不会推测或默认使用任何个人、公司或学校邮箱。当前 alpha 版本支持显式导入 EML 文件；未来的 OAuth 适配器也必须保持相同的只读边界。
@@ -115,11 +115,11 @@ jobops start --home ~/job-search
 [career-ops](https://github.com/career-ops-hq/career-ops) 是 Santiago Fernández de Valderrama 维护的独立 MIT 开源项目。它不是核心记录功能的必需项，但生成和验证简历或求职信时需要它。
 
 1. 安装 `config/dependency-manifest.yml` 中锁定的 CareerOps 版本
-2. 在初始化时设置根目录：`jobops setup --home ~/job-search --careerops-root /path/to/career-ops`
-3. 运行 `jobops doctor --home ~/job-search`
-4. 在 Codex 中使用 `careerops-materials` Skill；API 客户端可以调用 `jobops material prepare|verify --request request.json`
+2. 在初始化时设置根目录：`career-journal setup --home ~/job-search --careerops-root /path/to/career-ops`
+3. 运行 `career-journal doctor --home ~/job-search`
+4. 在 Codex 中使用 `careerops-materials` Skill；API 客户端可以调用 `career-journal material prepare|verify --request request.json`
 
-当前 alpha 版本的子进程适配器要求 CareerOps 安装目录暴露文档中规定的 `jobops-adapter.mjs` JSON 桥接。如果桥接或锁定版本缺失，材料验证将保持不可用，任何降级产物都必须标记为 **Unverified Draft**。
+当前 alpha 版本的子进程适配器要求 CareerOps 安装目录暴露文档中规定的 `career-journal-adapter.mjs` JSON 桥接。如果桥接或锁定版本缺失，材料验证将保持不可用，任何降级产物都必须标记为 **Unverified Draft**。
 
 ### 内置与个人简历规则
 
@@ -128,7 +128,7 @@ CAREER JOURNAL 在 [`config/material-rules/us-resume-default.md`](config/materia
 内置规则适用于美国英文简历，用户的明确指令可以覆盖它们。用户也可以在不修改仓库的情况下添加自己的 Skill 或规则文件：
 
 ```sh
-jobops setup --home ~/job-search --material-rules /path/to/personal-resume-skill/SKILL.md
+career-journal setup --home ~/job-search --material-rules /path/to/personal-resume-skill/SKILL.md
 ```
 
 `careerops-materials` Skill 会同时加载内置默认规则和所有已配置的个人规则文件，并在材料审核中记录覆盖项。简历专用的章节、bullet 和格式规则不会自动应用到求职信正文。
@@ -145,42 +145,48 @@ jobops setup --home ~/job-search --material-rules /path/to/personal-resume-skill
 项目提供四个可移植任务：`mail-sync`、`deadline-review`、`daily-consolidation` 和 `local-backup`。
 
 ```sh
-jobops automation configure --home ~/job-search --task deadline-review --time 20:00 --enabled
-jobops automation configure --home ~/job-search --task daily-consolidation --time 22:00 --enabled
-jobops automation list --home ~/job-search
-jobops automation run --home ~/job-search --task deadline-review --dry-run
-jobops automation install --home ~/job-search --task deadline-review
+career-journal automation configure --home ~/job-search --task deadline-review --time 20:00 --enabled
+career-journal automation configure --home ~/job-search --task daily-consolidation --time 22:00 --enabled
+career-journal automation list --home ~/job-search
+career-journal automation run --home ~/job-search --task deadline-review --dry-run
+career-journal automation install --home ~/job-search --task deadline-review
 ```
 
-未传入 `--timezone` 时，自动化会使用初始化时从电脑读取并保存的工作区时区。`install` 只会在 `.jobops/schedulers/` 中生成对应平台的调度定义，不会直接注册到操作系统。检查文件后，可分别使用 macOS 的 `launchctl`、Linux 的 `crontab` 或 Windows 的 `schtasks` 加载。每个任务保持自己的游标，只在成功后向前推进，没有可执行变化时保持安静。当前 alpha 中，`local-backup` 有真实的可执行处理器；其他缺少适配器的任务会明确失败，不会记录伪成功。
+未传入 `--timezone` 时，自动化会使用初始化时从电脑读取并保存的工作区时区。`install` 只会在 `.career-journal/schedulers/` 中生成对应平台的调度定义，不会直接注册到操作系统。检查文件后，可分别使用 macOS 的 `launchctl`、Linux 的 `crontab` 或 Windows 的 `schtasks` 加载。每个任务保持自己的游标，只在成功后向前推进，没有可执行变化时保持安静。当前 alpha 中，`local-backup` 有真实的可执行处理器；其他缺少适配器的任务会明确失败，不会记录伪成功。
 
 如果你手动注册了调度定义，应先删除操作系统中的注册，再删除本地定义文件：
 
 ```sh
 # macOS：使用你实际加载的 plist 路径
-launchctl bootout "gui/$(id -u)" "/path/to/io.job-search-ops.deadline-review.plist"
-# Linux：从当前 crontab 中删除准确的 jobops-deadline-review 行
-crontab -l | grep -v 'jobops-deadline-review' | crontab -
+launchctl bootout "gui/$(id -u)" "/path/to/io.career-journal.deadline-review.plist"
+# Linux：从当前 crontab 中删除准确的 career-journal-deadline-review 行
+crontab -l | grep -v 'career-journal-deadline-review' | crontab -
 # Windows
-schtasks /Delete /TN "JobSearchOps-deadline-review" /F
+schtasks /Delete /TN "CareerJournal-deadline-review" /F
 ```
 
-然后运行 `jobops automation uninstall --home ~/job-search --task deadline-review` 删除已生成的定义文件。返回结果会明确区分“已删除定义文件”和“已删除操作系统调度任务”。
+然后运行 `career-journal automation uninstall --home ~/job-search --task deadline-review` 删除已生成的定义文件。返回结果会明确区分“已删除定义文件”和“已删除操作系统调度任务”。
 
 ## 数据与隐私
 
-数据只保存在你选择的本地目录中。`.jobops/` 包含配置、SQLite 数据、不可变的申请材料副本和已生成的调度文件。导出不包含密钥引用，从邮件中识别出的身份验证链接会被脱敏。项目不会自动提交求职申请、发送邮件或联系招聘方。
+数据只保存在你选择的本地目录中。`.career-journal/` 包含配置、SQLite 数据、不可变的申请材料副本和已生成的调度文件。导出不包含密钥引用，从邮件中识别出的身份验证链接会被脱敏。项目不会自动提交求职申请、发送邮件或联系招聘方。
 
 ## 更新、迁移、备份与卸载
 
 ```sh
-jobops update --check
-jobops backup create --home ~/job-search --output ~/job-search-backup
-jobops migrate --home ~/job-search --dry-run
-jobops migrate --home ~/job-search --apply
+career-journal update --check
+career-journal backup create --home ~/job-search --output ~/job-search-backup
+career-journal migrate --home ~/job-search --dry-run
+career-journal migrate --home ~/job-search --apply
 ```
 
-升级前先备份，然后拉取指定的版本标签，运行 `jobops update --check`，并且只应用命令实际报告的迁移。卸载时，先对每个已安装任务运行 `jobops automation uninstall`，保留或导出所选数据目录，再删除克隆的仓库。只有在你确实希望删除所有本地记录和归档材料时，才删除数据目录。
+升级前先备份，然后拉取指定的版本标签，运行 `career-journal update --check`，并且只应用命令实际报告的迁移。卸载时，先对每个已安装任务运行 `career-journal automation uninstall`，保留或导出所选数据目录，再删除克隆的仓库。只有在你确实希望删除所有本地记录和归档材料时，才删除数据目录。
+
+### 兼容 v0.1.0-alpha.5 及更早版本
+
+旧的 `jobops` CLI、`.jobops/` 数据目录、`jobops-adapter.mjs` 桥接名和相关调度标识只用于升级 v0.1.0-alpha.5 及更早版本创建的安装。显式指定 `jobops-adapter.mjs` 的旧配置仍受支持；新配置不会自动回退到旧桥接。新安装和新集成必须使用 `career-journal`、`.career-journal/`、`career-journal-adapter.mjs` 和 CAREER JOURNAL 调度标识。
+
+重新生成定义时，旧自动化会继续使用原有的 `jobops-*`、`io.job-search-ops.*` 和 `JobSearchOps-*` 标识，因此升级安装不会创建并行的系统任务。调度定义包含克隆目录的绝对路径；移动或重命名克隆目录后，应先卸载现有系统注册，运行 `career-journal automation install`，再以相同的旧标识重新加载生成的定义。Linux 用户应使用重新生成的内容替换已有 `jobops-*` crontab 行。`automation uninstall` 会删除新旧本地定义文件，但不会卸载操作系统中的注册。
 
 ## 项目架构
 

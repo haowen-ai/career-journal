@@ -2,7 +2,7 @@ import { openHomeDatabase } from '../runtime/home.mjs';
 import { archiveArtifact } from '../domain/artifacts.mjs';
 
 export async function artifactCommand(parsed, io) {
-  if (parsed.subcommand !== 'add') throw new Error('Usage: jobops artifact add');
+  if (parsed.subcommand !== 'add') throw new Error('Usage: career-journal artifact add');
   const context = await openHomeDatabase(parsed.options.home ?? process.cwd());
   try {
     const record = await archiveArtifact(context.db, {

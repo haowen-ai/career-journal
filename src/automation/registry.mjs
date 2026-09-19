@@ -18,11 +18,14 @@ export { BUILT_IN_TASKS };
 export function upsertTask(db, input) {
   if (!Object.hasOwn(BUILT_IN_TASKS, input.type)) throw new Error(`Unknown automation task: ${input.type}`);
   if (typeof input.enabled !== 'boolean') throw new Error('enabled must be true or false');
-  const id = `jobops-${input.type}`;
+  const primaryId = `career-journal-${input.type}`;
+  const legacyId = `jobops-${input.type}`;
+  const existingTask = db.prepare('SELECT id, cursor FROM automations WHERE id IN (?, ?) ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END LIMIT 1')
+    .get(primaryId, legacyId, primaryId);
+  const id = existingTask?.id ?? primaryId;
   const timezone = validateTimezone(input.timezone);
   const schedule = validateTime(input.time);
-  const existing = db.prepare('SELECT cursor FROM automations WHERE id = ?').get(id);
-  const cursor = input.cursor ?? existing?.cursor ?? null;
+  const cursor = input.cursor ?? existingTask?.cursor ?? null;
   db.prepare(`INSERT INTO automations
     (id, task_type, enabled, timezone, schedule, account_id, notification_policy, cursor, config_json)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -65,4 +68,3 @@ export async function runTask(db, id, { dryRun = false, handler }) {
     throw error;
   }
 }
-

@@ -69,7 +69,7 @@ export async function applicationCommand(parsed, io) {
       io.out(JSON.stringify({ ...record, events, artifacts }, null, 2));
       return 0;
     }
-    throw new Error('Usage: jobops application add|list|show');
+    throw new Error('Usage: career-journal application add|list|show');
   } finally { context.db.close(); }
 }
 

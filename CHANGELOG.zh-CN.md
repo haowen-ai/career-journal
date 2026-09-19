@@ -22,6 +22,33 @@
 
 - 无
 
+## [0.1.0-alpha.6] - 2026-09-19
+
+### 新增
+
+- 增加 `career-journal`，作为主 CLI、仓库 Skill、启动器、包命令和全新安装标识
+- 增加旧 `.jobops` 工作区、`jobops-*` 自动化和 `jobops` CLI 别名的升级验证
+- 增加可复现的合成看板数据脚本，并使用 SHA-256 清单校验发布截图
+
+### 变更
+
+- GitHub 仓库和标准包信息统一改为 CAREER JOURNAL 与 `career-journal`
+- 新工作区的配置、数据、材料、备份和调度定义统一存放在 `.career-journal/`
+- 新工作区使用 `career-journal-*`、`io.career-journal.*` 和 `CareerJournal-*` 调度标识；升级任务继续使用原有平台标识
+- 产品截图改用容易识别的大厂演示记录，每家公司都明确标注 `Demo`，编号统一使用 `DEMO-*`
+
+### 修复
+
+- 防止新目录静默遮蔽有效旧工作区；新旧配置同时存在时明确报告冲突
+- 重新配置旧自动化时继续使用原 ID，避免升级后出现重复定时任务
+- 新安装优先使用 `career-journal-adapter.mjs`，并为已经公开的 CareerOps `jobops-adapter.mjs` 桥接保留回退兼容
+
+### 安全
+
+- 工作区冲突检测避免本地写入分散到两个数据根目录
+- 原有仅限本机环回、凭据引用和导出脱敏边界保持不变
+- README 声明与截图测试明确说明示例公司不代表真实投递、结果、关联或背书
+
 ## [0.1.0-alpha.5] - 2026-09-19
 
 ### 新增
@@ -150,9 +177,10 @@
 - 凭据通过环境变量引用，不会进入导出文件
 - 标记已提交材料时需要用户明确确认
 
-[尚未发布]: https://github.com/haowenchen0811/job-search-ops/compare/v0.1.0-alpha.5...HEAD
-[0.1.0-alpha.5]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.5
-[0.1.0-alpha.4]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.4
-[0.1.0-alpha.3]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.3
-[0.1.0-alpha.2]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.2
-[0.1.0-alpha.1]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.1
+[尚未发布]: https://github.com/haowenchen0811/career-journal/compare/v0.1.0-alpha.6...HEAD
+[0.1.0-alpha.6]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.6
+[0.1.0-alpha.5]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.5
+[0.1.0-alpha.4]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.4
+[0.1.0-alpha.3]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.3
+[0.1.0-alpha.2]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.2
+[0.1.0-alpha.1]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.1

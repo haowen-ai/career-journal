@@ -6,7 +6,7 @@ import path from 'node:path';
 import { detectCareerOps, runCareerOps } from '../../src/integrations/careerops.mjs';
 
 async function withDirectory(run) {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'jobops-careerops-'));
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'career-journal-careerops-'));
   try { await run(directory); } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
@@ -17,19 +17,30 @@ test('reports a missing CareerOps installation as optional capability health', a
   assert.match(health.detail, /install|configure/i);
 }));
 
-test('detects the exact pinned CareerOps version and bridge', async () => withDirectory(async (directory) => {
+test('detects the exact pinned CareerOps version and primary bridge', async () => withDirectory(async (directory) => {
   await mkdir(directory, { recursive: true });
   await writeFile(path.join(directory, 'package.json'), JSON.stringify({ name: 'career-ops', version: '1.32.0' }));
-  await writeFile(path.join(directory, 'jobops-adapter.mjs'), '');
+  await writeFile(path.join(directory, 'career-journal-adapter.mjs'), '');
   const health = await detectCareerOps({ root: directory, pinnedVersion: '1.32.0' });
   assert.equal(health.ok, true);
   assert.equal(health.installedVersion, '1.32.0');
-  assert.equal(health.entrypoint, path.join(directory, 'jobops-adapter.mjs'));
+  assert.equal(health.entrypoint, path.join(directory, 'career-journal-adapter.mjs'));
+}));
+
+test('a new integration does not silently fall back to the legacy jobops adapter', async () => withDirectory(async (directory) => {
+  await writeFile(path.join(directory, 'package.json'), JSON.stringify({ name: 'career-ops', version: '1.32.0' }));
+  await writeFile(path.join(directory, 'jobops-adapter.mjs'), '');
+
+  const health = await detectCareerOps({ root: directory, pinnedVersion: '1.32.0' });
+
+  assert.equal(health.ok, false);
+  assert.equal(health.code, 'bridge-missing');
+  assert.match(health.detail, /career-journal-adapter\.mjs/);
 }));
 
 test('rejects a version mismatch instead of silently accepting drift', async () => withDirectory(async (directory) => {
   await writeFile(path.join(directory, 'package.json'), JSON.stringify({ name: 'career-ops', version: '1.31.0' }));
-  await writeFile(path.join(directory, 'jobops-adapter.mjs'), '');
+  await writeFile(path.join(directory, 'career-journal-adapter.mjs'), '');
   const health = await detectCareerOps({ root: directory, pinnedVersion: '1.32.0' });
   assert.equal(health.ok, false);
   assert.equal(health.code, 'version-mismatch');
@@ -37,7 +48,7 @@ test('rejects a version mismatch instead of silently accepting drift', async () 
 
 test('constructs a bounded structured draft request and validates the result', async () => withDirectory(async (directory) => {
   await writeFile(path.join(directory, 'package.json'), JSON.stringify({ name: 'career-ops', version: '1.32.0' }));
-  await writeFile(path.join(directory, 'jobops-adapter.mjs'), '');
+  await writeFile(path.join(directory, 'career-journal-adapter.mjs'), '');
   let invocation;
   const outputPath = path.join(directory, 'resume.pdf');
   await writeFile(outputPath, '%PDF fixture');
@@ -49,16 +60,39 @@ test('constructs a bounded structured draft request and validates the result', a
       return { exitCode: 0, stdout: JSON.stringify({ ok: true, applicationId: 'app-1', lifecycle: 'draft', outputPath, verification: 'passed' }), stderr: '' };
     },
   });
-  assert.deepEqual(invocation.args, [path.join(directory, 'jobops-adapter.mjs'), 'material', 'prepare']);
+  assert.deepEqual(invocation.args, [path.join(directory, 'career-journal-adapter.mjs'), 'material', 'prepare']);
   const request = JSON.parse(invocation.stdin);
   assert.equal(request.lifecycle, 'draft');
   assert.equal(request.applicationId, 'app-1');
   assert.equal(result.verification, 'passed');
 }));
 
-test('does not fabricate success or accept a submitted lifecycle from the adapter', async () => withDirectory(async (directory) => {
+test('an existing config can still execute the explicitly named jobops adapter', async () => withDirectory(async (directory) => {
   await writeFile(path.join(directory, 'package.json'), JSON.stringify({ name: 'career-ops', version: '1.32.0' }));
   await writeFile(path.join(directory, 'jobops-adapter.mjs'), '');
+  const outputPath = path.join(directory, 'resume.pdf');
+  await writeFile(outputPath, '%PDF fixture');
+  let invocation;
+
+  await runCareerOps({ action: 'prepare', applicationId: 'legacy-app', materialKind: 'resume' }, {
+    root: directory, pinnedVersion: '1.32.0', entrypoint: 'jobops-adapter.mjs',
+  }, {
+    execute: async (value) => {
+      invocation = value;
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({ ok: true, applicationId: 'legacy-app', lifecycle: 'draft', outputPath, verification: 'passed' }),
+        stderr: '',
+      };
+    },
+  });
+
+  assert.deepEqual(invocation.args, [path.join(directory, 'jobops-adapter.mjs'), 'material', 'prepare']);
+}));
+
+test('does not fabricate success or accept a submitted lifecycle from the adapter', async () => withDirectory(async (directory) => {
+  await writeFile(path.join(directory, 'package.json'), JSON.stringify({ name: 'career-ops', version: '1.32.0' }));
+  await writeFile(path.join(directory, 'career-journal-adapter.mjs'), '');
   const config = { root: directory, pinnedVersion: '1.32.0' };
   await assert.rejects(() => runCareerOps({ action: 'prepare', applicationId: 'app-1', materialKind: 'resume' }, config, {
     execute: async () => ({ exitCode: 1, stdout: '', stderr: 'fact gate failed' }),
@@ -72,7 +106,7 @@ test('does not fabricate success or accept a submitted lifecycle from the adapte
 
 test('rejects missing output files and wrong application associations', async () => withDirectory(async (directory) => {
   await writeFile(path.join(directory, 'package.json'), JSON.stringify({ name: 'career-ops', version: '1.32.0' }));
-  await writeFile(path.join(directory, 'jobops-adapter.mjs'), '');
+  await writeFile(path.join(directory, 'career-journal-adapter.mjs'), '');
   const config = { root: directory, pinnedVersion: '1.32.0' };
   await assert.rejects(() => runCareerOps({ action: 'prepare', applicationId: 'app-1', materialKind: 'resume' }, config, {
     execute: async () => ({ exitCode: 0, stdout: JSON.stringify({ ok: true, applicationId: 'app-1', lifecycle: 'draft', outputPath: path.join(directory, 'missing.pdf'), verification: 'passed' }), stderr: '' }),

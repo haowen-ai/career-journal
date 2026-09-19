@@ -22,7 +22,7 @@ function snapshot(db) {
 
 export async function exportCommand(parsed, io) {
   const format = parsed.subcommand;
-  if (!['json', 'markdown', 'csv'].includes(format)) throw new Error('Usage: jobops export json|markdown|csv --output <file>');
+  if (!['json', 'markdown', 'csv'].includes(format)) throw new Error('Usage: career-journal export json|markdown|csv --output <file>');
   if (!parsed.options.output) throw new Error('output is required');
   const context = await openHomeDatabase(parsed.options.home ?? process.cwd());
   try {

@@ -1,5 +1,5 @@
 export function renderWindows(task, runtime) {
-  const taskName = `JobSearchOps-${task.type}`;
+  const taskName = task.id.startsWith('jobops-') ? `JobSearchOps-${task.type}` : `CareerJournal-${task.type}`;
   const action = `"${runtime.node}" "${runtime.cli}" automation run --id ${task.id} --home "${runtime.home}"`;
   return {
     kind: 'schtasks',
@@ -8,4 +8,3 @@ export function renderWindows(task, runtime) {
     content: `schtasks ${['/Create', '/F', '/SC', 'DAILY', '/TN', taskName, '/TR', action, '/ST', task.schedule].map((item) => `"${item.replace(/"/g, '\\"')}"`).join(' ')}\n`,
   };
 }
-

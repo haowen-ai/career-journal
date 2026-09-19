@@ -1,4 +1,4 @@
-# job-search-ops Skill scenarios
+# CAREER JOURNAL Skill scenarios
 
 ## Baseline run without the Skill
 

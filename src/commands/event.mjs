@@ -3,7 +3,7 @@ import { openHomeDatabase } from '../runtime/home.mjs';
 import { recordEvent } from '../domain/events.mjs';
 
 export async function eventCommand(parsed, io) {
-  if (!['record', 'add'].includes(parsed.subcommand)) throw new Error('Usage: jobops event record|add');
+  if (!['record', 'add'].includes(parsed.subcommand)) throw new Error('Usage: career-journal event record|add');
   const context = await openHomeDatabase(parsed.options.home ?? process.cwd());
   try {
     const eventId = parsed.options['event-id'] ?? randomUUID();

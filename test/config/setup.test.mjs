@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { setup } from '../../src/commands/setup.mjs';
-import { loadConfig } from '../../src/config/store.mjs';
+import { configPath, loadConfig } from '../../src/config/store.mjs';
+import { defaultConfig } from '../../src/config/defaults.mjs';
 import { setupCommand } from '../../src/commands/setup.mjs';
 import { memoryIO } from '../../test-utils/helpers.mjs';
 
@@ -18,6 +19,58 @@ test('does not invent an email account', async () => withHome(async (home) => {
   assert.deepEqual(result.config.email.accounts, []);
   assert.equal(result.config.email.setupState, 'skipped');
   assert.equal((await loadConfig(home)).timezone, 'America/Chicago');
+}));
+
+test('new workspaces use the CAREER JOURNAL data directory and database name', async () => withHome(async (home) => {
+  const result = await setup(home, { timezone: 'UTC', email: { mode: 'skip' } });
+  assert.equal(configPath(home), path.join(home, '.career-journal', 'config.json'));
+  await access(configPath(home));
+  assert.equal(result.config.data.database, '.career-journal/career-journal.db');
+  assert.equal(result.config.data.artifacts, '.career-journal/artifacts');
+  assert.equal(result.config.careerOps.entrypoint, 'career-journal-adapter.mjs');
+}));
+
+test('existing .jobops workspaces remain readable for upgrades', async () => withHome(async (home) => {
+  const legacyDirectory = path.join(home, '.jobops');
+  await mkdir(legacyDirectory, { recursive: true });
+  const legacy = defaultConfig('2026-09-19T00:00:00Z', 'UTC');
+  legacy.data = { database: '.jobops/jobops.db', artifacts: '.jobops/artifacts' };
+  legacy.careerOps.entrypoint = 'jobops-adapter.mjs';
+  await writeFile(path.join(legacyDirectory, 'config.json'), `${JSON.stringify(legacy)}\n`);
+  assert.equal(configPath(home), path.join(legacyDirectory, 'config.json'));
+  assert.equal((await loadConfig(home)).data.database, '.jobops/jobops.db');
+  await setup(home, { timezone: 'America/New_York' });
+  assert.equal((await loadConfig(home)).timezone, 'America/New_York');
+  await assert.rejects(() => access(path.join(home, '.career-journal', 'config.json')), { code: 'ENOENT' });
+}));
+
+test('an empty primary directory does not shadow an existing legacy config', async () => withHome(async (home) => {
+  const primaryDirectory = path.join(home, '.career-journal');
+  const legacyDirectory = path.join(home, '.jobops');
+  await mkdir(primaryDirectory, { recursive: true });
+  await mkdir(legacyDirectory, { recursive: true });
+  const legacy = defaultConfig('2026-09-19T00:00:00Z', 'UTC');
+  legacy.data = { database: '.jobops/jobops.db', artifacts: '.jobops/artifacts' };
+  legacy.careerOps.entrypoint = 'jobops-adapter.mjs';
+  await writeFile(path.join(legacyDirectory, 'config.json'), `${JSON.stringify(legacy)}\n`);
+
+  assert.equal(configPath(home), path.join(legacyDirectory, 'config.json'));
+  assert.equal((await loadConfig(home)).careerOps.entrypoint, 'jobops-adapter.mjs');
+}));
+
+test('two config files fail explicitly instead of silently choosing one workspace', async () => withHome(async (home) => {
+  const primaryDirectory = path.join(home, '.career-journal');
+  const legacyDirectory = path.join(home, '.jobops');
+  await mkdir(primaryDirectory, { recursive: true });
+  await mkdir(legacyDirectory, { recursive: true });
+  const primary = defaultConfig('2026-09-19T01:00:00Z', 'America/Chicago');
+  const legacy = defaultConfig('2026-09-19T00:00:00Z', 'UTC');
+  legacy.data = { database: '.jobops/jobops.db', artifacts: '.jobops/artifacts' };
+  legacy.careerOps.entrypoint = 'jobops-adapter.mjs';
+  await writeFile(path.join(primaryDirectory, 'config.json'), `${JSON.stringify(primary)}\n`);
+  await writeFile(path.join(legacyDirectory, 'config.json'), `${JSON.stringify(legacy)}\n`);
+
+  await assert.rejects(() => loadConfig(home), /both|conflict|multiple/i);
 }));
 
 test('stores only an explicit email adapter without credentials', async () => withHome(async (home) => {

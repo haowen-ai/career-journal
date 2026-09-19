@@ -53,6 +53,6 @@ export async function emailCommand(parsed, io) {
       io.out(JSON.stringify({ removed }));
       return 0;
     }
-    throw new Error('Usage: jobops email configure|list|import-eml|disconnect');
+    throw new Error('Usage: career-journal email configure|list|import-eml|disconnect');
   } finally { context.db.close(); }
 }

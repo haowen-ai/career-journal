@@ -1,6 +1,10 @@
 {
   "schemaVersion": 1,
   "timezone": "UTC",
+  "data": {
+    "database": ".career-journal/career-journal.db",
+    "artifacts": ".career-journal/artifacts"
+  },
   "email": {
     "setupState": "not-configured",
     "accounts": []
@@ -16,6 +20,11 @@
     "model": "jev-latest",
     "secretRef": null,
     "mode": "off"
+  },
+  "careerOps": {
+    "root": null,
+    "pinnedVersion": "1.32.0",
+    "entrypoint": "career-journal-adapter.mjs"
   },
   "materials": {
     "ruleFiles": []

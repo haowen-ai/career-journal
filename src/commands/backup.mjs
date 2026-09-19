@@ -50,7 +50,7 @@ export async function createBackup(home, output, options = {}) {
     const sourceDatabase = path.resolve(root, config.data.database);
     if (await exists(sourceDatabase)) {
       const db = openDatabase(sourceDatabase);
-      try { await backupDatabase(db, path.join(destination, 'jobops.db')); }
+      try { await backupDatabase(db, path.join(destination, path.basename(sourceDatabase))); }
       finally { db.close(); }
     }
     const artifactRoot = path.resolve(root, config.data.artifacts);
@@ -74,7 +74,7 @@ export async function createBackup(home, output, options = {}) {
 }
 
 export async function backupCommand(parsed, io, runtime) {
-  if (!['create', null].includes(parsed.subcommand)) throw new Error('Usage: jobops backup create --output <directory>');
+  if (!['create', null].includes(parsed.subcommand)) throw new Error('Usage: career-journal backup create --output <directory>');
   if (!parsed.options.output) throw new Error('backup create requires --output');
   const result = await createBackup(parsed.options.home ?? process.cwd(), parsed.options.output, { version: runtime.version });
   io.out(JSON.stringify(result, null, 2));

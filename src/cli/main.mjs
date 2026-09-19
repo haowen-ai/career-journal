@@ -2,7 +2,7 @@ import { parseArgs } from './parse-args.mjs';
 
 const HELP = `CAREER JOURNAL
 
-Usage: jobops <command> [subcommand] [options]
+Usage: career-journal <command> [subcommand] [options]
 
 Commands:
   setup         Configure a local workspace
@@ -39,7 +39,7 @@ export async function runCli(argv, io, runtime) {
   const handler = runtime.commands.get(parsed.command);
   if (!handler) {
     io.err(`Unknown command: ${parsed.command}`);
-    io.err('Run jobops --help to see available commands.');
+    io.err('Run career-journal --help to see available commands.');
     return 2;
   }
   try {
@@ -51,4 +51,3 @@ export async function runCli(argv, io, runtime) {
 }
 
 export { HELP };
-

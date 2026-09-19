@@ -10,13 +10,13 @@ import { materialCommand } from '../../src/commands/material.mjs';
 import { memoryIO } from '../../test-utils/helpers.mjs';
 
 test('material prepare validates, hashes, and archives the generated draft', async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'jobops-material-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'career-journal-material-'));
   const home = path.join(root, 'home');
   const careerOps = path.join(root, 'career-ops');
   try {
     await import('node:fs/promises').then(({ mkdir }) => mkdir(careerOps, { recursive: true }));
     await writeFile(path.join(careerOps, 'package.json'), JSON.stringify({ name: 'career-ops', version: '1.32.0' }));
-    await writeFile(path.join(careerOps, 'jobops-adapter.mjs'), `import { readFile, writeFile } from 'node:fs/promises';
+    await writeFile(path.join(careerOps, 'career-journal-adapter.mjs'), `import { readFile, writeFile } from 'node:fs/promises';
 let text=''; for await (const chunk of process.stdin) text += chunk; const request=JSON.parse(text);
 await writeFile(request.requestedOutput, '%PDF generated');
 console.log(JSON.stringify({ok:true, applicationId:request.applicationId, lifecycle:'draft', outputPath:request.requestedOutput, verification:'passed', verificationEvidence:{factGate:'passed',ruleFiles:request.ruleFiles}}));`);
@@ -38,6 +38,7 @@ console.log(JSON.stringify({ok:true, applicationId:request.applicationId, lifecy
       path.join(process.cwd(), 'config', 'material-rules', 'us-resume-default.md'),
       rules,
     ]);
+    assert.equal(result.artifact.storagePath.includes(`${path.sep}.career-journal${path.sep}artifacts${path.sep}`), true);
     assert.equal(await readFile(result.artifact.storagePath, 'utf8'), '%PDF generated');
     const inspect = await openHomeDatabase(home);
     assert.equal(inspect.db.prepare('SELECT COUNT(*) count FROM artifacts').get().count, 1);

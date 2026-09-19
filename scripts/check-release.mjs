@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -13,7 +14,9 @@ async function readable(file) {
 
 async function candidateFiles(root) {
   const { stdout } = await execFileAsync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd: root });
-  return stdout.split('\n').filter(Boolean);
+  const candidates = stdout.split('\n').filter(Boolean);
+  const states = await Promise.all(candidates.map(async (file) => [file, await readable(path.join(root, file))]));
+  return states.filter(([, exists]) => exists).map(([file]) => file);
 }
 
 export async function checkRelease(root) {
@@ -36,6 +39,25 @@ export async function checkRelease(root) {
     ]);
     check('version-consistency', version === packageJson.version && changelog.includes(`## [${version}]`), `${version} / ${packageJson.version}`);
   } catch (error) { check('version-consistency', false, error.message); }
+
+  try {
+    const [englishReadme, chineseReadme, skill] = await Promise.all([
+      read('README.md'),
+      read('README.zh-CN.md'),
+      read('.agents/skills/career-journal/SKILL.md'),
+    ]);
+    const repositoryUrl = packageJson.repository?.url;
+    const identityOk = packageJson.name === '@haowenchen0811/career-journal'
+      && packageJson.bin?.['career-journal'] === 'bin/career-journal.mjs'
+      && packageJson.bin?.jobops === 'bin/jobops.mjs'
+      && repositoryUrl === 'https://github.com/haowenchen0811/career-journal.git'
+      && /^name: career-journal$/m.test(skill)
+      && /git clone https:\/\/github\.com\/haowenchen0811\/career-journal\.git/.test(englishReadme)
+      && /git clone https:\/\/github\.com\/haowenchen0811\/career-journal\.git/.test(chineseReadme)
+      && !/git clone [^\n]*job-search-ops/.test(englishReadme)
+      && !/git clone [^\n]*job-search-ops/.test(chineseReadme);
+    check('product-identity', identityOk, 'CAREER JOURNAL package, repository, primary CLI, Skill, and onboarding');
+  } catch (error) { check('product-identity', false, error.message); }
 
   try {
     const notices = await read('THIRD_PARTY_NOTICES.md');
@@ -86,8 +108,13 @@ export async function checkRelease(root) {
       && /http:\/\/career-journal\.localhost:<port>/.test(englishReadme)
       && /http:\/\/career-journal\.localhost:<port>/.test(chineseReadme);
     const dashboardPreview = await readFile(path.join(root, 'docs/assets/dashboard-preview.png'));
+    const previewManifest = JSON.parse(await read('docs/assets/dashboard-preview.json'));
     const screenshotOk = dashboardPreview.length > 10_000
-      && dashboardPreview.subarray(0, 8).toString('hex') === '89504e470d0a1a0a';
+      && dashboardPreview.subarray(0, 8).toString('hex') === '89504e470d0a1a0a'
+      && createHash('sha256').update(dashboardPreview).digest('hex') === previewManifest.sha256
+      && previewManifest.fixture === 'synthetic-big-company-demo'
+      && previewManifest.companies.includes('Apple · Demo')
+      && previewManifest.companies.includes('Google · Demo');
     check('product-readme', productReadme && screenshotOk, 'product explanation, real browser preview, workflows, and installation order in both languages');
   } catch (error) { check('bilingual-docs', false, error.message); }
 

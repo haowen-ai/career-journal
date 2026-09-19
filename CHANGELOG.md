@@ -22,6 +22,33 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.6] - 2026-09-19
+
+### Added
+
+- Added `career-journal` as the primary CLI, repository Skill, launcher, package binary, and fresh-install identity
+- Added upgrade coverage for legacy `.jobops` workspaces, `jobops-*` automations, and the `jobops` CLI alias
+- Added a reproducible synthetic dashboard fixture and a SHA-256 manifest gate for the published product screenshot
+
+### Changed
+
+- Renamed the GitHub repository and canonical package metadata to CAREER JOURNAL and `career-journal`
+- New workspaces now store configuration, data, artifacts, backups, and scheduler definitions under `.career-journal/`
+- New workspaces use `career-journal-*`, `io.career-journal.*`, and `CareerJournal-*` scheduler identifiers; upgraded tasks retain their existing platform identities
+- Replaced the product preview records with recognizable big-company examples, each visibly marked `Demo` with a `DEMO-*` identifier
+
+### Fixed
+
+- Added an explicit conflict error when both configurations exist, preventing a new workspace from silently shadowing a valid legacy workspace
+- Preserved legacy automation IDs during reconfiguration so upgrades do not create duplicate scheduled tasks
+- Kept the published `jobops-adapter.mjs` CareerOps bridge as a fallback while preferring `career-journal-adapter.mjs` for new setups
+
+### Security
+
+- Workspace conflict detection prevents writes from being split across two local data roots
+- Existing loopback-only dashboard, credential-reference, and redacted-export boundaries remain unchanged
+- README disclaimers and preview tests make clear that the example companies do not represent real applications, outcomes, affiliations, or endorsements
+
 ## [0.1.0-alpha.5] - 2026-09-19
 
 ### Added
@@ -150,9 +177,10 @@ All notable changes are documented here. This project follows Semantic Versionin
 - Credentials are referenced through environment variables and excluded from exports
 - Submitted artifacts require explicit confirmation
 
-[Unreleased]: https://github.com/haowenchen0811/job-search-ops/compare/v0.1.0-alpha.5...HEAD
-[0.1.0-alpha.5]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.5
-[0.1.0-alpha.4]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.4
-[0.1.0-alpha.3]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.3
-[0.1.0-alpha.2]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.2
-[0.1.0-alpha.1]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.1
+[Unreleased]: https://github.com/haowenchen0811/career-journal/compare/v0.1.0-alpha.6...HEAD
+[0.1.0-alpha.6]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.6
+[0.1.0-alpha.5]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.5
+[0.1.0-alpha.4]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.4
+[0.1.0-alpha.3]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.3
+[0.1.0-alpha.2]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.2
+[0.1.0-alpha.1]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.1

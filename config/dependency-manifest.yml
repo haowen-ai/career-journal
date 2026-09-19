@@ -8,7 +8,9 @@ dependencies:
     source: https://github.com/career-ops-hq/career-ops
     version: "1.32.0"
     license: MIT
-    adapter_entrypoint: jobops-adapter.mjs
+    adapter_entrypoint: career-journal-adapter.mjs
+    legacy_adapter_entrypoint: jobops-adapter.mjs
+    legacy_adapter_through: "0.1.0-alpha.5"
   pdf:
     required: false
     required_for:

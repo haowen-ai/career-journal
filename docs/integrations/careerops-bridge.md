@@ -6,14 +6,16 @@ The API-mode CareerOps adapter invokes a separately installed, pinned `career-op
 
 ## Availability
 
-The configured CareerOps root must contain `jobops-adapter.mjs`. The pinned upstream release does not currently ship this bridge, so API-mode material generation remains unavailable until the user installs a compatible bridge. Codex-native users can still follow the repo-local `careerops-materials` Skill against CareerOps directly. Missing bridge health is a warning and never becomes a fabricated success.
+The configured CareerOps root must contain `career-journal-adapter.mjs`. The pinned upstream release does not currently ship this bridge, so API-mode material generation remains unavailable until the user installs a compatible bridge. Codex-native users can still follow the repo-local `careerops-materials` Skill against CareerOps directly. Missing bridge health is a warning and never becomes a fabricated success.
+
+A legacy v0.1.0-alpha.5-or-earlier config that explicitly names `jobops-adapter.mjs` remains supported. New configurations do not discover or fall back to that legacy bridge; new integrations must expose `career-journal-adapter.mjs`.
 
 ## Invocation
 
 CAREER JOURNAL runs:
 
 ```text
-node <careerops-root>/jobops-adapter.mjs material prepare|verify
+node <careerops-root>/career-journal-adapter.mjs material prepare|verify
 ```
 
 It sends one JSON object on standard input. Required fields are:
@@ -27,7 +29,7 @@ It sends one JSON object on standard input. Required fields are:
   "jdPath": "/path/to/jd.txt",
   "evidencePath": "/path/to/profile.md",
   "ruleFiles": [
-    "/path/to/job-search-ops/config/material-rules/us-resume-default.md",
+    "/path/to/career-journal/config/material-rules/us-resume-default.md",
     "/path/to/personal-resume-skill/SKILL.md"
   ],
   "requestedOutput": "/path/to/output.pdf"

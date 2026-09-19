@@ -15,7 +15,8 @@ export async function detectCareerOps(config = {}) {
   if (!config.root) return { ok: false, code: 'missing', detail: 'CareerOps is not configured; install it and set its root path' };
   const root = path.resolve(config.root);
   const packageFile = path.join(root, 'package.json');
-  const entrypoint = path.join(root, config.entrypoint ?? 'jobops-adapter.mjs');
+  const configuredEntrypoint = config.entrypoint ?? 'career-journal-adapter.mjs';
+  let entrypoint = path.join(root, configuredEntrypoint);
   if (!(await exists(packageFile))) return { ok: false, code: 'missing', detail: `CareerOps is not installed or configured at ${root}` };
   let metadata;
   try { metadata = JSON.parse(await readFile(packageFile, 'utf8')); }

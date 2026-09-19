@@ -6,14 +6,16 @@ API 模式的 CareerOps 适配器会调用用户单独安装并锁定版本的 `
 
 ## 可用性
 
-配置的 CareerOps 根目录必须包含 `jobops-adapter.mjs`。当前锁定的上游版本并未提供这个桥接，因此在用户安装兼容桥接之前，API 模式的申请材料生成不可用。Codex 原生用户仍可以直接配合 CareerOps 使用仓库内的 `careerops-materials` Skill。缺少桥接只会显示健康检查警告，不会被冒充为成功结果。
+配置的 CareerOps 根目录必须包含 `career-journal-adapter.mjs`。当前锁定的上游版本并未提供这个桥接，因此在用户安装兼容桥接之前，API 模式的申请材料生成不可用。Codex 原生用户仍可以直接配合 CareerOps 使用仓库内的 `careerops-materials` Skill。缺少桥接只会显示健康检查警告，不会被冒充为成功结果。
+
+显式指定 `jobops-adapter.mjs` 的 v0.1.0-alpha.5 及更早版本配置仍受支持。新配置不会发现或自动回退到该旧桥接；新集成必须暴露 `career-journal-adapter.mjs`。
 
 ## 调用方式
 
 CAREER JOURNAL 运行：
 
 ```text
-node <careerops-root>/jobops-adapter.mjs material prepare|verify
+node <careerops-root>/career-journal-adapter.mjs material prepare|verify
 ```
 
 它通过标准输入发送一个 JSON 对象。必填字段如下：
@@ -27,7 +29,7 @@ node <careerops-root>/jobops-adapter.mjs material prepare|verify
   "jdPath": "/path/to/jd.txt",
   "evidencePath": "/path/to/profile.md",
   "ruleFiles": [
-    "/path/to/job-search-ops/config/material-rules/us-resume-default.md",
+    "/path/to/career-journal/config/material-rules/us-resume-default.md",
     "/path/to/personal-resume-skill/SKILL.md"
   ],
   "requestedOutput": "/path/to/output.pdf"

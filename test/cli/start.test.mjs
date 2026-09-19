@@ -40,7 +40,7 @@ async function stopChild(child) {
 test('default start reports a friendly localhost URL that serves the dashboard', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'jobops-start-'));
   await setup(home, { timezone: 'UTC', email: { mode: 'skip' } });
-  const child = spawn(process.execPath, ['bin/jobops.mjs', 'start', '--home', home, '--port', '0'], {
+  const child = spawn(process.execPath, ['bin/career-journal.mjs', 'start', '--home', home, '--port', '0'], {
     cwd: process.cwd(),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -59,7 +59,7 @@ test('default start reports a friendly localhost URL that serves the dashboard',
 test('explicit IPv6 loopback start reports a valid bracketed URL', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'jobops-start-ipv6-'));
   await setup(home, { timezone: 'UTC', email: { mode: 'skip' } });
-  const child = spawn(process.execPath, ['bin/jobops.mjs', 'start', '--home', home, '--host', '::1', '--port', '0'], {
+  const child = spawn(process.execPath, ['bin/career-journal.mjs', 'start', '--home', home, '--host', '::1', '--port', '0'], {
     cwd: process.cwd(),
     stdio: ['ignore', 'pipe', 'pipe'],
   });

@@ -1,7 +1,7 @@
 import { access, mkdir, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { loadConfig } from '../config/store.mjs';
+import { loadConfig, workspaceDirectory } from '../config/store.mjs';
 import { detectCareerOps } from '../integrations/careerops.mjs';
 
 const major = (version) => Number(String(version).replace(/^v/, '').split('.')[0]);
@@ -26,7 +26,7 @@ export async function doctor(home, capabilities = {}) {
     return { ok: false, checks };
   }
   const storageCheck = capabilities.storage ?? (async () => {
-    const directory = path.join(path.resolve(home), '.jobops');
+    const directory = workspaceDirectory(home);
     await mkdir(directory, { recursive: true });
     await access(directory);
     const probe = path.join(directory, `.doctor-${randomUUID()}`);
@@ -43,7 +43,7 @@ export async function doctor(home, capabilities = {}) {
   checks.push({ id: 'careerops', severity: careerOps.ok ? 'pass' : 'warn', detail: careerOps.detail ?? '' });
   const emailProviders = config.email.accounts.map((item) => item.provider);
   const emailUsable = emailProviders.length > 0 && emailProviders.every((provider) => provider === 'manual-eml');
-  checks.push({ id: 'email', severity: emailUsable ? 'pass' : 'warn', detail: emailUsable ? 'configured read-only manual-eml adapter' : emailProviders.length ? 'unsupported email adapter; configure manual-eml' : `${config.email.setupState}; run jobops email configure` });
+  checks.push({ id: 'email', severity: emailUsable ? 'pass' : 'warn', detail: emailUsable ? 'configured read-only manual-eml adapter' : emailProviders.length ? 'unsupported email adapter; configure manual-eml' : `${config.email.setupState}; run career-journal email configure` });
 
   const env = capabilities.env ?? process.env;
   const model = config.model ?? { provider: 'none' };

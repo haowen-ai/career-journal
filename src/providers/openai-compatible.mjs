@@ -60,7 +60,7 @@ export function createOpenAICompatibleProvider(config, fetchImpl = globalThis.fe
             response_format: {
               type: 'json_schema',
               json_schema: {
-                name: 'jobops_response',
+                name: 'career_journal_response',
                 strict: true,
                 schema: { type: 'object', additionalProperties: true, ...schema },
               },

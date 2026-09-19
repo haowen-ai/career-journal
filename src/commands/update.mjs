@@ -28,7 +28,7 @@ export async function inspectUpdate(root, version, dependencies = {}) {
 }
 
 export async function updateCommand(parsed, io, runtime) {
-  if (parsed.options.check !== true && parsed.subcommand !== 'check') throw new Error('Usage: jobops update --check');
+  if (parsed.options.check !== true && parsed.subcommand !== 'check') throw new Error('Usage: career-journal update --check');
   io.out(JSON.stringify(await inspectUpdate(runtime.root, runtime.version), null, 2));
   return 0;
 }

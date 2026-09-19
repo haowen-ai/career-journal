@@ -6,11 +6,11 @@ export function defaultConfig(now = new Date().toISOString(), timezone = Intl.Da
     createdAt: now,
     updatedAt: now,
     timezone,
-    data: { database: '.jobops/jobops.db', artifacts: '.jobops/artifacts' },
+    data: { database: '.career-journal/career-journal.db', artifacts: '.career-journal/artifacts' },
     email: { setupState: 'not-configured', accounts: [] },
     model: { provider: 'none', baseUrl: null, model: null, secretRef: null },
     jev: { accessState: 'unavailable', model: 'jev-latest', secretRef: null, mode: 'off' },
-    careerOps: { root: null, pinnedVersion: '1.32.0', entrypoint: 'jobops-adapter.mjs' },
+    careerOps: { root: null, pinnedVersion: '1.32.0', entrypoint: 'career-journal-adapter.mjs' },
     materials: { ruleFiles: [] },
     automation: { setupState: 'not-configured' },
   };

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
@@ -19,10 +20,10 @@ test('Quick Start smoke block executes against a clean home', async () => {
   const readme = await readFile('README.md', 'utf8');
   const match = readme.match(/<!-- quickstart-smoke:start -->\s*```sh\n([^]*?)\n```\s*<!-- quickstart-smoke:end -->/);
   assert.ok(match, 'README smoke block is missing');
-  const home = await mkdtemp(path.join(os.tmpdir(), 'jobops-readme-'));
+  const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-readme-'));
   try {
     for (const raw of match[1].split('\n').filter(Boolean)) {
-      const line = raw.replaceAll('$REPO', process.cwd()).replaceAll('$JOBOPS_HOME', home);
+      const line = raw.replaceAll('$REPO', process.cwd()).replaceAll('$CAREER_JOURNAL_HOME', home);
       const args = line.trim().split(/\s+/);
       const result = await run(process.execPath, args, process.cwd());
       assert.equal(result.code, 0, `${line}\n${result.output}`);
@@ -32,7 +33,7 @@ test('Quick Start smoke block executes against a clean home', async () => {
 
 test('README documents both modes and every lifecycle command', async () => {
   const readme = await readFile('README.md', 'utf8');
-  for (const phrase of ['Codex-native', 'OpenAI-compatible', 'jobops start', 'jobops automation', 'jobops update', 'jobops migrate', 'jobops backup', 'Uninstall', 'CareerOps', 'Jev', 'read-only email', 'THIRD_PARTY_NOTICES.md']) {
+  for (const phrase of ['Codex-native', 'OpenAI-compatible', 'career-journal start', 'career-journal automation', 'career-journal update', 'career-journal migrate', 'career-journal backup', 'Uninstall', 'CareerOps', 'Jev', 'read-only email', 'THIRD_PARTY_NOTICES.md']) {
     assert.match(readme, new RegExp(phrase, 'i'));
   }
 });
@@ -79,8 +80,18 @@ test('README leads with the product, interface, and workflows before installatio
     assert.match(readme, /!\[[^\]]+\]\(docs\/assets\/dashboard-preview\.png\)/);
   }
   const preview = await readFile('docs/assets/dashboard-preview.png');
+  const previewManifest = JSON.parse(await readFile('docs/assets/dashboard-preview.json', 'utf8'));
   assert.equal(preview.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
   assert.ok(preview.length > 10_000, 'dashboard preview must be a real browser screenshot');
+  assert.equal(createHash('sha256').update(preview).digest('hex'), previewManifest.sha256);
+  assert.equal(preview.readUInt32BE(16), previewManifest.width);
+  assert.equal(preview.readUInt32BE(20), previewManifest.height);
+  assert.equal(previewManifest.fixture, 'synthetic-big-company-demo');
+  assert.deepEqual(previewManifest.companies, ['Apple · Demo', 'Google · Demo', 'Microsoft · Demo', 'NVIDIA · Demo', 'Amazon · Demo', 'Meta · Demo', 'Tesla · Demo']);
+  assert.match(english, /synthetic big-company examples/i);
+  assert.match(english, /do not represent real applications, outcomes, affiliations, or endorsements/i);
+  assert.match(chinese, /大厂名称作为合成演示数据/);
+  assert.match(chinese, /不代表真实投递、结果、关联或背书/);
 });
 
 test('public onboarding uses the friendly localhost dashboard URL', async () => {
