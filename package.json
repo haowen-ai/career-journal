@@ -1,0 +1,20 @@
+{
+  "name": "job-search-ops",
+  "version": "0.1.0-alpha.1",
+  "description": "Local-first, evidence-driven job search operations",
+  "type": "module",
+  "private": false,
+  "bin": {
+    "jobops": "bin/jobops.mjs"
+  },
+  "scripts": {
+    "test": "node --test",
+    "start": "node bin/jobops.mjs start",
+    "check:release": "node scripts/check-release.mjs"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "license": "MIT"
+}
+

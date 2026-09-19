@@ -1,2 +1,12 @@
 .worktrees/
 .superpowers/
+.jobops/
+.env
+.env.*
+!.env.example
+node_modules/
+coverage/
+*.db
+*.db-shm
+*.db-wal
+*.log
