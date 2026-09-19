@@ -63,7 +63,7 @@ export async function createBackup(home, output, options = {}) {
       createdAt: options.now ?? new Date().toISOString(),
       sourceVersion: options.version ?? null,
       files: Object.fromEntries(await Promise.all(files.map(async (file) => [file, await digest(path.join(destination, file))]))),
-      exclusions: ['credentials', 'secret references', 'environment files', 'scheduler definitions'],
+      exclusions: ['credential values', 'environment files', 'scheduler definitions'],
     };
     await writeFile(path.join(destination, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
     return { output: destination, manifest };
