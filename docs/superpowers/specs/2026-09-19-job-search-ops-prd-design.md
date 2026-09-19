@@ -3,10 +3,10 @@
 [English](2026-09-19-job-search-ops-prd-design.en.md) | [简体中文](2026-09-19-job-search-ops-prd-design.md)
 
 **状态：** Review Draft  
-**版本：** 0.15
+**版本：** 0.16
 **日期：** 2026-09-19  
 **产品名称：** CAREER JOURNAL
-**交付形态：** 开源 GitHub 项目，提供 Codex 原生版本和通用 LLM API 版本
+**交付形态：** 开源 GitHub 项目，提供 Agent 托管版本和通用 LLM API 版本
 
 **本版更新：** 将“配置已填写”与“外部能力已验证”分开：邮箱必须经过实时只读 IMAPS 验证或等价的可校验适配器，两项必需调度必须被 Codex 或操作系统实时探测，并且每项都有一次匹配 ID 的成功运行，`career-journal doctor` 才能通过。占位 ID、手工调用和宿主自行编写的 JSON 不能单独满足门禁。
 
@@ -18,7 +18,7 @@ CAREER JOURNAL 是一个本地优先、证据驱动的求职工作系统。它�
 
 系统提供两个运行版本：
 
-1. **Codex 原生版本**：用户克隆仓库后，由 Codex 读取项目说明和 Skill，完成环境检查、初始化、依赖发现与日常操作
+1. **Agent 托管版本**：用户克隆仓库后，由 Codex、Claude Code、Cursor 或其他能够读取仓库的编程 Agent 读取项目说明和 Skill，完成环境检查、初始化、依赖发现与日常操作
 2. **通用 API 版本**：通过本地 CLI 和 Web UI 使用，支持可替换的大模型供应商以及 OpenAI-compatible、本地或自建模型
 
 两个版本共用同一套领域模型、状态机、证据规则、数据存储、CareerOps 接口和测试用例，避免行为分叉。
@@ -390,7 +390,7 @@ career-journal automation uninstall --task deadline-review
 
 ### 9.4 README onboarding 契约
 
-README 必须提供两个二选一的 Agent 入口：用户可以只把 GitHub 仓库地址交给 Agent，也可以复制一段包含该地址的完整配置提示词。两条路径都要求 Agent 自动克隆或打开仓库、读取根目录 `AGENTS.md` 和仓库 Skill、选择一种方式安装或读取 TypeSafe 官方 Skill、只询问无法代替完成的账号信息或授权、完成 setup、创建并验证两个必需任务、分别运行一次，再执行 `doctor`。命令由 Agent 执行，不能把用户变成安装人员。
+README 首页必须以一句话安装指令开头。用户把这句话交给 Codex、Claude Code、Cursor 或其他能够读取仓库的编程 Agent 后，由 Agent 自动克隆或打开仓库、读取根目录 `AGENTS.md` 和仓库 Skill、选择一种方式安装或读取 TypeSafe 官方 Skill、只询问无法代替完成的账号信息或授权、完成 setup、创建并验证两个必需任务、分别运行一次，再执行 `doctor`。命令由 Agent 执行，不能把用户变成安装人员。
 
 ## 10. 核心用户流程
 

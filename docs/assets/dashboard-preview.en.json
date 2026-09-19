@@ -1,0 +1,16 @@
+{
+  "fixture": "synthetic-big-company-demo",
+  "locale": "en",
+  "companies": [
+    "Apple · Demo",
+    "Google · Demo",
+    "Microsoft · Demo",
+    "NVIDIA · Demo",
+    "Amazon · Demo",
+    "Meta · Demo",
+    "Tesla · Demo"
+  ],
+  "width": 1400,
+  "height": 986,
+  "sha256": "1ba0755b19c30d35982286feefa9ef524bf111671919e119beafd156f06661d4"
+}

@@ -72,9 +72,11 @@ export async function checkRelease(root) {
   check('changelog', /### Added/.test(changelog) && /### Changed/.test(changelog) && /### Fixed/.test(changelog) && /### Security/.test(changelog), 'required changelog sections');
 
   try {
-    const [englishReadme, chineseReadme, chineseNotices, chineseBridge, englishResumeRules, chineseResumeRules, chineseChangelog, bugTemplate, dogfoodTemplate, pullRequestTemplate] = await Promise.all([
+    const [englishReadme, chineseReadme, englishGuide, chineseGuide, chineseNotices, chineseBridge, englishResumeRules, chineseResumeRules, chineseChangelog, bugTemplate, dogfoodTemplate, pullRequestTemplate] = await Promise.all([
       read('README.md'),
       read('README.zh-CN.md'),
+      read('docs/getting-started.md'),
+      read('docs/getting-started.zh-CN.md'),
       read('THIRD_PARTY_NOTICES.zh-CN.md'),
       read('docs/integrations/careerops-bridge.zh-CN.md'),
       read('config/material-rules/us-resume-default.md'),
@@ -86,9 +88,11 @@ export async function checkRelease(root) {
     ]);
     const bilingual = /\[简体中文\]\(README\.zh-CN\.md\)/.test(englishReadme)
       && /\[English\]\(README\.md\)/.test(chineseReadme)
-      && /### 快速开始/.test(chineseReadme)
-      && /## 每日自动化/.test(chineseReadme)
-      && /## 数据与隐私/.test(chineseReadme)
+      && /\[简体中文\]\(getting-started\.zh-CN\.md\)/.test(englishGuide)
+      && /\[English\]\(getting-started\.md\)/.test(chineseGuide)
+      && /## 一句话安装/.test(chineseGuide)
+      && /## 每日自动化/.test(chineseGuide)
+      && /## 数据与隐私/.test(chineseGuide)
       && /career-ops-hq\/career-ops/.test(chineseNotices)
       && /tabler\/tabler-icons/.test(chineseNotices)
       && /CareerOps JSON 桥接契约/.test(chineseBridge)
@@ -99,24 +103,30 @@ export async function checkRelease(root) {
       && /全新克隆/.test(dogfoodTemplate)
       && /问题与最终行为/.test(pullRequestTemplate);
     check('bilingual-docs', bilingual, 'English and Simplified Chinese onboarding, changelog, notices, integration docs, resume rules, and contribution templates');
-    const productReadme = englishReadme.indexOf('## What it does') > 0
-      && englishReadme.indexOf('## Product preview') > englishReadme.indexOf('## What it does')
-      && englishReadme.indexOf('## Install') > englishReadme.indexOf('## Product preview')
-      && chineseReadme.indexOf('## 它能做什么') > 0
-      && chineseReadme.indexOf('## 产品界面') > chineseReadme.indexOf('## 它能做什么')
-      && chineseReadme.indexOf('## 安装') > chineseReadme.indexOf('## 产品界面')
-      && /docs\/assets\/dashboard-preview\.png/.test(englishReadme)
-      && /docs\/assets\/dashboard-preview\.png/.test(chineseReadme)
+    const productReadme = englishReadme.indexOf('## One-line setup') > 0
+      && englishReadme.indexOf('## Product preview') > englishReadme.indexOf('## One-line setup')
+      && englishReadme.indexOf('## What it does') > englishReadme.indexOf('## Product preview')
+      && chineseReadme.indexOf('## 一句话安装') > 0
+      && chineseReadme.indexOf('## 产品界面') > chineseReadme.indexOf('## 一句话安装')
+      && chineseReadme.indexOf('## 它能做什么') > chineseReadme.indexOf('## 产品界面')
+      && /docs\/assets\/dashboard-preview\.en\.png/.test(englishReadme)
+      && /docs\/assets\/dashboard-preview\.zh-CN\.png/.test(chineseReadme)
+      && /Codex, Claude Code/.test(englishReadme)
+      && /Codex、Claude Code/.test(chineseReadme)
       && /http:\/\/career-journal\.localhost:<port>/.test(englishReadme)
       && /http:\/\/career-journal\.localhost:<port>/.test(chineseReadme);
-    const dashboardPreview = await readFile(path.join(root, 'docs/assets/dashboard-preview.png'));
-    const previewManifest = JSON.parse(await read('docs/assets/dashboard-preview.json'));
-    const screenshotOk = dashboardPreview.length > 10_000
-      && dashboardPreview.subarray(0, 8).toString('hex') === '89504e470d0a1a0a'
-      && createHash('sha256').update(dashboardPreview).digest('hex') === previewManifest.sha256
-      && previewManifest.fixture === 'synthetic-big-company-demo'
-      && previewManifest.companies.includes('Apple · Demo')
-      && previewManifest.companies.includes('Google · Demo');
+    const screenshotChecks = await Promise.all(['en', 'zh-CN'].map(async (locale) => {
+      const dashboardPreview = await readFile(path.join(root, `docs/assets/dashboard-preview.${locale}.png`));
+      const previewManifest = JSON.parse(await read(`docs/assets/dashboard-preview.${locale}.json`));
+      return dashboardPreview.length > 10_000
+        && dashboardPreview.subarray(0, 8).toString('hex') === '89504e470d0a1a0a'
+        && createHash('sha256').update(dashboardPreview).digest('hex') === previewManifest.sha256
+        && previewManifest.locale === locale
+        && previewManifest.fixture === 'synthetic-big-company-demo'
+        && previewManifest.companies.includes('Apple · Demo')
+        && previewManifest.companies.includes('Google · Demo');
+    }));
+    const screenshotOk = screenshotChecks.every(Boolean);
     check('product-readme', productReadme && screenshotOk, 'product explanation, real browser preview, workflows, and installation order in both languages');
   } catch (error) { check('bilingual-docs', false, error.message); }
 

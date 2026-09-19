@@ -22,6 +22,28 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.12] - 2026-09-19
+
+### Added
+
+- Added paired English and Simplified Chinese Getting Started guides for email, automation, CLI, backup, upgrade, and troubleshooting details
+- Added a fully English product screenshot and localized synthetic preview data for the English landing page
+
+### Changed
+
+- Rebuilt both READMEs as concise product landing pages with a one-sentence Agent setup request at the top
+- Made the setup entry explicitly usable with Codex, Claude Code, Cursor, and other repository-aware coding Agents
+- Moved operational instructions out of the product landing page and linked to the detailed bilingual guides
+
+### Fixed
+
+- Prevented the English product preview from showing Chinese interface or synthetic event text
+- Removed the duplicate two-option onboarding flow from the public landing page
+
+### Security
+
+- The one-line Agent setup keeps credentials in environment variables or an external secret store and asks users only for unavoidable authentication or account choices
+
 ## [0.1.0-alpha.11] - 2026-09-19
 
 ### Added

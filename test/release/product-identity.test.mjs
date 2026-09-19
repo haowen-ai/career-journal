@@ -4,9 +4,11 @@ import { access, readFile } from 'node:fs/promises';
 
 test('publishes CAREER JOURNAL as the primary repository, package, CLI, and Skill identity', async () => {
   const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
-  const [english, chinese, skill] = await Promise.all([
+  const [english, chinese, englishGuide, chineseGuide, skill] = await Promise.all([
     readFile('README.md', 'utf8'),
     readFile('README.zh-CN.md', 'utf8'),
+    readFile('docs/getting-started.md', 'utf8'),
+    readFile('docs/getting-started.zh-CN.md', 'utf8'),
     readFile('.agents/skills/career-journal/SKILL.md', 'utf8'),
   ]);
 
@@ -20,7 +22,8 @@ test('publishes CAREER JOURNAL as the primary repository, package, CLI, and Skil
   assert.match(skill, /^---\nname: career-journal\n/m);
   for (const readme of [english, chinese]) {
     assert.match(readme, /github\.com\/haowenchen0811\/career-journal(?:\.git)?/);
-    assert.match(readme, /career-journal start/);
     assert.doesNotMatch(readme, /git clone [^\n]*job-search-ops/);
   }
+  assert.match(englishGuide, /career-journal start/);
+  assert.match(chineseGuide, /career-journal start/);
 });

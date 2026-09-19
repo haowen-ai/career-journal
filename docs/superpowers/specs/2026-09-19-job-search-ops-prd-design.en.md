@@ -3,10 +3,10 @@
 [English](2026-09-19-job-search-ops-prd-design.en.md) | [简体中文](2026-09-19-job-search-ops-prd-design.md)
 
 **Status:** Review Draft
-**Version:** 0.15
+**Version:** 0.16
 **Date:** 2026-09-19
 **Product:** CAREER JOURNAL
-**Delivery:** Open-source GitHub project with a Codex-native edition and a provider-neutral LLM API edition
+**Delivery:** Open-source GitHub project with an Agent-managed edition and a provider-neutral LLM API edition
 
 **Revision focus:** Configuration claims and verified external capability are separate. The selected mailbox must pass a live read-only IMAPS verification, or an equivalent independently verifiable adapter, and both required daily jobs must pass a live Codex or operating-system scheduler probe plus one successful run with the matching external ID before `career-journal doctor` can pass. Placeholder IDs, direct manual invocations, screenshots, and host-authored JSON cannot satisfy those gates on their own.
 
@@ -18,7 +18,7 @@ The product serves different countries, industries, roles, and career stages. It
 
 Two runtime editions share the same domain model, state machine, evidence rules, storage, CareerOps interface, and test fixtures:
 
-1. **Codex-native edition:** Codex reads the repository instructions and Skills after clone, checks the environment, initializes the workspace, discovers dependencies, and operates the daily workflow
+1. **Agent-managed edition:** Codex, Claude Code, Cursor, or another repository-aware coding Agent reads the repository instructions and Skills after clone, checks the environment, initializes the workspace, discovers dependencies, and operates the daily workflow
 2. **General API edition:** A local CLI and Web UI support replaceable hosted, OpenAI-compatible, local, or self-managed model providers
 
 ## 2. Problem definition
@@ -208,7 +208,7 @@ Manual EML is a one-message fallback only. Mailbox integrations are read-only: t
 
 ### 9.4 README onboarding contract
 
-The README exposes two alternative Agent-first entry points: a user may give an Agent only the GitHub repository address, or copy a complete setup prompt that includes that address. Both paths instruct the Agent to clone or open the repository, read root `AGENTS.md` and the repository Skill, install or read the official TypeSafe Skill using one supported method, ask only for unavoidable account information or authorization, complete setup, create and verify the two required schedules, run them once, and finish with `doctor`. The Agent performs the commands; the user is not turned into the installer.
+The README leads with one setup sentence that points an Agent at the GitHub repository. Codex, Claude Code, Cursor, or another repository-aware coding Agent then clones or opens the repository, reads root `AGENTS.md` and the repository Skill, installs or reads the official TypeSafe Skill using one supported method, asks only for unavoidable account information or authorization, completes setup, creates and verifies the two required schedules, runs them once, and finishes with `doctor`. The Agent performs the commands; the user is not turned into the installer.
 
 The README must let a new user install without author explanation. Copyable instructions cover requirements, clone and dependency commands, Codex versus API choice, setup, profile import or blank start, provider configuration, live read-only mailbox verification and first sync, creation and probing of both required jobs in the detected time zone, one run per job, `doctor`, dashboard start, first application, update, uninstall, backup, and local-data removal.
 

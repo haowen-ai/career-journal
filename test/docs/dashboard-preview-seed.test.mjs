@@ -57,3 +57,20 @@ test('dashboard preview seed is synthetic, recognizable, and contains no applica
 test('dashboard preview seed refuses to replace a non-preview directory', async () => {
   await assert.rejects(() => seedDashboardPreview(path.join(os.tmpdir(), 'career-journal-user-data')), /Preview homes must be/);
 });
+
+test('dashboard preview seed localizes synthetic event copy for the selected preview', async () => {
+  const parent = await mkdtemp(path.join(os.tmpdir(), 'career-journal-preview-locale-parent-'));
+  const home = path.join(os.tmpdir(), `career-journal-preview-${path.basename(parent)}`);
+  try {
+    await seedDashboardPreview(home, { locale: 'en' });
+    const context = await openHomeDatabase(home);
+    const events = context.db.prepare('SELECT title, note FROM application_events ORDER BY id').all();
+    context.db.close();
+    assert.ok(events.length > 0);
+    for (const event of events) assert.match(event.note, /^\[Synthetic demo\]/);
+    assert.ok(events.some((event) => event.title === 'Technical interview scheduled'));
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
+  }
+});

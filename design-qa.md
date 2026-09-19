@@ -3,7 +3,8 @@
 ## Evidence
 
 - Source visual truth: local-only user-provided reference at `/var/folders/35/xmw2fwbj6zbb9_hlvmv013fh0000gn/T/codex-clipboard-a8965660-48ed-40b3-8949-546a6940b703.png`; excluded from the repository because it contains personal application data
-- Implementation screenshot: `docs/assets/dashboard-preview.png`; captured from the real local dashboard with a temporary workspace and synthetic data
+- English implementation screenshot: `docs/assets/dashboard-preview.en.png`; captured from the real local dashboard with a temporary workspace and English synthetic data
+- Simplified Chinese implementation screenshot: `docs/assets/dashboard-preview.zh-CN.png`; captured from the real local dashboard with a temporary workspace and Chinese synthetic data
 - Full-view comparison: `/tmp/career-journal-design-qa-comparison.png`
 - Focused card comparison: `/tmp/career-journal-design-qa-focused.png`
 - Browser state: Simplified Chinese, seven synthetic applications, collapsed application cards

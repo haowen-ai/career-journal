@@ -20,11 +20,15 @@ function assertPreviewHome(value) {
 function parseArgs(argv) {
   const index = argv.indexOf('--home');
   if (index === -1 || !argv[index + 1]) throw new Error('Usage: node scripts/seed-dashboard-preview.mjs --home <temporary-directory>');
-  return { home: assertPreviewHome(argv[index + 1]) };
+  const localeIndex = argv.indexOf('--locale');
+  const locale = localeIndex === -1 ? 'zh-CN' : argv[localeIndex + 1];
+  if (!['en', 'zh-CN'].includes(locale)) throw new Error('Preview locale must be en or zh-CN');
+  return { home: assertPreviewHome(argv[index + 1]), locale };
 }
 
-export async function seedDashboardPreview(home) {
+export async function seedDashboardPreview(home, { locale = 'zh-CN' } = {}) {
   home = assertPreviewHome(home);
+  if (!['en', 'zh-CN'].includes(locale)) throw new Error('Preview locale must be en or zh-CN');
   await rm(home, { recursive: true, force: true });
   await setup(home, { timezone: 'UTC', email: { mode: 'skip' } });
   const context = await openHomeDatabase(home);
@@ -67,14 +71,34 @@ export async function seedDashboardPreview(home) {
       statusAfter,
     });
 
-    addEvent('Apple · Demo', 'demo-apple-interview', 'interview_scheduled', '技术面试已安排', '[合成演示] 已记录 AI 应用团队面试时间', '2026-09-18T15:10:00Z', 'interview');
-    addEvent('Google · Demo', 'demo-google-offer', 'offer_received', '收到录用通知', '[合成演示] 已记录录用决定', '2026-09-18T14:30:00Z', 'offer');
-    addEvent('Google · Demo', 'demo-google-accepted', 'offer_accepted', '已接受录用', '[合成演示] 已确认入职日期', '2026-09-18T14:45:00Z', 'accepted');
-    addEvent('Microsoft · Demo', 'demo-microsoft-assessment', 'assessment_received', '收到在线测评', '[合成演示] 已记录测评截止时间', '2026-09-18T14:15:00Z', 'assessment');
-    addEvent('NVIDIA · Demo', 'demo-nvidia-applied', 'application_submitted', '已收到申请', '[合成演示] 招聘网站已确认收件', '2026-09-17T16:20:00Z', 'applied');
-    addEvent('Amazon · Demo', 'demo-amazon-closed', 'application_closed', '申请已结束', '[合成演示] 该申请未进入下一阶段', '2026-09-16T18:00:00Z', 'rejected');
-    addEvent('Meta · Demo', 'demo-meta-applied', 'application_submitted', '申请已提交', '[合成演示] 已确认提交成功', '2026-09-15T17:00:00Z', 'applied');
-    addEvent('Tesla · Demo', 'demo-tesla-ready', 'materials_prepared', '申请材料已准备', '[合成演示] 简历与求职信等待审核', '2026-09-14T16:00:00Z', 'prepared');
+    const eventCopy = locale === 'en' ? {
+      interview: ['Technical interview scheduled', '[Synthetic demo] Interview time recorded for the AI applications team'],
+      offer: ['Offer received', '[Synthetic demo] Hiring decision recorded'],
+      accepted: ['Offer accepted', '[Synthetic demo] Start date confirmed'],
+      assessment: ['Online assessment received', '[Synthetic demo] Assessment deadline recorded'],
+      received: ['Application received', '[Synthetic demo] Careers site confirmed receipt'],
+      closed: ['Application closed', '[Synthetic demo] Application did not advance'],
+      submitted: ['Application submitted', '[Synthetic demo] Submission confirmed'],
+      materials: ['Application materials ready', '[Synthetic demo] Resume and cover letter awaiting review'],
+    } : {
+      interview: ['技术面试已安排', '[合成演示] 已记录 AI 应用团队面试时间'],
+      offer: ['收到录用通知', '[合成演示] 已记录录用决定'],
+      accepted: ['已接受录用', '[合成演示] 已确认入职日期'],
+      assessment: ['收到在线测评', '[合成演示] 已记录测评截止时间'],
+      received: ['已收到申请', '[合成演示] 招聘网站已确认收件'],
+      closed: ['申请已结束', '[合成演示] 该申请未进入下一阶段'],
+      submitted: ['申请已提交', '[合成演示] 已确认提交成功'],
+      materials: ['申请材料已准备', '[合成演示] 简历与求职信等待审核'],
+    };
+
+    addEvent('Apple · Demo', 'demo-apple-interview', 'interview_scheduled', ...eventCopy.interview, '2026-09-18T15:10:00Z', 'interview');
+    addEvent('Google · Demo', 'demo-google-offer', 'offer_received', ...eventCopy.offer, '2026-09-18T14:30:00Z', 'offer');
+    addEvent('Google · Demo', 'demo-google-accepted', 'offer_accepted', ...eventCopy.accepted, '2026-09-18T14:45:00Z', 'accepted');
+    addEvent('Microsoft · Demo', 'demo-microsoft-assessment', 'assessment_received', ...eventCopy.assessment, '2026-09-18T14:15:00Z', 'assessment');
+    addEvent('NVIDIA · Demo', 'demo-nvidia-applied', 'application_submitted', ...eventCopy.received, '2026-09-17T16:20:00Z', 'applied');
+    addEvent('Amazon · Demo', 'demo-amazon-closed', 'application_closed', ...eventCopy.closed, '2026-09-16T18:00:00Z', 'rejected');
+    addEvent('Meta · Demo', 'demo-meta-applied', 'application_submitted', ...eventCopy.submitted, '2026-09-15T17:00:00Z', 'applied');
+    addEvent('Tesla · Demo', 'demo-tesla-ready', 'materials_prepared', ...eventCopy.materials, '2026-09-14T16:00:00Z', 'prepared');
 
     await rm(sourceDir, { recursive: true, force: true });
     await mkdir(sourceDir, { recursive: true });
@@ -109,7 +133,7 @@ export async function seedDashboardPreview(home) {
 
 const invoked = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invoked) {
-  const { home } = parseArgs(process.argv.slice(2));
-  const result = await seedDashboardPreview(home);
+  const { home, locale } = parseArgs(process.argv.slice(2));
+  const result = await seedDashboardPreview(home, { locale });
   console.log(JSON.stringify(result));
 }

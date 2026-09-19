@@ -16,10 +16,10 @@ function run(command, args, cwd) {
   });
 }
 
-test('Quick Start smoke block executes against a clean home', async () => {
-  const readme = await readFile('README.md', 'utf8');
-  const match = readme.match(/<!-- quickstart-smoke:start -->\s*```sh\n([^]*?)\n```\s*<!-- quickstart-smoke:end -->/);
-  assert.ok(match, 'README smoke block is missing');
+test('Getting Started smoke block executes against a clean home', async () => {
+  const guide = await readFile('docs/getting-started.md', 'utf8');
+  const match = guide.match(/<!-- quickstart-smoke:start -->\s*```sh\n([^]*?)\n```\s*<!-- quickstart-smoke:end -->/);
+  assert.ok(match, 'Getting Started smoke block is missing');
   const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-readme-'));
   try {
     for (const raw of match[1].split('\n').filter(Boolean)) {
@@ -31,53 +31,76 @@ test('Quick Start smoke block executes against a clean home', async () => {
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
-test('README documents both modes and every lifecycle command', async () => {
-  const readme = await readFile('README.md', 'utf8');
-  for (const phrase of ['Codex-native', 'newly released Jev', 'OpenAI-compatible', 'manual review', 'TYPESAFE_API_KEY', 'career-journal start', 'career-journal automation', 'career-journal update', 'career-journal migrate', 'career-journal backup', 'Uninstall', 'CareerOps', 'Jev', 'read-only email', 'THIRD_PARTY_NOTICES.md']) {
-    assert.match(readme, new RegExp(phrase, 'i'));
-  }
-  assert.match(readme, /Jev[^\n]*(?:September 15, 2026|Sep(?:tember)? 15, 2026)/i);
-  assert.match(readme, /without Jev[^\n]*(?:structured LLM|OpenAI-compatible)/i);
-});
-
-test('README offers two alternative agent-first onboarding entry points', async () => {
+test('README is a concise product landing page with one Agent setup sentence', async () => {
   const [english, chinese, agentInstructions] = await Promise.all([
     readFile('README.md', 'utf8'),
     readFile('README.zh-CN.md', 'utf8'),
     readFile('AGENTS.md', 'utf8'),
   ]);
+  assert.ok(english.split('\n').length < 100, 'English README should stay concise');
+  assert.ok(chinese.split('\n').length < 100, 'Chinese README should stay concise');
+  assert.match(english, /## One-line setup/i);
+  assert.match(chinese, /## 一句话安装/);
+  assert.match(english, /Codex, Claude Code/i);
+  assert.match(chinese, /Codex、Claude Code/);
   for (const readme of [english, chinese]) {
     assert.match(readme, /https:\/\/github\.com\/haowenchen0811\/career-journal/);
-    assert.match(readme, /(?:give|send|share|提供|发送|交给)[^\n]*(?:GitHub|仓库|地址|链接)/i);
-    assert.match(readme, /(?:copy|paste|复制)[^\n]*(?:prompt|提示词)/i);
-    assert.match(readme, /TypeSafe[^\n]*(?:skill|Skill)/i);
+    assert.match(readme, /docs\/getting-started/);
+    assert.doesNotMatch(readme, /#### Agent-first setup: choose one entry point|由 Agent 自动配置：任选一种入口/i);
+    assert.doesNotMatch(readme, /--email-provider imap|automation register-external|codexCommandLine/);
   }
-  assert.doesNotMatch(english, /four registered daily tasks/i);
-  assert.doesNotMatch(chinese, /4 个每日自动任务|四个每日任务/);
   assert.match(agentInstructions, /\.agents\/skills\/career-journal\/SKILL\.md/);
-  assert.match(agentInstructions, /mail-sync[^\n]*20:00|20:00[^\n]*mail-sync/i);
-  assert.match(agentInstructions, /deadline-review[^\n]*20:15|20:15[^\n]*deadline-review/i);
-  assert.doesNotMatch(agentInstructions, /daily-consolidation[^\n]*22:00|22:00[^\n]*daily-consolidation/i);
-  assert.doesNotMatch(agentInstructions, /local-backup[^\n]*23:00|23:00[^\n]*local-backup/i);
 });
 
-test('English and Simplified Chinese READMEs cross-link and cover onboarding', async () => {
+test('English and Chinese landing pages use matching-language product previews', async () => {
   const [english, chinese] = await Promise.all([
     readFile('README.md', 'utf8'),
     readFile('README.zh-CN.md', 'utf8'),
   ]);
-  assert.match(english, /\[\u7b80\u4f53\u4e2d\u6587\]\(README\.zh-CN\.md\)/);
-  assert.match(chinese, /\[English\]\(README\.md\)/);
-  for (const phrase of ['\u5feb\u901f\u5f00\u59cb', '\u4e24\u79cd\u8fd0\u884c\u6a21\u5f0f', '\u6bcf\u65e5\u81ea\u52a8\u5316', '\u6570\u636e\u4e0e\u9690\u79c1', '\u66f4\u65b0\u3001\u8fc1\u79fb\u3001\u5907\u4efd\u4e0e\u5378\u8f7d', 'CareerOps', 'Jev', '\u65b0\u53d1\u5e03', '\u5927\u8bed\u8a00\u6a21\u578b']) {
-    assert.match(chinese, new RegExp(phrase, 'i'));
+  assert.match(english, /docs\/assets\/dashboard-preview\.en\.png/);
+  assert.doesNotMatch(english, /dashboard-preview\.zh-CN\.png/);
+  assert.match(chinese, /docs\/assets\/dashboard-preview\.zh-CN\.png/);
+  assert.doesNotMatch(chinese, /dashboard-preview\.en\.png/);
+  for (const [locale, file] of [['en', 'dashboard-preview.en'], ['zh-CN', 'dashboard-preview.zh-CN']]) {
+    const preview = await readFile(`docs/assets/${file}.png`);
+    const manifest = JSON.parse(await readFile(`docs/assets/${file}.json`, 'utf8'));
+    assert.equal(preview.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    assert.ok(preview.length > 10_000, `${locale} preview must be a real browser screenshot`);
+    assert.equal(createHash('sha256').update(preview).digest('hex'), manifest.sha256);
+    assert.equal(preview.readUInt32BE(16), manifest.width);
+    assert.equal(preview.readUInt32BE(20), manifest.height);
+    assert.equal(manifest.locale, locale);
+    assert.equal(manifest.fixture, 'synthetic-big-company-demo');
+    assert.deepEqual(manifest.companies, ['Apple · Demo', 'Google · Demo', 'Microsoft · Demo', 'NVIDIA · Demo', 'Amazon · Demo', 'Meta · Demo', 'Tesla · Demo']);
   }
-  assert.match(chinese, /Jev[^\n]*2026 \u5e74 9 \u6708 15 \u65e5/);
+  assert.match(english, /synthetic big-company examples/i);
+  assert.match(english, /do not represent real applications, outcomes, affiliations, or endorsements/i);
+  assert.match(chinese, /虚构的演示数据/);
+  assert.match(chinese, /不代表真实投递、求职结果、合作关系或官方背书/);
 });
 
-test('onboarding uses the computer timezone and documents built-in and personal material rules', async () => {
+test('bilingual Getting Started guides retain the complete operating contract', async () => {
   const [english, chinese] = await Promise.all([
-    readFile('README.md', 'utf8'),
-    readFile('README.zh-CN.md', 'utf8'),
+    readFile('docs/getting-started.md', 'utf8'),
+    readFile('docs/getting-started.zh-CN.md', 'utf8'),
+  ]);
+  assert.match(english, /\[简体中文\]\(getting-started\.zh-CN\.md\)/);
+  assert.match(chinese, /\[English\]\(getting-started\.md\)/);
+  for (const phrase of ['Codex', 'Claude Code', 'newly released Jev', 'OpenAI-compatible', 'manual review', 'TYPESAFE_API_KEY', 'career-journal start', 'career-journal automation', 'career-journal update', 'career-journal migrate', 'career-journal backup', 'Uninstall', 'CareerOps']) {
+    assert.match(english, new RegExp(phrase, 'i'));
+  }
+  assert.match(english, /read-only (?:email|mailbox)/i);
+  for (const phrase of ['Codex', 'Claude Code', '每日自动化', '数据与隐私', '更新、迁移、备份与卸载', 'CareerOps', 'Jev', '新发布', '大语言模型']) {
+    assert.match(chinese, new RegExp(phrase, 'i'));
+  }
+  assert.match(english, /without Jev[^\n]*(?:structured LLM|OpenAI-compatible)/i);
+  assert.match(chinese, /Jev[^\n]*2026 年 9 月 15 日/);
+});
+
+test('Getting Started uses the computer timezone and documents material rules', async () => {
+  const [english, chinese] = await Promise.all([
+    readFile('docs/getting-started.md', 'utf8'),
+    readFile('docs/getting-started.zh-CN.md', 'utf8'),
   ]);
   assert.doesNotMatch(english, /setup[^\n]*--timezone America\/Chicago/);
   assert.doesNotMatch(chinese, /setup[^\n]*--timezone America\/Chicago/);
@@ -89,70 +112,19 @@ test('onboarding uses the computer timezone and documents built-in and personal 
   assert.match(chinese, /--material-rules/);
 });
 
-test('README leads with the product, interface, and workflows before installation', async () => {
+test('Getting Started keeps the mailbox and two-schedule verification contract', async () => {
   const [english, chinese] = await Promise.all([
-    readFile('README.md', 'utf8'),
-    readFile('README.zh-CN.md', 'utf8'),
+    readFile('docs/getting-started.md', 'utf8'),
+    readFile('docs/getting-started.zh-CN.md', 'utf8'),
   ]);
-  for (const [readme, product, preview, install] of [
-    [english, '## What it does', '## Product preview', '## Install'],
-    [chinese, '## 它能做什么', '## 产品界面', '## 安装'],
-  ]) {
-    assert.ok(readme.indexOf(product) > 0, `missing ${product}`);
-    assert.ok(readme.indexOf(preview) > readme.indexOf(product), `${preview} must follow the product explanation`);
-    assert.ok(readme.indexOf(install) > readme.indexOf(preview), `${install} must follow the interface preview`);
-    assert.match(readme, /!\[[^\]]+\]\(docs\/assets\/dashboard-preview\.png\)/);
-  }
-  const preview = await readFile('docs/assets/dashboard-preview.png');
-  const previewManifest = JSON.parse(await readFile('docs/assets/dashboard-preview.json', 'utf8'));
-  assert.equal(preview.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
-  assert.ok(preview.length > 10_000, 'dashboard preview must be a real browser screenshot');
-  assert.equal(createHash('sha256').update(preview).digest('hex'), previewManifest.sha256);
-  assert.equal(preview.readUInt32BE(16), previewManifest.width);
-  assert.equal(preview.readUInt32BE(20), previewManifest.height);
-  assert.equal(previewManifest.fixture, 'synthetic-big-company-demo');
-  assert.deepEqual(previewManifest.companies, ['Apple · Demo', 'Google · Demo', 'Microsoft · Demo', 'NVIDIA · Demo', 'Amazon · Demo', 'Meta · Demo', 'Tesla · Demo']);
-  assert.match(english, /synthetic big-company examples/i);
-  assert.match(english, /do not represent real applications, outcomes, affiliations, or endorsements/i);
-  assert.match(chinese, /虚构的演示数据/);
-  assert.match(chinese, /不代表真实投递、求职结果、合作关系或官方背书/);
-});
-
-test('public onboarding uses the friendly localhost dashboard URL', async () => {
-  const [english, chinese] = await Promise.all([
-    readFile('README.md', 'utf8'),
-    readFile('README.zh-CN.md', 'utf8'),
-  ]);
-  for (const readme of [english, chinese]) {
-    assert.match(readme, /http:\/\/career-journal\.localhost:<port>/);
-    assert.doesNotMatch(readme, /dashboard runs locally on `127\.0\.0\.1`|看板在本机 `127\.0\.0\.1` 运行/i);
-  }
-});
-
-test('public onboarding requires a mailbox and the two verified job-search schedules', async () => {
-  const [english, chinese] = await Promise.all([
-    readFile('README.md', 'utf8'),
-    readFile('README.zh-CN.md', 'utf8'),
-  ]);
-  for (const readme of [english, chinese]) {
-    assert.doesNotMatch(readme, /--skip-email/);
-    assert.match(readme, /--email-provider imap/);
-    assert.match(readme, /--email-provider host/);
-    assert.match(readme, /--email-address/);
-    assert.match(readme, /email verify-imap/);
-    assert.match(readme, /email sync-host/);
-    assert.match(readme, /automation register-external/);
-    assert.match(readme, /automation verify/);
-    assert.match(readme, /automation run[^\n]*--external-id/);
-    assert.match(readme, /codexCommandLine/);
-    for (const task of ['mail-sync', 'deadline-review']) {
-      assert.match(readme, new RegExp(task));
+  for (const guide of [english, chinese]) {
+    assert.doesNotMatch(guide, /--skip-email/);
+    for (const phrase of ['--email-provider imap', '--email-provider host', '--email-address', 'email verify-imap', 'email sync-host', 'automation register-external', 'automation verify', 'codexCommandLine', 'mail-sync', 'deadline-review', '20:00', '20:15', 'http://career-journal.localhost:<port>']) {
+      assert.match(guide, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     }
-    for (const time of ['20:00', '20:15']) {
-      assert.match(readme, new RegExp(time.replace(':', '\\:')));
-    }
-    assert.doesNotMatch(readme, /(?:daily-consolidation[^\n]*22:00|22:00[^\n]*daily-consolidation)/i);
-    assert.doesNotMatch(readme, /(?:local-backup[^\n]*23:00|23:00[^\n]*local-backup)/i);
+    assert.match(guide, /automation run[^\n]*--external-id/);
+    assert.doesNotMatch(guide, /(?:daily-consolidation[^\n]*22:00|22:00[^\n]*daily-consolidation)/i);
+    assert.doesNotMatch(guide, /(?:local-backup[^\n]*23:00|23:00[^\n]*local-backup)/i);
   }
   assert.match(english, /manual EML[^\n]*(fallback|one-off)/i);
   assert.match(chinese, /手动(?:导入 )?EML[^\n]*(备用|临时|单次)/i);
@@ -160,8 +132,4 @@ test('public onboarding requires a mailbox and the two verified job-search sched
   assert.match(chinese, /doctor[^\n]*通过/i);
   assert.match(english, /36 hours/i);
   assert.match(chinese, /36 小时/i);
-  assert.match(english, /native `mail-sync` installation is deliberately blocked/i);
-  assert.match(chinese, /(阻止操作系统直接安装|主动阻止原生安装) `mail-sync`/);
-  assert.doesNotMatch(english, /`mail-sync` is supported when its selected account uses IMAPS/i);
-  assert.doesNotMatch(chinese, /当所选邮箱是 IMAPS 时，`mail-sync` 也受支持/);
 });
