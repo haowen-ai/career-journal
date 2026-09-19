@@ -5,6 +5,7 @@ import { eventCommand } from '../commands/event.mjs';
 import { artifactCommand } from '../commands/artifact.mjs';
 import { exportCommand } from '../commands/export.mjs';
 import { startCommand } from '../commands/start.mjs';
+import { automationCommand } from '../commands/automation.mjs';
 
 export function createRuntime({ root, version }) {
   return {
@@ -18,6 +19,7 @@ export function createRuntime({ root, version }) {
       ['artifact', artifactCommand],
       ['export', exportCommand],
       ['start', startCommand],
+      ['automation', automationCommand],
     ]),
   };
 }
