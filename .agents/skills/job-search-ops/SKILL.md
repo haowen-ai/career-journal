@@ -3,7 +3,7 @@ name: job-search-ops
 description: Use when tracking job applications, reviewing recruiting updates, checking deadlines, or coordinating application materials in this repository
 ---
 
-# Job Search Ops
+# CAREER JOURNAL
 
 Keep job-search facts, evidence, and artifacts auditable. Run `jobops doctor` before capability-dependent work and continue with core local tracking when optional capabilities are unavailable.
 

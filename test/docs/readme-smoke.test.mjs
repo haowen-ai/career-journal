@@ -76,8 +76,11 @@ test('README leads with the product, interface, and workflows before installatio
     assert.ok(readme.indexOf(product) > 0, `missing ${product}`);
     assert.ok(readme.indexOf(preview) > readme.indexOf(product), `${preview} must follow the product explanation`);
     assert.ok(readme.indexOf(install) > readme.indexOf(preview), `${install} must follow the interface preview`);
-    assert.match(readme, /!\[[^\]]+\]\(docs\/assets\/dashboard-preview\.svg\)/);
+    assert.match(readme, /!\[[^\]]+\]\(docs\/assets\/dashboard-preview\.png\)/);
   }
+  const preview = await readFile('docs/assets/dashboard-preview.png');
+  assert.equal(preview.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+  assert.ok(preview.length > 10_000, 'dashboard preview must be a real browser screenshot');
 });
 
 test('public onboarding uses the friendly localhost dashboard URL', async () => {
@@ -86,7 +89,7 @@ test('public onboarding uses the friendly localhost dashboard URL', async () => 
     readFile('README.zh-CN.md', 'utf8'),
   ]);
   for (const readme of [english, chinese]) {
-    assert.match(readme, /http:\/\/job-search-ops\.localhost:<port>/);
+    assert.match(readme, /http:\/\/career-journal\.localhost:<port>/);
     assert.doesNotMatch(readme, /dashboard runs locally on `127\.0\.0\.1`|看板在本机 `127\.0\.0\.1` 运行/i);
   }
 });

@@ -12,7 +12,7 @@ function waitForDashboardUrl(child) {
     const timeout = setTimeout(() => reject(new Error(`dashboard URL not reported\n${output}`)), 5_000);
     const consume = (chunk) => {
       output += chunk;
-      const match = output.match(/Job Search Ops dashboard: (http:\/\/[^\s]+)/);
+      const match = output.match(/CAREER JOURNAL dashboard: (http:\/\/[^\s]+)/);
       if (match) {
         clearTimeout(timeout);
         resolve(match[1]);
@@ -21,7 +21,7 @@ function waitForDashboardUrl(child) {
     child.stdout.on('data', consume);
     child.stderr.on('data', consume);
     child.once('exit', (code) => {
-      if (code !== null && !/Job Search Ops dashboard:/.test(output)) {
+      if (code !== null && !/CAREER JOURNAL dashboard:/.test(output)) {
         clearTimeout(timeout);
         reject(new Error(`dashboard exited with ${code}\n${output}`));
       }
@@ -46,7 +46,7 @@ test('default start reports a friendly localhost URL that serves the dashboard',
   });
   try {
     const dashboardUrl = await waitForDashboardUrl(child);
-    assert.match(dashboardUrl, /^http:\/\/job-search-ops\.localhost:\d+$/);
+    assert.match(dashboardUrl, /^http:\/\/career-journal\.localhost:\d+$/);
     const health = await fetch(`${dashboardUrl}/api/health`);
     assert.equal(health.status, 200);
     assert.deepEqual(await health.json(), { ok: true, schemaVersion: 1 });

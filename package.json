@@ -1,7 +1,7 @@
 {
   "name": "job-search-ops",
-  "version": "0.1.0-alpha.4",
-  "description": "Local-first, evidence-driven job search operations",
+  "version": "0.1.0-alpha.5",
+  "description": "CAREER JOURNAL: local-first, evidence-driven job search operations",
   "type": "module",
   "private": false,
   "bin": {

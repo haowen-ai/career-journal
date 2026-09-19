@@ -8,7 +8,7 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Added
 
-- Published bilingual dogfood evidence for the `v0.1.0-alpha.4` public tag
+- None
 
 ### Changed
 
@@ -21,6 +21,34 @@ All notable changes are documented here. This project follows Semantic Versionin
 ### Security
 
 - None
+
+## [0.1.0-alpha.5] - 2026-09-19
+
+### Added
+
+- Added the bilingual CAREER JOURNAL dashboard with five application summaries, combined search and status filters, and expandable timelines and material records
+- Added a privacy-filtered `/api/dashboard` snapshot that returns application details without artifact storage paths or raw event-source payloads
+- Added a real browser screenshot generated from a temporary workspace containing only synthetic applications and materials
+- Added locally bundled Tabler Icons 3.47.0 assets with the upstream MIT license and bilingual attribution
+- Published bilingual dogfood evidence for the `v0.1.0-alpha.4` public tag
+
+### Changed
+
+- Renamed the public product to CAREER JOURNAL while retaining the existing `jobops` command for compatibility
+- Changed the friendly local dashboard address to `http://career-journal.localhost:<port>`
+- The dashboard now selects the browser language on first use, preserves an explicit English or Chinese choice, and sorts applications by the latest recorded activity
+- Both READMEs now display the actual responsive application UI instead of an illustrated preview
+
+### Fixed
+
+- Replaced the separate minimal public dashboard with the same information hierarchy as the proven personal tracker: summary, search, filters, application facts, next-step guidance, event history, and material lifecycle
+- Fixed the public interface gap that hid event and material history even though the local database already stored it
+
+### Security
+
+- Dashboard event sources are reduced to a controlled category before reaching the browser, and artifact storage paths remain private
+- The committed product screenshot contains fictional companies, roles, dates, identifiers, events, and file names only
+- The server remains loopback-only and accepts the exact `career-journal.localhost` Host and Origin in addition to standard loopback names
 
 ## [0.1.0-alpha.4] - 2026-09-19
 
@@ -122,7 +150,8 @@ All notable changes are documented here. This project follows Semantic Versionin
 - Credentials are referenced through environment variables and excluded from exports
 - Submitted artifacts require explicit confirmation
 
-[Unreleased]: https://github.com/haowenchen0811/job-search-ops/compare/v0.1.0-alpha.4...HEAD
+[Unreleased]: https://github.com/haowenchen0811/job-search-ops/compare/v0.1.0-alpha.5...HEAD
+[0.1.0-alpha.5]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.5
 [0.1.0-alpha.4]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.4
 [0.1.0-alpha.3]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.2

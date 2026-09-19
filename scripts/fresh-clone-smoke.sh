@@ -19,28 +19,28 @@ git clone --quiet --no-hardlinks "$source_repo" "$checkout"
 git -C "$checkout" checkout --quiet "$source_ref"
 cli="$checkout/bin/jobops.mjs"
 
-HOME="$scratch/isolated-home" "$node_bin" "$cli" setup --home "$data_home" --timezone UTC --skip-email
-HOME="$scratch/isolated-home" "$node_bin" "$cli" doctor --home "$data_home"
-HOME="$scratch/isolated-home" "$node_bin" "$cli" application add --home "$data_home" --company DogfoodCo --role TestEngineer
-HOME="$scratch/isolated-home" "$node_bin" "$cli" automation configure --home "$data_home" --task deadline-review --time 20:00 --timezone UTC --enabled
-HOME="$scratch/isolated-home" "$node_bin" "$cli" automation run --home "$data_home" --task deadline-review --dry-run
+"$node_bin" "$cli" setup --home "$data_home" --timezone UTC --skip-email
+"$node_bin" "$cli" doctor --home "$data_home"
+"$node_bin" "$cli" application add --home "$data_home" --company DogfoodCo --role TestEngineer
+"$node_bin" "$cli" automation configure --home "$data_home" --task deadline-review --time 20:00 --timezone UTC --enabled
+"$node_bin" "$cli" automation run --home "$data_home" --task deadline-review --dry-run
 
 server_log="$scratch/server.log"
-HOME="$scratch/isolated-home" "$node_bin" "$cli" start --home "$data_home" --port 0 >"$server_log" 2>&1 &
+"$node_bin" "$cli" start --home "$data_home" --port 0 >"$server_log" 2>&1 &
 server_pid=$!
 i=0
-while [ "$i" -lt 50 ] && ! grep -q 'http://job-search-ops.localhost:' "$server_log"; do
+while [ "$i" -lt 50 ] && ! grep -q 'http://career-journal.localhost:' "$server_log"; do
   sleep 0.1
   i=$((i + 1))
 done
-dashboard_url=$(sed -n 's/^Job Search Ops dashboard: //p' "$server_log" | head -1)
+dashboard_url=$(sed -n 's/^CAREER JOURNAL dashboard: //p' "$server_log" | head -1)
 if [ -z "$dashboard_url" ]; then cat "$server_log"; exit 1; fi
 "$node_bin" -e "const r=await fetch(process.argv[1]); const j=await r.json(); if(!r.ok||j.ok!==true) process.exit(1)" "$dashboard_url/api/health"
 kill "$server_pid" 2>/dev/null || true
 wait "$server_pid" 2>/dev/null || true
 server_pid=
 
-HOME="$scratch/isolated-home" "$node_bin" "$cli" backup create --home "$data_home" --output "$backup_dir"
-HOME="$scratch/isolated-home" "$node_bin" "$cli" setup --home "$data_home" --timezone UTC
-HOME="$scratch/isolated-home" "$node_bin" "$cli" application list --home "$data_home" --json | grep -q 'DogfoodCo'
+"$node_bin" "$cli" backup create --home "$data_home" --output "$backup_dir"
+"$node_bin" "$cli" setup --home "$data_home" --timezone UTC
+"$node_bin" "$cli" application list --home "$data_home" --json | grep -q 'DogfoodCo'
 printf 'FRESH_CLONE_SMOKE_OK ref=%s\n' "$(git -C "$checkout" rev-parse HEAD)"

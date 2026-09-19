@@ -8,7 +8,7 @@
 
 ### 新增
 
-- 发布 `v0.1.0-alpha.4` 公开标签的中英文 dogfood 验证记录
+- 无
 
 ### 变更
 
@@ -21,6 +21,34 @@
 ### 安全
 
 - 无
+
+## [0.1.0-alpha.5] - 2026-09-19
+
+### 新增
+
+- 增加中英文 CAREER JOURNAL 看板，包括五项申请统计、搜索与状态组合筛选，以及可展开的时间线和材料记录
+- 增加经过隐私过滤的 `/api/dashboard` 快照接口；返回申请详情时不包含材料存储路径或原始事件来源内容
+- 增加由真实浏览器和临时工作区生成的产品截图，截图只使用虚构申请与材料数据
+- 增加本地打包的 Tabler Icons 3.47.0 图标、上游 MIT 许可证和中英文开源归属
+- 发布 `v0.1.0-alpha.4` 公开标签的中英文 dogfood 验证记录
+
+### 变更
+
+- 公开产品统一命名为 CAREER JOURNAL；为兼容已有安装，继续保留 `jobops` 命令名
+- 友好的本地看板地址改为 `http://career-journal.localhost:<port>`
+- 看板首次打开时使用浏览器语言，保存用户显式选择的中文或英文，并按照最新记录时间排序申请
+- 中英文 README 改为展示真实响应式申请界面，不再使用绘制的示意图
+
+### 修复
+
+- 用经过个人看板验证的信息层级替换独立开发的极简公开页面：统计、搜索、筛选、申请事实、建议下一步、事件历史和材料生命周期保持一致
+- 修复本地数据库已有时间线和材料记录、公开看板却无法查看的问题
+
+### 安全
+
+- 事件来源在进入浏览器前缩减为受控类别，材料存储路径继续保持私有
+- 提交到仓库的产品截图只包含虚构公司、岗位、日期、编号、事件和文件名
+- 服务继续只监听环回地址；除标准环回名称外，仅接受准确的 `career-journal.localhost` Host 和 Origin
 
 ## [0.1.0-alpha.4] - 2026-09-19
 
@@ -122,7 +150,8 @@
 - 凭据通过环境变量引用，不会进入导出文件
 - 标记已提交材料时需要用户明确确认
 
-[尚未发布]: https://github.com/haowenchen0811/job-search-ops/compare/v0.1.0-alpha.4...HEAD
+[尚未发布]: https://github.com/haowenchen0811/job-search-ops/compare/v0.1.0-alpha.5...HEAD
+[0.1.0-alpha.5]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.5
 [0.1.0-alpha.4]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.4
 [0.1.0-alpha.3]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/haowenchen0811/job-search-ops/releases/tag/v0.1.0-alpha.2

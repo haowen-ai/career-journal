@@ -14,7 +14,7 @@
 
 - Temporary checkout:
 - Temporary HOME:
-- Temporary Job Search Ops data home:
+- Temporary CAREER JOURNAL data home:
 - Existing developer configuration reused: no
 
 ## Commands

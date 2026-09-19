@@ -1,6 +1,6 @@
 import { parseArgs } from './parse-args.mjs';
 
-const HELP = `Job Search Ops
+const HELP = `CAREER JOURNAL
 
 Usage: jobops <command> [subcommand] [options]
 

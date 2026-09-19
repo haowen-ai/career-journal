@@ -12,7 +12,7 @@ export async function loadConfig(home) {
   let parsed;
   try { parsed = JSON.parse(await readFile(file, 'utf8')); }
   catch (error) {
-    if (error.code === 'ENOENT') throw new Error(`Job Search Ops is not configured at ${path.resolve(home)}. Run jobops setup.`);
+    if (error.code === 'ENOENT') throw new Error(`CAREER JOURNAL is not configured at ${path.resolve(home)}. Run jobops setup.`);
     throw error;
   }
   if (parsed.schemaVersion !== CONFIG_SCHEMA_VERSION) throw new Error(`Unsupported config schema: ${parsed.schemaVersion}`);

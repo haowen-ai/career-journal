@@ -2,7 +2,7 @@
 
 [English](careerops-bridge.md) | [简体中文](careerops-bridge.zh-CN.md)
 
-API 模式的 CareerOps 适配器会调用用户单独安装并锁定版本的 `career-ops` checkout。Job Search Ops 不会复制 CareerOps 源代码，也不会将 CareerOps 的工作声称为自己的成果。
+API 模式的 CareerOps 适配器会调用用户单独安装并锁定版本的 `career-ops` checkout。CAREER JOURNAL 不会复制 CareerOps 源代码，也不会将 CareerOps 的工作声称为自己的成果。
 
 ## 可用性
 
@@ -10,7 +10,7 @@ API 模式的 CareerOps 适配器会调用用户单独安装并锁定版本的 `
 
 ## 调用方式
 
-Job Search Ops 运行：
+CAREER JOURNAL 运行：
 
 ```text
 node <careerops-root>/jobops-adapter.mjs material prepare|verify
@@ -34,7 +34,7 @@ node <careerops-root>/jobops-adapter.mjs material prepare|verify
 }
 ```
 
-对于简历请求，`ruleFiles` 先包含 Job Search Ops 内置简历默认规则，然后才是已配置的个人规则文件。求职信请求不包含简历默认规则文件。桥接必须按顺序应用，后出现的文件优先级更高；用户当前的明确指令仍然拥有最高优先级。简历专用规则不得应用到求职信正文。
+对于简历请求，`ruleFiles` 先包含 CAREER JOURNAL 内置简历默认规则，然后才是已配置的个人规则文件。求职信请求不包含简历默认规则文件。桥接必须按顺序应用，后出现的文件优先级更高；用户当前的明确指令仍然拥有最高优先级。简历专用规则不得应用到求职信正文。
 
 桥接必须通过标准输出返回一个 JSON 对象：
 
@@ -49,4 +49,4 @@ node <careerops-root>/jobops-adapter.mjs material prepare|verify
 }
 ```
 
-Job Search Ops 会拒绝以下结果：输出文件不存在、应用 ID 不一致、生命周期被标记为已提交、JSON 格式错误或子进程执行失败。合法文件会在报告成功前被计算哈希，并复制到不可变的草稿材料存储区。
+CAREER JOURNAL 会拒绝以下结果：输出文件不存在、应用 ID 不一致、生命周期被标记为已提交、JSON 格式错误或子进程执行失败。合法文件会在报告成功前被计算哈希，并复制到不可变的草稿材料存储区。

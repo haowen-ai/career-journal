@@ -42,6 +42,34 @@ function applicationDetail(db, id) {
   return { ...application, events, artifacts };
 }
 
+const safeSourceKinds = new Set(['api', 'cli', 'email', 'import', 'manual', 'system']);
+
+function dashboardApplication(db, id) {
+  const detail = applicationDetail(db, id);
+  if (!detail) return null;
+  return {
+    ...detail,
+    events: detail.events.map(({ source, ...event }) => {
+      const rawCandidate = String(source?.kind ?? source?.provider ?? '').toLowerCase();
+      const candidate = rawCandidate === 'user' ? 'manual' : rawCandidate;
+      return { ...event, sourceKind: safeSourceKinds.has(candidate) ? candidate : 'other' };
+    }),
+  };
+}
+
+function latestApplicationTime(application) {
+  const eventTime = application.events.reduce((latest, event) => {
+    const value = Date.parse(event.recordedAt ?? event.observedAt ?? event.occurredAt ?? 0) || 0;
+    return Math.max(latest, value);
+  }, 0);
+  const artifactTime = application.artifacts.reduce((latest, artifact) => {
+    const recorded = Date.parse(artifact.recordedAt ?? 0) || 0;
+    const submitted = Date.parse(artifact.submittedAt ?? 0) || 0;
+    return Math.max(latest, recorded, submitted);
+  }, 0);
+  return Math.max(eventTime, artifactTime, Date.parse(application.updatedAt ?? 0) || 0);
+}
+
 export async function handleApi(request, response, url, { db, config }) {
   if (request.method === 'GET' && url.pathname === '/api/health') {
     sendJson(response, 200, { ok: true, schemaVersion: config.schemaVersion });
@@ -49,6 +77,19 @@ export async function handleApi(request, response, url, { db, config }) {
   }
   if (url.pathname === '/api/applications' && request.method === 'GET') {
     sendJson(response, 200, listApplications(db));
+    return true;
+  }
+  if (url.pathname === '/api/dashboard' && request.method === 'GET') {
+    const applications = listApplications(db)
+      .map((application) => dashboardApplication(db, application.id))
+      .sort((left, right) => latestApplicationTime(right) - latestApplicationTime(left)
+        || left.company.localeCompare(right.company)
+        || left.role.localeCompare(right.role));
+    sendJson(response, 200, {
+      generatedAt: new Date().toISOString(),
+      timezone: config.timezone,
+      applications,
+    });
     return true;
   }
   if (url.pathname === '/api/applications' && request.method === 'POST') {
@@ -70,4 +111,3 @@ export async function handleApi(request, response, url, { db, config }) {
   }
   return false;
 }
-

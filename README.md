@@ -1,8 +1,8 @@
-# Job Search Ops
+# CAREER JOURNAL
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Job Search Ops is a local-first, evidence-driven application tracker for people and AI agents. It keeps roles, status events, recruiting email evidence, deadlines, and the exact material lifecycle in one SQLite database. A generated resume remains a draft until the exact uploaded file is confirmed.
+CAREER JOURNAL is a local-first, evidence-driven application tracker for people and AI agents. It keeps roles, status events, recruiting email evidence, deadlines, and the exact material lifecycle in one SQLite database. A generated resume remains a draft until the exact uploaded file is confirmed.
 
 This is an alpha release. Core tracking is usable without an email account, model key, CareerOps, or Jev access.
 
@@ -17,9 +17,9 @@ This is an alpha release. Core tracking is usable without an email account, mode
 
 ## Product preview
 
-![Job Search Ops dashboard showing example applications](docs/assets/dashboard-preview.svg)
+![CAREER JOURNAL dashboard showing example applications](docs/assets/dashboard-preview.png)
 
-*Synthetic example data. The dashboard opens at `http://job-search-ops.localhost:<port>` and can be searched or filtered by application status.*
+*Real browser capture of the running dashboard with synthetic example data. The dashboard opens at `http://career-journal.localhost:<port>` and can be searched or filtered by application status.*
 
 ## Core workflows
 
@@ -33,7 +33,7 @@ Read-only email evidence is attached to the relevant application and reviewed be
 
 ### Create and verify application materials
 
-The CareerOps bridge can prepare a role-specific resume or cover letter. Job Search Ops records whether a file is a draft, passed its rules, or was confirmed as the exact submitted artifact.
+The CareerOps bridge can prepare a role-specific resume or cover letter. CAREER JOURNAL records whether a file is a draft, passed its rules, or was confirmed as the exact submitted artifact.
 
 ### Run daily checks
 
@@ -77,7 +77,7 @@ node ./bin/jobops.mjs start --home "$HOME/job-search"
 
 Use `node ./bin/jobops.mjs ...` or the included `./jobops ...` launcher from the clone. To install the bare `jobops` command globally, run `npm link` with a Node.js installation that includes npm.
 
-On first setup, Job Search Ops detects the computer's IANA time zone. Later setup runs preserve the saved value unless the user explicitly passes `--timezone <IANA-zone>`.
+On first setup, CAREER JOURNAL detects the computer's IANA time zone. Later setup runs preserve the saved value unless the user explicitly passes `--timezone <IANA-zone>`.
 
 The dashboard URL uses the reserved `.localhost` domain, so it needs no purchased domain, DNS record, or hosts-file change. The server still binds only to the local loopback interface and is not exposed to the LAN.
 
@@ -104,7 +104,7 @@ $REPO/bin/jobops.mjs automation configure --home $JOBOPS_HOME --task daily-conso
 
 ### Codex-native
 
-Open the cloned repository in Codex and ask it to set up Job Search Ops. Codex discovers the repo-local `job-search-ops` Skill, runs `jobops doctor`, and routes resume or cover-letter work through the separate `careerops-materials` Skill. The Skills name every dependency and preserve the difference between status evidence and submitted-artifact evidence.
+Open the cloned repository in Codex and ask it to set up CAREER JOURNAL. Codex discovers the repo-local `job-search-ops` Skill, runs `jobops doctor`, and routes resume or cover-letter work through the separate `careerops-materials` Skill. The Skills name every dependency and preserve the difference between status evidence and submitted-artifact evidence.
 
 ### Local API and OpenAI-compatible models
 
@@ -136,7 +136,7 @@ The alpha child-process adapter expects the configured CareerOps installation to
 
 ### Built-in and personal resume rules
 
-Job Search Ops ships the project author's reusable resume rules in [`config/material-rules/us-resume-default.md`](config/material-rules/us-resume-default.md). They add opinionated defaults that CareerOps does not impose: Education → Experience → Skills only, three bullets per employer, 11 point body text, no Projects or Summary, certification under Skills, concise achievement bullets, and a rule-by-rule final-PDF audit.
+CAREER JOURNAL ships the project author's reusable resume rules in [`config/material-rules/us-resume-default.md`](config/material-rules/us-resume-default.md). They add opinionated defaults that CareerOps does not impose: Education → Experience → Skills only, three bullets per employer, 11 point body text, no Projects or Summary, certification under Skills, concise achievement bullets, and a rule-by-rule final-PDF audit.
 
 The built-in rules apply to U.S. English resumes and can be overridden by a user's explicit instruction. A user can also add a personal Skill or rule file without editing the repository:
 
@@ -217,8 +217,8 @@ Public user documentation must ship in both English and Simplified Chinese. The 
 
 ## Acknowledgements
 
-Job Search Ops integrates with and learns from third-party open-source work without claiming it as its own. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the preserved license texts in `LICENSES/`. The project name is distinct from the third-party career-ops trademark and does not imply endorsement.
+CAREER JOURNAL integrates with and learns from third-party open-source work without claiming it as its own. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the preserved license texts in `LICENSES/`. The project name is distinct from the third-party career-ops trademark and does not imply endorsement.
 
 ## License
 
-Job Search Ops is released under the MIT License. See [LICENSE](LICENSE).
+CAREER JOURNAL is released under the MIT License. See [LICENSE](LICENSE).

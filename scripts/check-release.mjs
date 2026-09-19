@@ -39,19 +39,18 @@ export async function checkRelease(root) {
 
   try {
     const notices = await read('THIRD_PARTY_NOTICES.md');
-    check('attribution', /career-ops-hq\/career-ops/.test(notices) && /Santiago Fernández de Valderrama/.test(notices) && /typesafe-ai\/skills/.test(notices) && /TypeSafe AI/.test(notices), 'CareerOps and TypeSafe attribution');
+    check('attribution', /career-ops-hq\/career-ops/.test(notices) && /Santiago Fernández de Valderrama/.test(notices) && /typesafe-ai\/skills/.test(notices) && /TypeSafe AI/.test(notices) && /tabler\/tabler-icons/.test(notices), 'CareerOps, TypeSafe, and Tabler attribution');
   } catch (error) { check('attribution', false, error.message); }
 
-  const licenseFiles = ['LICENSE', 'LICENSES/career-ops-MIT.txt', 'LICENSES/typesafe-ai-skills-MIT.txt'];
+  const licenseFiles = ['LICENSE', 'LICENSES/career-ops-MIT.txt', 'LICENSES/typesafe-ai-skills-MIT.txt', 'LICENSES/tabler-icons-MIT.txt'];
   const licenses = await Promise.all(licenseFiles.map(async (file) => (await readable(path.join(root, file))) && /MIT License/.test(await read(file))));
   check('licenses', licenses.every(Boolean), licenseFiles.join(', '));
   check('changelog', /### Added/.test(changelog) && /### Changed/.test(changelog) && /### Fixed/.test(changelog) && /### Security/.test(changelog), 'required changelog sections');
 
   try {
-    const [englishReadme, chineseReadme, dashboardPreview, chineseNotices, chineseBridge, englishResumeRules, chineseResumeRules, chineseChangelog, bugTemplate, dogfoodTemplate, pullRequestTemplate] = await Promise.all([
+    const [englishReadme, chineseReadme, chineseNotices, chineseBridge, englishResumeRules, chineseResumeRules, chineseChangelog, bugTemplate, dogfoodTemplate, pullRequestTemplate] = await Promise.all([
       read('README.md'),
       read('README.zh-CN.md'),
-      read('docs/assets/dashboard-preview.svg'),
       read('THIRD_PARTY_NOTICES.zh-CN.md'),
       read('docs/integrations/careerops-bridge.zh-CN.md'),
       read('config/material-rules/us-resume-default.md'),
@@ -67,6 +66,7 @@ export async function checkRelease(root) {
       && /## 每日自动化/.test(chineseReadme)
       && /## 数据与隐私/.test(chineseReadme)
       && /career-ops-hq\/career-ops/.test(chineseNotices)
+      && /tabler\/tabler-icons/.test(chineseNotices)
       && /CareerOps JSON 桥接契约/.test(chineseBridge)
       && /\[简体中文\]\(us-resume-default\.zh-CN\.md\)/.test(englishResumeRules)
       && /\[English\]\(us-resume-default\.md\)/.test(chineseResumeRules)
@@ -81,14 +81,14 @@ export async function checkRelease(root) {
       && chineseReadme.indexOf('## 它能做什么') > 0
       && chineseReadme.indexOf('## 产品界面') > chineseReadme.indexOf('## 它能做什么')
       && chineseReadme.indexOf('## 安装') > chineseReadme.indexOf('## 产品界面')
-      && /docs\/assets\/dashboard-preview\.svg/.test(englishReadme)
-      && /docs\/assets\/dashboard-preview\.svg/.test(chineseReadme)
-      && /http:\/\/job-search-ops\.localhost:<port>/.test(englishReadme)
-      && /http:\/\/job-search-ops\.localhost:<port>/.test(chineseReadme)
-      && /<svg\b/.test(dashboardPreview)
-      && /<title\b[^>]*>[^<]+<\/title>/.test(dashboardPreview)
-      && /<desc\b[^>]*>[^<]+<\/desc>/.test(dashboardPreview);
-    check('product-readme', productReadme, 'product explanation, interface preview, workflows, and installation order in both languages');
+      && /docs\/assets\/dashboard-preview\.png/.test(englishReadme)
+      && /docs\/assets\/dashboard-preview\.png/.test(chineseReadme)
+      && /http:\/\/career-journal\.localhost:<port>/.test(englishReadme)
+      && /http:\/\/career-journal\.localhost:<port>/.test(chineseReadme);
+    const dashboardPreview = await readFile(path.join(root, 'docs/assets/dashboard-preview.png'));
+    const screenshotOk = dashboardPreview.length > 10_000
+      && dashboardPreview.subarray(0, 8).toString('hex') === '89504e470d0a1a0a';
+    check('product-readme', productReadme && screenshotOk, 'product explanation, real browser preview, workflows, and installation order in both languages');
   } catch (error) { check('bilingual-docs', false, error.message); }
 
   const files = await candidateFiles(root);

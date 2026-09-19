@@ -15,7 +15,7 @@ export async function startCommand(parsed, io, runtime) {
   const address = server.address();
   const dashboardHost = parsed.options.host ? host : FRIENDLY_DASHBOARD_HOST;
   const urlHost = dashboardHost.includes(':') ? `[${dashboardHost}]` : dashboardHost;
-  io.out(`Job Search Ops dashboard: http://${urlHost}:${address.port}`);
+  io.out(`CAREER JOURNAL dashboard: http://${urlHost}:${address.port}`);
   server.on('close', () => context.db.close());
   return 0;
 }

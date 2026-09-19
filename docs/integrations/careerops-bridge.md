@@ -2,7 +2,7 @@
 
 [English](careerops-bridge.md) | [简体中文](careerops-bridge.zh-CN.md)
 
-The API-mode CareerOps adapter invokes a separately installed, pinned `career-ops` checkout. Job Search Ops does not copy CareerOps source code or claim its work as its own.
+The API-mode CareerOps adapter invokes a separately installed, pinned `career-ops` checkout. CAREER JOURNAL does not copy CareerOps source code or claim its work as its own.
 
 ## Availability
 
@@ -10,7 +10,7 @@ The configured CareerOps root must contain `jobops-adapter.mjs`. The pinned upst
 
 ## Invocation
 
-Job Search Ops runs:
+CAREER JOURNAL runs:
 
 ```text
 node <careerops-root>/jobops-adapter.mjs material prepare|verify
@@ -34,7 +34,7 @@ It sends one JSON object on standard input. Required fields are:
 }
 ```
 
-For resume requests, `ruleFiles` starts with the built-in Job Search Ops resume defaults and then includes configured personal rule files. Cover-letter requests omit the resume-default file. The bridge must apply files in order, with later files taking precedence; current explicit user instructions remain the highest authority. Resume-only rules must not be applied to cover-letter prose.
+For resume requests, `ruleFiles` starts with the built-in CAREER JOURNAL resume defaults and then includes configured personal rule files. Cover-letter requests omit the resume-default file. The bridge must apply files in order, with later files taking precedence; current explicit user instructions remain the highest authority. Resume-only rules must not be applied to cover-letter prose.
 
 The bridge must emit one JSON object on standard output:
 
@@ -49,4 +49,4 @@ The bridge must emit one JSON object on standard output:
 }
 ```
 
-Job Search Ops rejects a missing file, a different application ID, a submitted lifecycle, malformed JSON, or an unsuccessful exit. A valid file is copied into the immutable draft artifact store and hashed before success is reported.
+CAREER JOURNAL rejects a missing file, a different application ID, a submitted lifecycle, malformed JSON, or an unsuccessful exit. A valid file is copied into the immutable draft artifact store and hashed before success is reported.

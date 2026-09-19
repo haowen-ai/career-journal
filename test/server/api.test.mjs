@@ -15,7 +15,7 @@ async function withServer(run) {
   const server = createServer({ db: context.db, config: context.config, webRoot: path.resolve('web') });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
-  try { await run(baseUrl); }
+  try { await run(baseUrl, context.db); }
   finally { await new Promise((resolve) => server.close(resolve)); context.db.close(); await rm(home, { recursive: true, force: true }); }
 }
 
@@ -34,6 +34,36 @@ test('health, create, list, detail, and idempotent event routes work', async () 
   const second = await (await fetch(`${baseUrl}/api/applications/${created.id}/events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(event) })).json();
   assert.equal(first.created, true);
   assert.equal(second.created, false);
+  const dashboard = await (await fetch(`${baseUrl}/api/dashboard`)).json();
+  assert.equal(dashboard.applications.length, 1);
+  assert.equal(dashboard.applications[0].id, created.id);
+  assert.equal(dashboard.applications[0].events.length, 1);
+  assert.equal(dashboard.applications[0].events[0].sourceKind, 'api');
+  assert.equal('source' in dashboard.applications[0].events[0], false);
+  assert.deepEqual(dashboard.applications[0].artifacts, []);
+}));
+
+test('dashboard sorts material activity and normalizes CLI user sources', async () => withServer(async (baseUrl, db) => {
+  const older = await (await fetch(`${baseUrl}/api/applications`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ company: 'Older', role: 'Analyst' }),
+  })).json();
+  const material = await (await fetch(`${baseUrl}/api/applications`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ company: 'Material', role: 'Engineer' }),
+  })).json();
+  db.prepare('UPDATE applications SET updated_at = ? WHERE id IN (?, ?)').run('2026-01-01T00:00:00Z', older.id, material.id);
+  db.prepare(`INSERT INTO artifacts
+    (id, application_id, kind, lifecycle, file_name, storage_path, sha256, submitted_at, recorded_at, verification, metadata_json)
+    VALUES (?, ?, 'resume', 'submitted', 'resume.pdf', '/private/resume.pdf', ?, ?, ?, 'passed', '{}')`)
+    .run('artifact-latest', material.id, 'a'.repeat(64), '2026-01-02T00:00:00Z', '2026-09-19T03:00:00Z');
+  db.prepare(`INSERT INTO application_events
+    (id, application_id, event_type, occurred_at, observed_at, recorded_at, title, note, source_json, status_after, content_hash)
+    VALUES (?, ?, 'application_update', NULL, ?, ?, 'Manual update', '', ?, NULL, ?)`)
+    .run('event-user', older.id, '2026-09-19T01:00:00Z', '2026-09-19T02:00:00Z', JSON.stringify({ kind: 'user' }), 'b'.repeat(64));
+
+  const dashboard = await (await fetch(`${baseUrl}/api/dashboard`)).json();
+  assert.deepEqual(dashboard.applications.map((application) => application.id), [material.id, older.id]);
+  assert.equal(dashboard.applications[1].events[0].sourceKind, 'manual');
+  assert.equal('storagePath' in dashboard.applications[0].artifacts[0], false);
 }));
 
 test('rejects invalid JSON and oversized request bodies', async () => withServer(async (baseUrl) => {
@@ -73,8 +103,8 @@ test('accepts the friendly localhost Host and matching Origin hostname', async (
       path: target.pathname,
       method: 'POST',
       headers: {
-        host: `job-search-ops.localhost:${target.port}`,
-        origin: `http://job-search-ops.localhost:${target.port}`,
+        host: `career-journal.localhost:${target.port}`,
+        origin: `http://career-journal.localhost:${target.port}`,
         'content-type': 'application/json',
         'content-length': Buffer.byteLength(body),
       },

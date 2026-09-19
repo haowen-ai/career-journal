@@ -1,8 +1,8 @@
-# Job Search Ops
+# CAREER JOURNAL
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Job Search Ops 是一个本地优先、证据驱动的求职进度管理工具，同时面向求职者和 AI Agent。它用一个 SQLite 数据库统一保存岗位、状态事件、招聘邮件证据、截止日期和实际使用的申请材料。生成的简历会一直保持为草稿，直到用户明确确认已上传的准确文件。
+CAREER JOURNAL 是一个本地优先、证据驱动的求职进度管理工具，同时面向求职者和 AI Agent。它用一个 SQLite 数据库统一保存岗位、状态事件、招聘邮件证据、截止日期和实际使用的申请材料。生成的简历会一直保持为草稿，直到用户明确确认已上传的准确文件。
 
 当前是 alpha 版本。即使没有邮箱账户、模型密钥、CareerOps 或 Jev 访问权限，核心记录功能仍然可用。
 
@@ -17,9 +17,9 @@ Job Search Ops 是一个本地优先、证据驱动的求职进度管理工具�
 
 ## 产品界面
 
-![展示示例申请记录的 Job Search Ops 本地看板](docs/assets/dashboard-preview.svg)
+![展示示例申请记录的 CAREER JOURNAL 本地看板](docs/assets/dashboard-preview.png)
 
-*界面使用虚构示例数据。看板通过 `http://job-search-ops.localhost:<port>` 打开，可以搜索并按申请状态筛选。*
+*由真实运行的本地看板在浏览器中截取，界面使用虚构示例数据。看板通过 `http://career-journal.localhost:<port>` 打开，可以搜索并按申请状态筛选。*
 
 ## 核心工作流
 
@@ -33,7 +33,7 @@ Job Search Ops 是一个本地优先、证据驱动的求职进度管理工具�
 
 ### 生成并验证申请材料
 
-CareerOps 桥接可以准备针对岗位的简历或求职信。Job Search Ops 会分别记录文件是否只是草稿、是否通过规则检查，以及是否被确认成实际提交的版本。
+CareerOps 桥接可以准备针对岗位的简历或求职信。CAREER JOURNAL 会分别记录文件是否只是草稿、是否通过规则检查，以及是否被确认成实际提交的版本。
 
 ### 执行每日检查
 
@@ -77,7 +77,7 @@ node ./bin/jobops.mjs start --home "$HOME/job-search"
 
 可以在仓库中使用 `node ./bin/jobops.mjs ...` 或随项目提供的 `./jobops ...` 启动器。如果当前 Node.js 安装包含 npm，可运行 `npm link` 全局安装 `jobops` 命令。
 
-首次初始化时，Job Search Ops 会自动读取当前电脑的 IANA 时区。之后重新运行 setup 会保留已保存的时区，除非用户明确传入 `--timezone <IANA-zone>`。
+首次初始化时，CAREER JOURNAL 会自动读取当前电脑的 IANA 时区。之后重新运行 setup 会保留已保存的时区，除非用户明确传入 `--timezone <IANA-zone>`。
 
 看板使用专门为本机保留的 `.localhost` 域名，不需要购买域名、配置 DNS 或修改 hosts 文件。服务底层仍然只监听本机环回接口，不会开放到局域网。
 
@@ -91,7 +91,7 @@ node ./bin/jobops.mjs email configure --home "$HOME/job-search" --provider manua
 
 ### Codex 原生模式
 
-在 Codex 中打开克隆后的仓库，要求 Codex 配置 Job Search Ops。Codex 会发现仓库内的 `job-search-ops` Skill，运行 `jobops doctor`，并将简历或求职信任务交给独立的 `careerops-materials` Skill。这些 Skill 会明确标记依赖项，并区分“招聘状态证据”和“已提交材料证据”。
+在 Codex 中打开克隆后的仓库，要求 Codex 配置 CAREER JOURNAL。Codex 会发现仓库内的 `job-search-ops` Skill，运行 `jobops doctor`，并将简历或求职信任务交给独立的 `careerops-materials` Skill。这些 Skill 会明确标记依赖项，并区分“招聘状态证据”和“已提交材料证据”。
 
 ### 本地 API 与 OpenAI-compatible 模型
 
@@ -123,7 +123,7 @@ jobops start --home ~/job-search
 
 ### 内置与个人简历规则
 
-Job Search Ops 在 [`config/material-rules/us-resume-default.md`](config/material-rules/us-resume-default.zh-CN.md) 中内置了项目作者可复用的简历规则。这些是 CareerOps 本身没有强制的默认要求：只保留 Education → Experience → Skills、每家雇主三条 bullet、正文 11 磅、不使用 Projects 或 Summary、证书放入 Skills、使用精简成果句，并对最终 PDF 逐条检查。
+CAREER JOURNAL 在 [`config/material-rules/us-resume-default.md`](config/material-rules/us-resume-default.zh-CN.md) 中内置了项目作者可复用的简历规则。这些是 CareerOps 本身没有强制的默认要求：只保留 Education → Experience → Skills、每家雇主三条 bullet、正文 11 磅、不使用 Projects 或 Summary、证书放入 Skills、使用精简成果句，并对最终 PDF 逐条检查。
 
 内置规则适用于美国英文简历，用户的明确指令可以覆盖它们。用户也可以在不修改仓库的情况下添加自己的 Skill 或规则文件：
 
@@ -202,8 +202,8 @@ node scripts/check-release.mjs
 
 ## 致谢
 
-Job Search Ops 会集成并借鉴第三方开源成果，但不会将其声称为自己的工作。详见 [第三方开源声明](THIRD_PARTY_NOTICES.zh-CN.md) 以及 `LICENSES/` 中保留的原始许可证文本。项目名称与第三方 career-ops 商标有明确区分，不代表对方为本项目背书。
+CAREER JOURNAL 会集成并借鉴第三方开源成果，但不会将其声称为自己的工作。详见 [第三方开源声明](THIRD_PARTY_NOTICES.zh-CN.md) 以及 `LICENSES/` 中保留的原始许可证文本。项目名称与第三方 career-ops 商标有明确区分，不代表对方为本项目背书。
 
 ## 许可证
 
-Job Search Ops 使用 MIT License 发布，详见 [LICENSE](LICENSE)。
+CAREER JOURNAL 使用 MIT License 发布，详见 [LICENSE](LICENSE)。

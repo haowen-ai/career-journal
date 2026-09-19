@@ -3,41 +3,162 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Job Search Ops</title>
+  <meta name="color-scheme" content="light">
+  <title>CAREER JOURNAL</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <header class="topbar">
-    <div>
-      <p class="eyebrow">LOCAL WORKSPACE</p>
-      <h1>Job Search Ops</h1>
-      <p class="subtitle">Applications, evidence, materials, and next actions in one place</p>
-    </div>
-    <div class="legend" aria-label="Artifact status legend">
-      <span class="badge badge-draft">Draft</span>
-      <span class="badge badge-submitted">Submitted</span>
-    </div>
-  </header>
-  <main>
-    <section class="controls" aria-label="Application filters">
-      <label>Search <input id="search" type="search" placeholder="Company or role"></label>
-      <label>Status <select id="status"><option value="">All statuses</option></select></label>
-      <button id="refresh" type="button">Refresh</button>
-    </section>
-    <section aria-live="polite">
-      <p id="summary" class="summary">Loading applications…</p>
-      <div id="applications" class="application-grid"></div>
-      <p id="empty" class="empty" hidden>No applications match these filters.</p>
-    </section>
-  </main>
+  <div class="page-shell">
+    <header class="topbar">
+      <a class="brand" href="#applications-heading" aria-label="CAREER JOURNAL home">
+        <span class="brand-mark"><img src="/icons/arrow-up-right.svg" alt=""></span>
+        <span>
+          <strong>CAREER JOURNAL</strong>
+          <small>JOB SEARCH OPERATIONS</small>
+        </span>
+      </a>
+      <div class="top-actions">
+        <button class="language-toggle" data-testid="language-toggle" id="language-toggle" type="button">
+          <img src="/icons/language.svg" alt="">
+          <span>中文</span>
+        </button>
+        <span class="local-pill"><span class="semantic-dot" aria-hidden="true"></span><span data-i18n="localWorkspace">Local workspace</span></span>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="page-title">
+        <div class="hero-copy">
+          <p class="eyebrow hero-eyebrow" data-i18n="heroEyebrow">EVERY STEP, ON RECORD</p>
+          <h1 id="page-title"><span data-i18n="heroTitle">Your job search, at a glance</span><b>.</b></h1>
+          <p data-i18n="heroBody">Applications, submitted materials, and interview updates in one place.</p>
+        </div>
+        <aside class="reminder">
+          <img src="/icons/clock.svg" alt="">
+          <div>
+            <strong data-i18n="reminderTitle">Keep progress moving</strong>
+            <p data-i18n="reminderBody">When enabled, daily checks follow this workspace's local time zone.</p>
+          </div>
+        </aside>
+      </section>
+
+      <section class="stats" aria-label="Application summary">
+        <article class="stat-card stat-primary">
+          <span class="stat-label"><span class="semantic-dot dot-applied" aria-hidden="true"></span><span data-i18n="statApplied">Applications sent</span></span>
+          <strong id="stat-applied" data-testid="stat-applied">0</strong>
+          <span class="stat-note" data-i18n="statAppliedNote">Confirmed submissions</span>
+        </article>
+        <article class="stat-card">
+          <span class="stat-label"><span class="semantic-dot dot-waiting" aria-hidden="true"></span><span data-i18n="statWaiting">Waiting</span></span>
+          <strong id="stat-waiting" data-testid="stat-waiting">0</strong>
+          <span class="stat-note" data-i18n="statWaitingNote">Submitted or in assessment</span>
+        </article>
+        <article class="stat-card">
+          <span class="stat-label"><span class="semantic-dot dot-interview" aria-hidden="true"></span><span data-i18n="statInterview">Interview / Offer</span></span>
+          <strong id="stat-interview" data-testid="stat-interview">0</strong>
+          <span class="stat-note" data-i18n="statInterviewNote">Active interview or decision</span>
+        </article>
+        <article class="stat-card">
+          <span class="stat-label"><span class="semantic-dot dot-closed" aria-hidden="true"></span><span data-i18n="statClosed">Closed</span></span>
+          <strong id="stat-closed" data-testid="stat-closed">0</strong>
+          <span class="stat-note" data-i18n="statClosedNote">Finished, withdrawn, or rejected</span>
+        </article>
+        <article class="stat-card">
+          <span class="stat-label"><span class="semantic-dot dot-preparing" aria-hidden="true"></span><span data-i18n="statPreparing">Preparing</span></span>
+          <strong id="stat-preparing" data-testid="stat-preparing">0</strong>
+          <span class="stat-note" data-i18n="statPreparingNote">Not yet confirmed as submitted</span>
+        </article>
+      </section>
+
+      <section class="applications-section" aria-labelledby="applications-heading">
+        <div class="list-heading">
+          <div>
+            <h2 id="applications-heading" data-i18n="applicationsTitle">All applications</h2>
+            <p data-i18n="applicationsBody">Different roles at the same company stay separate.</p>
+          </div>
+          <label class="search-box">
+            <img src="/icons/search.svg" alt="">
+            <span class="sr-only" data-i18n="searchLabel">Search applications</span>
+            <input data-testid="search-input" id="search" type="search" autocomplete="off" data-i18n-placeholder="searchPlaceholder" placeholder="Search company, role, or ID">
+          </label>
+        </div>
+
+        <div class="filter-bar">
+          <div class="filters" role="group" aria-label="Application status filters">
+            <button data-testid="filter-all" data-filter="all" type="button" aria-pressed="true"><span data-i18n="filterAll">All</span><b data-count="all">0</b></button>
+            <button data-testid="filter-waiting" data-filter="waiting" type="button" aria-pressed="false"><span data-i18n="filterWaiting">Waiting</span><b data-count="waiting">0</b></button>
+            <button data-testid="filter-interview" data-filter="interview" type="button" aria-pressed="false"><span data-i18n="filterInterview">Interview / Offer</span><b data-count="interview">0</b></button>
+            <button data-testid="filter-closed" data-filter="closed" type="button" aria-pressed="false"><span data-i18n="filterClosed">Closed</span><b data-count="closed">0</b></button>
+            <button data-testid="filter-preparing" data-filter="preparing" type="button" aria-pressed="false"><span data-i18n="filterPreparing">Preparing</span><b data-count="preparing">0</b></button>
+          </div>
+          <span class="result-count" id="result-count" aria-live="polite">0 of 0</span>
+        </div>
+
+        <p class="loading-state" id="loading" data-i18n="loading">Loading applications…</p>
+        <div class="application-list" id="applications" aria-live="polite"></div>
+        <section class="empty-state" id="empty" hidden>
+          <h3 data-i18n="emptyTitle">No applications found</h3>
+          <p data-i18n="emptyBody">Try a different search or status filter.</p>
+        </section>
+        <section class="error-state" id="error" hidden>
+          <h3 data-i18n="errorTitle">The dashboard could not load</h3>
+          <p id="error-message"></p>
+          <button id="retry" type="button" data-i18n="retry">Try again</button>
+        </section>
+      </section>
+    </main>
+
+    <footer>
+      <span data-i18n="footerPrivacy">Local-first · SQLite · Your records stay on this computer</span>
+      <span id="generated-at"></span>
+    </footer>
+  </div>
+
   <template id="application-template">
-    <article class="application-card">
-      <div class="card-heading"><div><p class="company"></p><h2 class="role"></h2></div><span class="status"></span></div>
-      <dl><div><dt>Stage</dt><dd class="stage"></dd></div><div><dt>Applied</dt><dd class="applied"></dd></div></dl>
-      <p class="application-id"></p>
+    <article class="application-card" data-testid="application-card">
+      <div class="card-heading">
+        <div class="company-avatar" aria-hidden="true"></div>
+        <div class="job-heading">
+          <p class="company-name"><span class="company"></span><span class="job-id"></span></p>
+          <h2 class="role"></h2>
+        </div>
+        <span class="status"></span>
+      </div>
+
+      <div class="card-facts">
+        <div><span class="fact-label" data-field-label="stage"></span><strong class="stage"></strong></div>
+        <div><span class="fact-label" data-field-label="applied"></span><strong class="applied"></strong></div>
+        <div><span class="fact-label" data-field-label="latest"></span><strong class="latest"></strong></div>
+      </div>
+
+      <div class="next-action">
+        <span class="next-action-label"></span>
+        <p class="next-action-copy"></p>
+      </div>
+
+      <details class="application-details" data-testid="application-details">
+        <summary>
+          <span class="details-label"></span>
+          <span class="details-icons" aria-hidden="true"><img class="details-plus" src="/icons/plus.svg" alt=""><img class="details-minus" src="/icons/minus.svg" alt=""></span>
+        </summary>
+        <div class="details-content">
+          <section class="history">
+            <h3 class="history-title"></h3>
+            <p class="section-note history-note"></p>
+            <ol class="timeline" data-testid="timeline"></ol>
+          </section>
+          <section class="materials">
+            <h3 class="materials-title"></h3>
+            <p class="section-note materials-note"></p>
+            <div class="material-list" data-testid="materials"></div>
+            <a class="job-link" target="_blank" rel="noreferrer" hidden></a>
+          </section>
+        </div>
+      </details>
+      <div class="record-meta"><span class="record-id"></span><span class="updated-at"></span></div>
     </article>
   </template>
+
   <script type="module" src="/app.js"></script>
 </body>
 </html>
-
