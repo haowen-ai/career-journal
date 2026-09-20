@@ -22,6 +22,24 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.24] - 2026-09-19
+
+### Added
+
+- Added release validation that rejects tracked public files containing the retired GitHub owner namespace
+
+### Changed
+
+- Moved the repository, package scope, one-line Agent setup, documentation, tests, and local Git remote to `haowen-ai/career-journal`
+
+### Fixed
+
+- Replaced stale installation and release links that still pointed at the previous account name after the GitHub username change
+
+### Security
+
+- None
+
 ## [0.1.0-alpha.23] - 2026-09-19
 
 ### Added
@@ -550,12 +568,12 @@ All notable changes are documented here. This project follows Semantic Versionin
 - Credentials are referenced through environment variables and excluded from exports
 - Submitted artifacts require explicit confirmation
 
-[Unreleased]: https://github.com/haowenchen0811/career-journal/compare/v0.1.0-alpha.8...HEAD
-[0.1.0-alpha.8]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.8
-[0.1.0-alpha.7]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.7
-[0.1.0-alpha.6]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.6
-[0.1.0-alpha.5]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.5
-[0.1.0-alpha.4]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.4
-[0.1.0-alpha.3]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.3
-[0.1.0-alpha.2]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.2
-[0.1.0-alpha.1]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.1
+[Unreleased]: https://github.com/haowen-ai/career-journal/compare/v0.1.0-alpha.8...HEAD
+[0.1.0-alpha.8]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.8
+[0.1.0-alpha.7]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.7
+[0.1.0-alpha.6]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.6
+[0.1.0-alpha.5]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.5
+[0.1.0-alpha.4]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.4
+[0.1.0-alpha.3]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.3
+[0.1.0-alpha.2]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.2
+[0.1.0-alpha.1]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.1

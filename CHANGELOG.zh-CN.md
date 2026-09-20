@@ -22,6 +22,24 @@
 
 - 无
 
+## [0.1.0-alpha.24] - 2026-09-19
+
+### 新增
+
+- 发布检查新增账号迁移规则，发现项目文件仍引用已经停用的 GitHub 账号名时直接失败
+
+### 变更
+
+- 仓库地址、包名、一句话安装、项目文档、测试和本地 Git remote 已统一迁移到 `haowen-ai/career-journal`
+
+### 修复
+
+- 修复 GitHub 用户名修改后，安装提示和历史版本链接仍然指向旧账号的问题
+
+### 安全
+
+- 无
+
 ## [0.1.0-alpha.23] - 2026-09-19
 
 ### 新增
@@ -550,12 +568,12 @@
 - 凭据通过环境变量引用，不会进入导出文件
 - 标记已提交材料时需要用户明确确认
 
-[尚未发布]: https://github.com/haowenchen0811/career-journal/compare/v0.1.0-alpha.8...HEAD
-[0.1.0-alpha.8]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.8
-[0.1.0-alpha.7]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.7
-[0.1.0-alpha.6]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.6
-[0.1.0-alpha.5]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.5
-[0.1.0-alpha.4]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.4
-[0.1.0-alpha.3]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.3
-[0.1.0-alpha.2]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.2
-[0.1.0-alpha.1]: https://github.com/haowenchen0811/career-journal/releases/tag/v0.1.0-alpha.1
+[尚未发布]: https://github.com/haowen-ai/career-journal/compare/v0.1.0-alpha.8...HEAD
+[0.1.0-alpha.8]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.8
+[0.1.0-alpha.7]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.7
+[0.1.0-alpha.6]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.6
+[0.1.0-alpha.5]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.5
+[0.1.0-alpha.4]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.4
+[0.1.0-alpha.3]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.3
+[0.1.0-alpha.2]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.2
+[0.1.0-alpha.1]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.1

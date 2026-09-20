@@ -11,7 +11,7 @@ CAREER JOURNAL 是一款在本地运行的求职管理工具。你可以自己�
 把下面这句话发给 **Codex、Claude Code、Cursor 或其他能够读取仓库的编程 Agent**：
 
 ```text
-请从 https://github.com/haowenchen0811/career-journal 获取最新版本并自动安装配置 CAREER JOURNAL；如果本机已有旧副本，请安全快进，无法安全快进时使用新的隔离副本，然后读取最新 AGENTS.md 并完成首次配置。
+请从 https://github.com/haowen-ai/career-journal 获取最新版本并自动安装配置 CAREER JOURNAL；如果本机已有旧副本，请安全快进，无法安全快进时使用新的隔离副本，然后读取最新 AGENTS.md 并完成首次配置。
 ```
 
 Agent 会自动完成下载、项目配置、邮箱接入、本机时区检测、每日任务创建、验证和首次运行。你只需要处理无法代办的登录、授权或账号选择。[查看完整使用指南 →](docs/getting-started.zh-CN.md)

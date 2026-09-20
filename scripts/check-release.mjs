@@ -48,13 +48,13 @@ export async function checkRelease(root) {
       read('AGENTS.md'),
     ]);
     const repositoryUrl = packageJson.repository?.url;
-    const identityOk = packageJson.name === '@haowenchen0811/career-journal'
+    const identityOk = packageJson.name === '@haowen-ai/career-journal'
       && packageJson.bin?.['career-journal'] === 'bin/career-journal.mjs'
       && packageJson.bin?.jobops === 'bin/jobops.mjs'
-      && repositoryUrl === 'https://github.com/haowenchen0811/career-journal.git'
+      && repositoryUrl === 'https://github.com/haowen-ai/career-journal.git'
       && /^name: career-journal$/m.test(skill)
-      && /https:\/\/github\.com\/haowenchen0811\/career-journal/.test(englishReadme)
-      && /https:\/\/github\.com\/haowenchen0811\/career-journal/.test(chineseReadme)
+      && /https:\/\/github\.com\/haowen-ai\/career-journal/.test(englishReadme)
+      && /https:\/\/github\.com\/haowen-ai\/career-journal/.test(chineseReadme)
       && /\.agents\/skills\/career-journal\/SKILL\.md/.test(agentInstructions)
       && !/git clone [^\n]*job-search-ops/.test(englishReadme)
       && !/git clone [^\n]*job-search-ops/.test(chineseReadme);
@@ -168,6 +168,12 @@ export async function checkRelease(root) {
 
   const files = await candidateFiles(root);
   const textFiles = files.filter((file) => /\.(?:mjs|js|json|md|yml|yaml|txt|html|css)$/.test(file));
+  let retiredOwnerFile = null;
+  const retiredOwner = ['haowenchen', '0811'].join('');
+  for (const file of textFiles) {
+    if ((await read(file)).includes(retiredOwner)) { retiredOwnerFile = file; break; }
+  }
+  check('owner-namespace', retiredOwnerFile === null, retiredOwnerFile ?? 'all tracked public references use haowen-ai');
   const secretPatterns = [
     /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
     /\b(?:sk|ghp|github_pat)_[A-Za-z0-9_-]{20,}\b/,

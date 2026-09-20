@@ -54,7 +54,8 @@ test('README is a concise product landing page with one Agent setup sentence', a
   assert.match(chineseLead, /没有 Jev[\s\S]*当前 Agent/);
   assert.match(chineseLead, /https:\/\/typesafe\.ai\/blog\/introducing-system-one-models-and-jev/);
   for (const readme of [english, chinese]) {
-    assert.match(readme, /https:\/\/github\.com\/haowenchen0811\/career-journal/);
+    assert.match(readme, /https:\/\/github\.com\/haowen-ai\/career-journal/);
+    assert.doesNotMatch(readme, new RegExp(['haowenchen', '0811'].join('')));
     assert.match(readme, /docs\/getting-started/);
     assert.doesNotMatch(readme, /#### Agent-first setup: choose one entry point|由 Agent 自动配置：任选一种入口/i);
     assert.doesNotMatch(readme, /--email-provider imap|automation register-external|codexCommandLine/);
@@ -73,8 +74,8 @@ test('the repository-driven first run offers a review-before-write history impor
     readFile('docs/getting-started.zh-CN.md', 'utf8'),
   ]);
 
-  assert.match(englishReadme, /Get the latest version of CAREER JOURNAL from https:\/\/github\.com\/haowenchen0811\/career-journal/);
-  assert.match(chineseReadme, /请从 https:\/\/github\.com\/haowenchen0811\/career-journal 获取最新版本并自动安装配置 CAREER JOURNAL/);
+  assert.match(englishReadme, /Get the latest version of CAREER JOURNAL from https:\/\/github\.com\/haowen-ai\/career-journal/);
+  assert.match(chineseReadme, /请从 https:\/\/github\.com\/haowen-ai\/career-journal 获取最新版本并自动安装配置 CAREER JOURNAL/);
 
   for (const document of [agentInstructions, englishSkill, englishGuide]) {
     assert.match(document, /asks? (?:the user )?whether (?:they want to|to) import (?:their )?(?:existing|historical|past) applications/i);

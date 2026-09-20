@@ -12,8 +12,8 @@ test('publishes CAREER JOURNAL as the primary repository, package, CLI, and Skil
     readFile('.agents/skills/career-journal/SKILL.md', 'utf8'),
   ]);
 
-  assert.equal(packageJson.name, '@haowenchen0811/career-journal');
-  assert.equal(packageJson.repository.url, 'https://github.com/haowenchen0811/career-journal.git');
+  assert.equal(packageJson.name, '@haowen-ai/career-journal');
+  assert.equal(packageJson.repository.url, 'https://github.com/haowen-ai/career-journal.git');
   assert.equal(packageJson.bin['career-journal'], 'bin/career-journal.mjs');
   assert.equal(packageJson.bin.jobops, 'bin/jobops.mjs');
   await access('bin/career-journal.mjs');
@@ -21,7 +21,8 @@ test('publishes CAREER JOURNAL as the primary repository, package, CLI, and Skil
   await access('career-journal.cmd');
   assert.match(skill, /^---\nname: career-journal\n/m);
   for (const readme of [english, chinese]) {
-    assert.match(readme, /github\.com\/haowenchen0811\/career-journal(?:\.git)?/);
+    assert.match(readme, /github\.com\/haowen-ai\/career-journal(?:\.git)?/);
+    assert.doesNotMatch(readme, new RegExp(['haowenchen', '0811'].join('')));
     assert.doesNotMatch(readme, /git clone [^\n]*job-search-ops/);
   }
   assert.match(englishGuide, /career-journal start/);

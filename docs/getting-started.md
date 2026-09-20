@@ -15,7 +15,7 @@
 Paste this one sentence into Codex, Claude Code, Cursor, or another repository-aware coding Agent:
 
 ```text
-Get the latest version of CAREER JOURNAL from https://github.com/haowenchen0811/career-journal and set it up automatically; if an existing checkout is present, fast-forward it safely or use a fresh isolated clone, then read the latest AGENTS.md and complete onboarding.
+Get the latest version of CAREER JOURNAL from https://github.com/haowen-ai/career-journal and set it up automatically; if an existing checkout is present, fast-forward it safely or use a fresh isolated clone, then read the latest AGENTS.md and complete onboarding.
 ```
 
 The Agent first obtains a current checkout, then reads [`AGENTS.md`](../AGENTS.md) and the repository Skill, detects the computer's IANA time zone, configures the selected read-only mailboxes, creates the two required schedules, verifies them, runs them once, and finishes with `doctor`. In Codex it uses one shared Codex heartbeat for both times. The Agent itself acts as the host mail connector: it reads the selected account through the existing host capability, generates a bounded read-only host sync batch, and imports it with `email sync-host`; it does not wait for a separate Apple Mail adapter. It then asks the user whether they want to import existing applications. The user only handles an unavoidable login, authorization, account choice, or confirmation of proposed history records.

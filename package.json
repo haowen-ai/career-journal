@@ -1,6 +1,6 @@
 {
-  "name": "@haowenchen0811/career-journal",
-  "version": "0.1.0-alpha.23",
+  "name": "@haowen-ai/career-journal",
+  "version": "0.1.0-alpha.24",
   "description": "CAREER JOURNAL: a local-first, evidence-driven application tracker",
   "type": "module",
   "private": false,
@@ -19,11 +19,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/haowenchen0811/career-journal.git"
+    "url": "https://github.com/haowen-ai/career-journal.git"
   },
-  "homepage": "https://github.com/haowenchen0811/career-journal#readme",
+  "homepage": "https://github.com/haowen-ai/career-journal#readme",
   "bugs": {
-    "url": "https://github.com/haowenchen0811/career-journal/issues"
+    "url": "https://github.com/haowen-ai/career-journal/issues"
   },
   "license": "MIT"
 }

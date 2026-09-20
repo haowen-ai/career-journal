@@ -15,7 +15,7 @@
 把下面这一句话发给 Codex、Claude Code、Cursor 或其他能够读取仓库的编程 Agent：
 
 ```text
-请从 https://github.com/haowenchen0811/career-journal 获取最新版本并自动安装配置 CAREER JOURNAL；如果本机已有旧副本，请安全快进，无法安全快进时使用新的隔离副本，然后读取最新 AGENTS.md 并完成首次配置。
+请从 https://github.com/haowen-ai/career-journal 获取最新版本并自动安装配置 CAREER JOURNAL；如果本机已有旧副本，请安全快进，无法安全快进时使用新的隔离副本，然后读取最新 AGENTS.md 并完成首次配置。
 ```
 
 Agent 会先取得最新仓库副本，再读取 [`AGENTS.md`](../AGENTS.md) 和仓库 Skill，检测电脑的 IANA 时区，配置用户选择的只读邮箱，创建并验证两个每日任务，各运行一次，最后执行 `doctor`。在 Codex 中，这两个时间点由一个共享的 Codex heartbeat 承载。Agent 会直接使用当前环境已有的邮箱能力，只读获取所选邮箱中的招聘邮件，整理成有大小限制的同步批次，再通过 `email sync-host` 导入，不需要等待单独的 Apple Mail 适配器。技术配置通过后，Agent 会询问用户是否需要导入历史投递。用户只需处理无法代办的登录、授权、账号选择，以及确认待导入的历史记录。

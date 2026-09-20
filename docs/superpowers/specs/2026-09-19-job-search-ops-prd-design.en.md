@@ -458,7 +458,7 @@ Each run records version, commit, system, runtime mode, fresh-install or upgrade
 
 ## 21. Open decisions
 
-The following do not block review: first production model adapters, order of additional mailbox adapters, dashboard framework, CareerOps packaging mode, a possible pure-JSON storage adapter, and the long-term GitHub organization. The product name remains CAREER JOURNAL and the current public repository path is `haowenchen0811/career-journal`.
+The following do not block review: first production model adapters, order of additional mailbox adapters, dashboard framework, CareerOps packaging mode, a possible pure-JSON storage adapter, and the long-term GitHub organization. The product name remains CAREER JOURNAL and the current public repository path is `haowen-ai/career-journal`.
 
 ## 22. External references
 
