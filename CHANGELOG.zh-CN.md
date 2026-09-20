@@ -22,6 +22,26 @@
 
 - 无
 
+## [1.0.0] - 2026-09-20
+
+### 新增
+
+- 发布 CAREER JOURNAL 首个正式版，包含本地求职看板、证据时间线、只读邮箱流程，以及每日邮件同步和截止日期复核任务
+- 正式版包含 Jev 优先的求职邮件判断、Agent 备用判断、CareerOps 求职材料流程、中英文使用说明和一句话 Agent 安装
+
+### 变更
+
+- 将 `v0.1.0-alpha.24` 的完整功能固定为稳定的 `v1.0.0` 版本
+- 仓库、包名、文档和安装提示统一使用 `haowen-ai/career-journal`
+
+### 修复
+
+- 正式版收录 alpha 阶段已经验证的全部修复，包括多邮箱发现、Codex 共用定时任务、邮箱同步新鲜度检查、macOS 钥匙串支持和 Jev 优先判断
+
+### 安全
+
+- 邮箱和模型凭据不会写入 Git、提示词、日志、导出文件或备份；配置中只保存本地密钥引用
+
 ## [0.1.0-alpha.24] - 2026-09-19
 
 ### 新增
@@ -568,12 +588,5 @@
 - 凭据通过环境变量引用，不会进入导出文件
 - 标记已提交材料时需要用户明确确认
 
-[尚未发布]: https://github.com/haowen-ai/career-journal/compare/v0.1.0-alpha.8...HEAD
-[0.1.0-alpha.8]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.8
-[0.1.0-alpha.7]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.7
-[0.1.0-alpha.6]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.6
-[0.1.0-alpha.5]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.5
-[0.1.0-alpha.4]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.4
-[0.1.0-alpha.3]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.3
-[0.1.0-alpha.2]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.2
-[0.1.0-alpha.1]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.1
+[尚未发布]: https://github.com/haowen-ai/career-journal/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/haowen-ai/career-journal/releases/tag/v1.0.0

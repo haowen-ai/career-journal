@@ -22,6 +22,26 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [1.0.0] - 2026-09-20
+
+### Added
+
+- Released the first stable CAREER JOURNAL version with the local application dashboard, evidence timeline, read-only mailbox workflow, and daily mail and deadline automations
+- Included Jev-first recruiting-email classification, Agent fallback, CareerOps material routing, bilingual onboarding, and one-line Agent setup
+
+### Changed
+
+- Promoted the complete `v0.1.0-alpha.24` feature set to the stable `v1.0.0` release line
+- Standardized the public repository, package, documentation, and setup prompts on `haowen-ai/career-journal`
+
+### Fixed
+
+- Consolidated all validated alpha fixes into the stable release, including multi-mailbox discovery, shared Codex scheduling, host sync freshness, macOS Keychain support, and Jev-first routing
+
+### Security
+
+- Kept mailbox and model credentials outside Git, prompts, logs, exports, and backups; configuration stores only local secret references
+
 ## [0.1.0-alpha.24] - 2026-09-19
 
 ### Added
@@ -568,12 +588,5 @@ All notable changes are documented here. This project follows Semantic Versionin
 - Credentials are referenced through environment variables and excluded from exports
 - Submitted artifacts require explicit confirmation
 
-[Unreleased]: https://github.com/haowen-ai/career-journal/compare/v0.1.0-alpha.8...HEAD
-[0.1.0-alpha.8]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.8
-[0.1.0-alpha.7]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.7
-[0.1.0-alpha.6]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.6
-[0.1.0-alpha.5]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.5
-[0.1.0-alpha.4]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.4
-[0.1.0-alpha.3]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.3
-[0.1.0-alpha.2]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.2
-[0.1.0-alpha.1]: https://github.com/haowen-ai/career-journal/releases/tag/v0.1.0-alpha.1
+[Unreleased]: https://github.com/haowen-ai/career-journal/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/haowen-ai/career-journal/releases/tag/v1.0.0

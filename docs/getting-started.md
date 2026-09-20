@@ -116,7 +116,7 @@ Give the repository URL and one-line setup request to Codex, Claude Code, Cursor
 
 ### Local API and semantic decisions
 
-Run `career-journal start --home <data-directory>` for the loopback dashboard and JSON API. The standalone path uses the built-in IMAPS client plus a scheduler that can securely expose named environment variables to `mail-sync`. `automation install` can install and probe `deadline-review` on macOS, Linux, or Windows; the current alpha refuses native installation of `mail-sync` because those generated definitions do not yet have a safe cross-platform secret provider. When Jev is enabled, every recruiting email goes to Jev first. If Jev is unavailable or cannot return a valid high-confidence decision, CAREER JOURNAL tries the configured structured LLM, then local rules, and finally manual review. Every result remains review evidence and never changes an application status by itself.
+Run `career-journal start --home <data-directory>` for the loopback dashboard and JSON API. The standalone path uses the built-in IMAPS client plus a scheduler that can securely expose named environment variables to `mail-sync`. `automation install` can install and probe `deadline-review` on macOS, Linux, or Windows; the current native installer refuses native installation of `mail-sync` because those generated definitions do not yet have a safe cross-platform secret provider. When Jev is enabled, every recruiting email goes to Jev first. If Jev is unavailable or cannot return a valid high-confidence decision, CAREER JOURNAL tries the configured structured LLM, then local rules, and finally manual review. Every result remains review evidence and never changes an application status by itself.
 
 ## Email Integration
 
@@ -194,7 +194,7 @@ career-journal start --home ~/job-search
 3. Run `career-journal doctor --home ~/job-search`
 4. In Codex, use the `careerops-materials` Skill; API clients can call `career-journal material prepare|verify --request request.json`
 
-The alpha child-process adapter expects the configured CareerOps installation to expose the documented `career-journal-adapter.mjs` JSON bridge. If the bridge or pinned version is missing, material verification stays unavailable and any fallback must remain an **Unverified Draft**.
+The child-process adapter expects the configured CareerOps installation to expose the documented `career-journal-adapter.mjs` JSON bridge. If the bridge or pinned version is missing, material verification stays unavailable and any fallback must remain an **Unverified Draft**.
 
 ### Built-in and personal resume rules
 
@@ -295,7 +295,7 @@ node --test
 node scripts/check-release.mjs
 ```
 
-Versions follow SemVer. Every release updates `VERSION`, `package.json`, and `CHANGELOG.md`; alpha tags use `v0.1.0-alpha.N`. Fresh-clone and previous-version upgrade smoke tests are release gates.
+Versions follow SemVer. Every release updates `VERSION`, `package.json`, and `CHANGELOG.md`; stable tags use `vMAJOR.MINOR.PATCH`, and prereleases add an `alpha`, `beta`, or `rc` identifier. Fresh-clone and previous-version upgrade smoke tests are release gates.
 
 Public user documentation must ship in both English and Simplified Chinese. The release checker fails when the paired onboarding, attribution, or integration documentation is missing.
 

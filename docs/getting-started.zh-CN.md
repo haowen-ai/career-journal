@@ -188,7 +188,7 @@ career-journal start --home ~/job-search
 3. 运行 `career-journal doctor --home ~/job-search`
 4. Codex 中使用 `careerops-materials` Skill；API Client 可调用 `career-journal material prepare|verify --request request.json`
 
-当前 alpha 版本通过子进程调用 CareerOps，因此已配置的 CareerOps 安装必须提供文档约定的 `career-journal-adapter.mjs` JSON 接口。如果接口文件或指定版本缺失，材料验证不会启用；此时生成的任何替代内容都必须标为 **Unverified Draft**，不能当成已经通过检查的材料。
+当前版本通过子进程调用 CareerOps，因此已配置的 CareerOps 安装必须提供文档约定的 `career-journal-adapter.mjs` JSON 接口。如果接口文件或指定版本缺失，材料验证不会启用；此时生成的任何替代内容都必须标为 **Unverified Draft**，不能当成已经通过检查的材料。
 
 ### 内置与个人简历规则
 
@@ -241,7 +241,7 @@ node ./bin/career-journal.mjs automation list --home "$CAREER_JOURNAL_HOME"
 
 第一次手动触发每个任务时，应使用 `automation list` 中已经验证的 `registration.externalId`。新任务在 macOS 中使用 `io.career-journal.<task>`，在 Linux 中使用 `career-journal-<task>`，在 Windows 中使用 `CareerJournal-<task>`。
 
-当前 alpha 版本会阻止操作系统直接安装 `mail-sync`，因为生成的任务定义还不能安全、跨平台地提供邮箱凭据。请改用 Codex 或其他可信的外部调度器，在不把密钥写入任务定义的前提下提供已配置的环境变量。由其他运行环境获取的邮箱数据仍需单独验证真实邮箱连接。两个必需任务都完成定义检查，并各自使用匹配的外部 ID 成功运行一次后，再执行 `doctor`。
+当前原生安装器会阻止操作系统直接安装 `mail-sync`，因为生成的任务定义还不能安全、跨平台地提供邮箱凭据。请改用 Codex 或其他可信的外部调度器，在不把密钥写入任务定义的前提下提供已配置的环境变量。由其他运行环境获取的邮箱数据仍需单独验证真实邮箱连接。两个必需任务都完成定义检查，并各自使用匹配的外部 ID 成功运行一次后，再执行 `doctor`。
 
 如果你手动注册了调度定义，应先删除操作系统中的注册，再删除本地定义文件：
 
@@ -297,7 +297,7 @@ node --test
 node scripts/check-release.mjs
 ```
 
-版本号遵循 SemVer。每次发布都必须同步更新 `VERSION`、`package.json` 和 `CHANGELOG.md`；alpha 标签使用 `v0.1.0-alpha.N`。公开发布前必须通过 fresh-clone 和上一版本升级 smoke test。公开用户文档必须同时提供英文和简体中文版本。
+版本号遵循 SemVer。每次发布都必须同步更新 `VERSION`、`package.json` 和 `CHANGELOG.md`；正式版标签使用 `v主版本.次版本.修订版本`，预发布版本再加 `alpha`、`beta` 或 `rc` 标识。公开发布前必须通过 fresh-clone 和上一版本升级 smoke test。公开用户文档必须同时提供英文和简体中文版本。
 
 ### 项目参考文档
 

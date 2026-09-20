@@ -1,6 +1,6 @@
 {
   "name": "@haowen-ai/career-journal",
-  "version": "0.1.0-alpha.24",
+  "version": "1.0.0",
   "description": "CAREER JOURNAL: a local-first, evidence-driven application tracker",
   "type": "module",
   "private": false,

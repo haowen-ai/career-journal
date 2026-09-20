@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Verify release
+        run: |
+          test "v$(cat VERSION)" = "$GITHUB_REF_NAME"
+          node --test
+          node scripts/check-release.mjs
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes_file=".github/release-notes/${GITHUB_REF_NAME#v}.md"
+          test -f "$notes_file"
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "CAREER JOURNAL $GITHUB_REF_NAME" \
+            --notes-file "$notes_file" \
+            --verify-tag
+      - name: Remove alpha release history after v1.0.0
+        if: github.ref_name == 'v1.0.0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName' \
+            | while IFS= read -r tag; do
+                case "$tag" in
+                  v0.1.0-alpha.*) gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag ;;
+                esac
+              done
+          git fetch --tags --force
+          git tag --list 'v0.1.0-alpha.*' \
+            | while IFS= read -r tag; do
+                git push origin --delete "$tag"
+              done
