@@ -8,6 +8,7 @@ import { openReadOnlyDatabase, migrate } from '../storage/database.mjs';
 import { isLiveVerifiedEmailAccount, listEmailAccounts } from '../email/accounts.mjs';
 import { isCurrentTaskRegistration, listTasks, REQUIRED_TASK_TYPES, taskEmailAccountIds } from '../automation/registry.mjs';
 import { probeTaskRegistration } from '../automation/probe.mjs';
+import { secretReferenceState } from '../secrets/reference.mjs';
 
 const major = (version) => Number(String(version).replace(/^v/, '').split('.')[0]);
 const DAILY_HEALTH_WINDOW_MS = 36 * 60 * 60 * 1000;
@@ -183,8 +184,15 @@ export async function doctor(home, capabilities = {}) {
 
   let jevState = { ok: false, detail: config.jev.accessState };
   if (config.jev.accessState === 'enabled') {
-    const credential = envReferenceState(config.jev.secretRef, env);
-    jevState = { ok: credential.ok && Boolean(config.jev.model), detail: credential.ok ? `enabled with ${config.jev.model}` : credential.detail };
+    const credential = await secretReferenceState(config.jev.secretRef, {
+      env,
+      platform: capabilities.platform,
+      readKeychain: capabilities.readKeychain,
+    });
+    jevState = {
+      ok: credential.ok && Boolean(config.jev.model),
+      detail: credential.ok ? `enabled with ${config.jev.model}; ${credential.detail}` : credential.detail,
+    };
   } else if (config.jev.accessState === 'waitlisted') jevState.detail = 'waitlisted; no key required until access is granted';
   checks.push({ id: 'jev', severity: jevState.ok ? 'pass' : 'warn', detail: jevState.detail });
   return { ok: !checks.some((item) => item.severity === 'fail'), checks };

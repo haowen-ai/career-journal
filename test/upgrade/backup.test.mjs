@@ -71,6 +71,7 @@ test('backup config omits credential-like literal fields while preserving enviro
       credential: 'literal-credential',
       secretRef: 'literal-secret-reference',
       safeSecretRef: 'env:SAFE_REFERENCE',
+      keychainSecretRef: 'keychain:career-journal-typesafe:local-user',
       label: 'safe-value',
     };
     await saveConfig(home, config);
@@ -85,6 +86,7 @@ test('backup config omits credential-like literal fields while preserving enviro
       'literal-secret-reference',
     ]) assert.equal(serialized.includes(literal), false, `backup leaked ${literal}`);
     assert.equal(backupConfig.integration.safeSecretRef, 'env:SAFE_REFERENCE');
+    assert.equal(backupConfig.integration.keychainSecretRef, 'keychain:career-journal-typesafe:local-user');
     assert.equal(backupConfig.integration.label, 'safe-value');
   } finally { await rm(root, { recursive: true, force: true }); }
 });

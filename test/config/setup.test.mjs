@@ -416,6 +416,19 @@ test('CLI host setup enables Jev and keeps the current Agent as its credential-f
   assert.equal(config.model.secretRef, null);
 }));
 
+test('CLI host setup accepts a macOS Keychain Jev secret reference', async () => withHome(async (home) => {
+  await setupCommand({ options: {
+    home,
+    'email-provider': 'host',
+    'email-address': 'candidate@school.edu',
+    'email-connector': 'apple-mail',
+    'jev-secret-ref': 'keychain:career-journal-typesafe:local-user',
+  } }, memoryIO());
+  const config = await loadConfig(home);
+  assert.equal(config.jev.secretRef, 'keychain:career-journal-typesafe:local-user');
+  assert.equal(config.jev.accessState, 'enabled');
+}));
+
 test('CLI setup rejects a literal Jev key', async () => withHome(async (home) => {
   await assert.rejects(() => setupCommand({ options: {
     home,

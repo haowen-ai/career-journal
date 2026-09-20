@@ -109,6 +109,26 @@ test('reports configured versus usable provider, Jev, and email capabilities wit
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
+test('reports a configured macOS Keychain Jev credential as available', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-doctor-keychain-'));
+  try {
+    await setup(home, {
+      timezone: 'UTC',
+      email: { mode: 'skip' },
+      jev: { accessState: 'enabled', secretRef: 'keychain:career-journal-typesafe:local-user' },
+    });
+    const report = await doctor(home, {
+      nodeVersion: '24.19.0',
+      storage: async () => ({ ok: true, detail: 'writable' }),
+      platform: 'darwin',
+      readKeychain: async () => 'keychain-secret',
+    });
+    assert.equal(report.checks.find((item) => item.id === 'jev').severity, 'pass');
+    assert.match(report.checks.find((item) => item.id === 'jev').detail, /keychain/i);
+    assert.equal(JSON.stringify(report).includes('keychain-secret'), false);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
 test('host connector JSON remains self-attested and cannot make onboarding healthy', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-doctor-onboarding-'));
   try {

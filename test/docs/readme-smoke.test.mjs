@@ -131,11 +131,17 @@ test('Agent onboarding discovers and selects one or more host mailboxes without 
     assert.match(document, /(?:declines?|skip|no access)[^\n]*host-agent/i);
     assert.match(document, /never[^\n]*(?:paste|send|provide)[^\n]*(?:API key|secret)[^\n]*(?:chat|prompt)/i);
   }
+  for (const document of [agentInstructions, englishSkill, englishGuide]) {
+    assert.match(document, /keychain:career-journal-typesafe:/i);
+  }
   for (const document of [chineseSkill, chineseGuide, chinesePrd]) {
     assert.match(document, /(?:核心配置|doctor)[^\n]*(?:通过|完成)[^\n]*Jev/);
     assert.match(document, /可选[^\n]*Jev[^\n]*(?:启用|使用|配置)/);
     assert.match(document, /(?:跳过|没有权限|不启用)[^\n]*host-agent/i);
     assert.match(document, /不得[^\n]*(?:聊天|prompt)[^\n]*(?:粘贴|发送|提供)[^\n]*(?:API Key|secret)|不得[^\n]*(?:粘贴|发送|提供)[^\n]*(?:API Key|secret)[^\n]*(?:聊天|prompt)/i);
+  }
+  for (const document of [chineseSkill, chineseGuide]) {
+    assert.match(document, /keychain:career-journal-typesafe:/i);
   }
 });
 

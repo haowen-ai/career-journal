@@ -6,6 +6,7 @@ import { loadConfig, saveConfig } from '../config/store.mjs';
 import { openDatabase, openReadOnlyDatabase, migrate, pendingMigrationError } from '../storage/database.mjs';
 import { assertPublicEmailAddress, configureEmailAccount, listEmailAccounts, emailSetupState } from '../email/accounts.mjs';
 import { upsertTask, listTasks, automationSetupState, taskEmailAccountIds } from '../automation/registry.mjs';
+import { validSecretReference } from '../secrets/reference.mjs';
 
 const DAILY_AUTOMATIONS = Object.freeze({
   'mail-sync': { time: '20:00', notificationPolicy: 'actionable' },
@@ -44,8 +45,8 @@ function cleanJevBaseUrl(value) {
 
 function jevSettings(input, current) {
   const secretRef = input.secretRef ?? current.secretRef;
-  if (!/^env:[A-Za-z_][A-Za-z0-9_]*$/.test(String(secretRef ?? ''))) {
-    throw new Error('--jev-secret-ref env:VARIABLE is required; do not put the API key in config');
+  if (!validSecretReference(secretRef, { allowKeychain: true })) {
+    throw new Error('--jev-secret-ref env:VARIABLE or keychain:SERVICE:ACCOUNT is required; do not put the API key in config');
   }
   const threshold = cleanThreshold(input.threshold ?? current.threshold ?? 0.8, 'Jev threshold');
   return {

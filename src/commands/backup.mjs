@@ -15,7 +15,9 @@ function sanitize(value) {
   const output = {};
   for (const [key, item] of Object.entries(value)) {
     if (/secretRef$/i.test(key)) {
-      if (item == null || /^env:[A-Za-z_][A-Za-z0-9_]*$/.test(String(item))) output[key] = item;
+      if (item == null
+        || /^env:[A-Za-z_][A-Za-z0-9_]*$/.test(String(item))
+        || /^keychain:[A-Za-z0-9][A-Za-z0-9._-]{0,127}:[A-Za-z0-9][A-Za-z0-9._@+-]{0,127}$/.test(String(item))) output[key] = item;
       continue;
     }
     const normalizedKey = key.replace(/[^A-Za-z0-9]/g, '').toLowerCase();

@@ -53,11 +53,31 @@ test('Jev adapter rejects malformed Choice responses instead of fabricating a ru
   await assert.rejects(() => adapter.decide({ kind: 'email-classification', text: 'Update' }), /invalid Jev classification response/i);
 });
 
-test('Jev adapter keeps credentials environment-only', async () => {
+test('Jev adapter rejects literal credential values', async () => {
   const adapter = createJevAdapter({ accessState: 'enabled', secretRef: 'literal-secret' }, async () => {
     throw new Error('fetch should not run');
   }, {});
   await assert.rejects(() => adapter.decide({ kind: 'email-classification', text: 'Update' }), /env:VARIABLE/);
+});
+
+test('Jev adapter reads a macOS Keychain reference without exposing the secret', async () => {
+  let authorization;
+  const adapter = createJevAdapter({
+    accessState: 'enabled', secretRef: 'keychain:career-journal-typesafe:local-user',
+  }, async (_url, options) => {
+    authorization = options.headers.authorization;
+    return { ok: true, async json() { return { answers: { classification: { type: 'choice', choice: 'unknown', confidence: 0.9 } } }; } };
+  }, {}, {
+    platform: 'darwin',
+    readKeychain: async (service, account) => {
+      assert.equal(service, 'career-journal-typesafe');
+      assert.equal(account, 'local-user');
+      return 'keychain-secret';
+    },
+  });
+
+  await adapter.decide({ kind: 'email-classification', text: 'Update' });
+  assert.equal(authorization, 'Bearer keychain-secret');
 });
 
 test('Jev adapter refuses to send a TypeSafe key to a different origin', async () => {

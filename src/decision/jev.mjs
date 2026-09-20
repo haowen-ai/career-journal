@@ -1,4 +1,5 @@
 import { EMAIL_CLASSIFICATIONS } from './rules.mjs';
+import { resolveSecretReference } from '../secrets/reference.mjs';
 
 export const JEV_EMAIL_QUESTION = Object.freeze({
   type: 'choice',
@@ -14,14 +15,6 @@ export const JEV_EMAIL_QUESTION = Object.freeze({
   }),
 });
 
-function resolveSecret(secretRef, env) {
-  const match = /^env:([A-Za-z_][A-Za-z0-9_]*)$/.exec(String(secretRef ?? ''));
-  if (!match) throw new Error('Jev credentials must use an env:VARIABLE secret reference');
-  const value = env[match[1]];
-  if (!value) throw new Error(`Jev credential environment variable is unavailable: ${match[1]}`);
-  return value;
-}
-
 function apiEndpoint(value) {
   const url = new URL(value ?? 'https://api.typesafe.ai/v1/systemone');
   if (url.origin !== 'https://api.typesafe.ai' || url.pathname.replace(/\/$/, '') !== '/v1/systemone' || url.search || url.hash) {
@@ -30,7 +23,7 @@ function apiEndpoint(value) {
   return 'https://api.typesafe.ai/v1/systemone';
 }
 
-export function createJevAdapter(config, fetchImpl = globalThis.fetch, env = process.env) {
+export function createJevAdapter(config, fetchImpl = globalThis.fetch, env = process.env, capabilities = {}) {
   const accessState = config?.accessState ?? 'waitlisted';
   const mode = config?.mode ?? 'shadow';
   const threshold = Number.isFinite(Number(config?.threshold)) ? Number(config.threshold) : 0.8;
@@ -43,7 +36,7 @@ export function createJevAdapter(config, fetchImpl = globalThis.fetch, env = pro
     threshold,
     async decide(input) {
       const endpoint = apiEndpoint(config.baseUrl);
-      const secret = resolveSecret(config.secretRef, env);
+      const { value: secret } = await resolveSecretReference(config.secretRef, { ...capabilities, env });
       const retryDelaysMs = Array.isArray(config.retryDelaysMs) ? config.retryDelaysMs : [250, 750];
       let response;
       for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {

@@ -22,6 +22,24 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.19] - 2026-09-19
+
+### Added
+
+- Added macOS Keychain secret references for Jev in the form `keychain:SERVICE:ACCOUNT`
+
+### Changed
+
+- Agent-managed Jev setup can keep the TypeSafe key in Keychain instead of requiring a long-lived shell environment variable
+
+### Fixed
+
+- Closed the gap between the private local credential onboarding promise and the Jev adapter's environment-only implementation
+
+### Security
+
+- Keychain values are resolved only at request time and are never written to config, logs, prompts, exports, or backups
+
 ## [0.1.0-alpha.18] - 2026-09-19
 
 ### Added

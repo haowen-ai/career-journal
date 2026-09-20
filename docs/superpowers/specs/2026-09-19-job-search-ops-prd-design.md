@@ -3,12 +3,12 @@
 [English](2026-09-19-job-search-ops-prd-design.en.md) | [简体中文](2026-09-19-job-search-ops-prd-design.md)
 
 **状态：** Review Draft  
-**版本：** 0.22
+**版本：** 0.23
 **日期：** 2026-09-19  
 **产品名称：** CAREER JOURNAL
 **交付形态：** 开源 GitHub 项目，提供 Agent 托管版本和通用 LLM API 版本
 
-**本版更新：** Agent 模式先更新已有仓库或安全地改用最新隔离副本，再识别电脑上已经登录的邮箱，只询问用户其中哪一个或多个用于求职；没有账号时再请用户登录邮件应用。Jev 不阻塞核心配置：宿主已有配置时复用，否则由当前 Agent 复核。核心配置通过 `doctor` 后，Agent 主动提供一次可选 Jev 启用选项；用户跳过、没有权限或不启用时保留 `host-agent`，凭据不得进入聊天或 Agent prompt。独立 CLI/API 模式继续支持 IMAPS 和 OpenAI-compatible 服务。
+**本版更新：** Agent 模式先更新已有仓库或安全地改用最新隔离副本，再识别电脑上已经登录的邮箱，只询问用户其中哪一个或多个用于求职；没有账号时再请用户登录邮件应用。Jev 不阻塞核心配置：宿主已有配置时复用，否则由当前 Agent 复核。核心配置通过 `doctor` 后，Agent 主动提供一次可选 Jev 启用选项；用户跳过、没有权限或不启用时保留 `host-agent`，凭据不得进入聊天或 Agent prompt。macOS 可以把 Jev Key 保存到系统钥匙串，配置只保留 `keychain:SERVICE:ACCOUNT` 引用。独立 CLI/API 模式继续支持 IMAPS 和 OpenAI-compatible 服务。
 
 ## 1. 产品概述
 
@@ -552,7 +552,7 @@ TypeSafe AI 于 2026 年 9 月 15 日开放 Jev early access。CAREER JOURNAL �
 
 ### 13.2 权限与配置
 
-Agent 模式不得让 Jev 阻塞核心配置。宿主已经存在可发现、已配置的 Jev 能力时直接复用，否则先自动使用当前 Agent。核心配置通过 `doctor` 后，Agent 主动询问一次用户是否要启用 Jev；用户跳过、没有权限或不启用时保留 `host-agent`。选择 Jev 时，只通过本地私密路径输入凭据，不得要求用户在聊天或 Agent prompt 中粘贴、发送或提供 API Key 或 secret。独立 CLI/API 模式可以询问是否启用 Jev；启用时只保存 Key 的环境变量名称，未启用时可以配置 OpenAI-compatible 服务的 Base URL、模型名和 API Key 环境变量名称。真实 Key 不得写入配置、prompt、日志或 Git。
+Agent 模式不得让 Jev 阻塞核心配置。宿主已经存在可发现、已配置的 Jev 能力时直接复用，否则先自动使用当前 Agent。核心配置通过 `doctor` 后，Agent 主动询问一次用户是否要启用 Jev；用户跳过、没有权限或不启用时保留 `host-agent`。选择 Jev 时，只通过本地私密路径输入凭据，不得要求用户在聊天或 Agent prompt 中粘贴、发送或提供 API Key 或 secret。在 macOS 上，Agent 把新建 Key 保存到系统钥匙串，CAREER JOURNAL 只保存 `keychain:career-journal-typesafe:<本地账户>`。独立 CLI/API 模式可以询问是否启用 Jev；启用时只保存环境变量或受支持的系统凭据引用，未启用时可以配置 OpenAI-compatible 服务的 Base URL、模型名和 API Key 环境变量名称。真实 Key 不得写入配置、prompt、日志或 Git。
 
 ```yaml
 decision_engine:
