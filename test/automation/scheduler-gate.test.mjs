@@ -273,9 +273,13 @@ test('Codex scheduler probe requires an ACTIVE heartbeat with matching command s
         'target_thread_id = "01a0a64b-06b5-79a1-97fd-1cb60a1f21c7"',
       ].join('\n'));
 
-    const verified = await probeTaskRegistration(claim, { codexHome });
+    const verified = await probeTaskRegistration(claim, { codexHome, systemTimezone: 'America/Chicago' });
     assert.equal(verified.ok, true);
     assert.match(verified.evidenceDigest, /^sha256:[a-f0-9]{64}$/);
+
+    const wrongHostTimezone = await probeTaskRegistration(claim, { codexHome, systemTimezone: 'UTC' });
+    assert.equal(wrongHostTimezone.ok, false);
+    assert.match(wrongHostTimezone.detail, /host timezone/i);
 
     await fs.writeFile(path.join(directory, 'automation.toml'), [
       'id = "automation-deadline-review"',
@@ -284,7 +288,7 @@ test('Codex scheduler probe requires an ACTIVE heartbeat with matching command s
       'status = "ACTIVE"',
       'rrule = "FREQ=DAILY;BYHOUR=20;BYMINUTE=15;BYSECOND=0"',
     ].join('\n'));
-    const missingRequiredMetadata = await probeTaskRegistration(claim, { codexHome });
+    const missingRequiredMetadata = await probeTaskRegistration(claim, { codexHome, systemTimezone: 'America/Chicago' });
     assert.equal(missingRequiredMetadata.ok, false);
     assert.match(missingRequiredMetadata.detail, /version|target.thread/i);
 
@@ -297,7 +301,7 @@ test('Codex scheduler probe requires an ACTIVE heartbeat with matching command s
       'rrule = "FREQ=DAILY;BYHOUR=20;BYMINUTE=15;BYSECOND=0"',
       'target_thread_id = "01a0a64b-06b5-79a1-97fd-1cb60a1f21c7"',
     ].join('\n'));
-    const unsupportedCron = await probeTaskRegistration(claim, { codexHome });
+    const unsupportedCron = await probeTaskRegistration(claim, { codexHome, systemTimezone: 'America/Chicago' });
     assert.equal(unsupportedCron.ok, false);
     assert.match(unsupportedCron.detail, /heartbeat/i);
 
@@ -310,7 +314,7 @@ test('Codex scheduler probe requires an ACTIVE heartbeat with matching command s
       'rrule = "FREQ=DAILY;BYHOUR=20;BYMINUTE=15;BYSECOND=0"',
       'target_thread_id = "01a0a64b-06b5-79a1-97fd-1cb60a1f21c7"',
     ].join('\n'));
-    const echoWrapper = await probeTaskRegistration(claim, { codexHome });
+    const echoWrapper = await probeTaskRegistration(claim, { codexHome, systemTimezone: 'America/Chicago' });
     assert.equal(echoWrapper.ok, false);
     assert.match(echoWrapper.detail, /exact registered CAREER JOURNAL command/i);
 
@@ -323,7 +327,7 @@ test('Codex scheduler probe requires an ACTIVE heartbeat with matching command s
       'rrule = "FREQ=DAILY;BYHOUR=20;BYMINUTE=15;BYSECOND=0"',
       'target_thread_id = "01a0a64b-06b5-79a1-97fd-1cb60a1f21c7"',
     ].join('\n'));
-    const inactive = await probeTaskRegistration(claim, { codexHome });
+    const inactive = await probeTaskRegistration(claim, { codexHome, systemTimezone: 'America/Chicago' });
     assert.equal(inactive.ok, false);
     assert.match(inactive.detail, /ACTIVE/i);
 
@@ -338,7 +342,7 @@ test('Codex scheduler probe requires an ACTIVE heartbeat with matching command s
       'rrule = "FREQ=DAILY;BYHOUR=20;BYMINUTE=15;BYSECOND=0"',
       'target_thread_id = "01a0a64b-06b5-79a1-97fd-1cb60a1f21c7"',
     ].join('\n'));
-    const malformed = await probeTaskRegistration(claim, { codexHome });
+    const malformed = await probeTaskRegistration(claim, { codexHome, systemTimezone: 'America/Chicago' });
     assert.equal(malformed.ok, false);
     assert.match(malformed.detail, /TOML|malformed|duplicate/i);
     context.db.close();
@@ -381,7 +385,7 @@ test('Codex scheduler probe requires an exact indefinite daily recurrence', asyn
       'FREQ=DAILY;INTERVAL=1;BYHOUR=20;BYMINUTE=0',
     ]) {
       await writeAutomation(rrule);
-      const verified = await probeTaskRegistration(claim, { codexHome });
+      const verified = await probeTaskRegistration(claim, { codexHome, systemTimezone: 'America/Chicago' });
       assert.equal(verified.ok, true, `${rrule} should be accepted`);
     }
 
@@ -395,7 +399,7 @@ test('Codex scheduler probe requires an exact indefinite daily recurrence', asyn
       'FREQ=DAILY;BYHOUR=20;BYHOUR=20;BYMINUTE=0',
     ]) {
       await writeAutomation(rrule);
-      const rejected = await probeTaskRegistration(claim, { codexHome });
+      const rejected = await probeTaskRegistration(claim, { codexHome, systemTimezone: 'America/Chicago' });
       assert.equal(rejected.ok, false, `${rrule} should be rejected`);
       assert.match(rejected.detail, /schedule does not match/i);
     }
@@ -439,13 +443,13 @@ test('one Codex heartbeat verifies the two required commands and schedules', asy
       ].join('\n'),
     );
     await writeAutomation(`At 20:00 run mail-sync; at 20:15 run deadline-review in America/Chicago.\n${commands.join('\n')}`);
-    for (const task of tasks) assert.equal((await probeTaskRegistration(task, { codexHome })).ok, true);
+    for (const task of tasks) assert.equal((await probeTaskRegistration(task, { codexHome, systemTimezone: 'America/Chicago' })).ok, true);
 
     await writeAutomation(`America/Chicago\n${commands[0]}`);
-    assert.equal((await probeTaskRegistration(tasks[1], { codexHome })).ok, false);
+    assert.equal((await probeTaskRegistration(tasks[1], { codexHome, systemTimezone: 'America/Chicago' })).ok, false);
 
     await writeAutomation(`America/Chicago\n${commands.join('\n')}`, 'FREQ=DAILY;BYHOUR=20;BYMINUTE=0,15,30;BYSECOND=0');
-    for (const task of tasks) assert.equal((await probeTaskRegistration(task, { codexHome })).ok, false);
+    for (const task of tasks) assert.equal((await probeTaskRegistration(task, { codexHome, systemTimezone: 'America/Chicago' })).ok, false);
     context.db.close();
   } finally {
     await rm(home, { recursive: true, force: true });
@@ -1112,7 +1116,7 @@ test('automation verify promotes a real Codex heartbeat claim without trusting r
     ].join('\n'));
 
     await automationCommand({ subcommand: 'verify', options: { home, task: 'deadline-review' } }, memoryIO(), {
-      root: '/repo', version: 'test', codexHome,
+      root: '/repo', version: 'test', codexHome, systemTimezone: 'America/Chicago',
     });
     context = await openHomeDatabase(home);
     const verified = listTasks(context.db).find((task) => task.type === 'deadline-review');

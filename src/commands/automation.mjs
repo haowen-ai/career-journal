@@ -93,6 +93,7 @@ export async function automationCommand(parsed, io, runtime) {
         : await probeTaskRegistration(task, {
           platform: runtime.platform ?? process.platform,
           codexHome: runtime.codexHome,
+          systemTimezone: runtime.systemTimezone,
         });
       if (!probe?.ok) throw new Error(`Scheduler verification failed: ${probe?.detail ?? 'job not found'}`);
       const verified = verifyTaskRegistration(context.db, task.id, {

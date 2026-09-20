@@ -22,6 +22,24 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.21] - 2026-09-19
+
+### Added
+
+- Added CI coverage that verifies Codex scheduler checks under an explicitly controlled host timezone
+
+### Changed
+
+- Scheduler verification now accepts the runtime host timezone as an explicit dependency for deterministic agent and test execution
+
+### Fixed
+
+- Fixed Codex scheduler tests that passed only when the test machine happened to use the configured task timezone
+
+### Security
+
+- None
+
 ## [0.1.0-alpha.20] - 2026-09-19
 
 ### Added
