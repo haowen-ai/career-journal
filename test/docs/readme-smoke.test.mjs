@@ -102,7 +102,7 @@ test('Agent onboarding discovers and selects one or more host mailboxes without 
     assert.match(document, /which (?:one or more|account or accounts)[^\n]*job search/i);
     assert.match(document, /sign in[^\n]*(?:Apple Mail|mail app)/i);
     assert.match(document, /current (?:coding )?Agent[^\n]*(?:Jev|semantic)/i);
-    assert.match(document, /do not ask[^\n]*(?:Base URL|API key)/i);
+    assert.match(document, /(?:do not ask|never ask)[^\n]*(?:Base URL|API key|secret)/i);
   }
   for (const document of [chineseSkill, chineseGuide]) {
     assert.match(document, /识别[^\n]*(?:Apple Mail|宿主)[^\n]*邮箱账号/);
@@ -125,7 +125,18 @@ test('Agent onboarding discovers and selects one or more host mailboxes without 
   assert.match(chineseReadme, /最新版本[^\n]*已有[^\n]*(?:安全快进|隔离副本)/);
   assert.match(agentInstructions, /before reading local onboarding instructions[^\n]*(?:fetch|latest)/i);
   assert.match(agentInstructions, /attempt account discovery before asking/i);
-  assert.match(agentInstructions, /do not ask whether Jev is available/i);
+  for (const document of [agentInstructions, englishSkill, englishGuide, englishPrd]) {
+    assert.match(document, /after[^\n]*(?:core|doctor|onboarding)[^\n]*(?:pass|complete)[^\n]*Jev/i);
+    assert.match(document, /optional[^\n]*Jev[^\n]*(?:enable|use|configure)/i);
+    assert.match(document, /(?:declines?|skip|no access)[^\n]*host-agent/i);
+    assert.match(document, /never[^\n]*(?:paste|send|provide)[^\n]*(?:API key|secret)[^\n]*(?:chat|prompt)/i);
+  }
+  for (const document of [chineseSkill, chineseGuide, chinesePrd]) {
+    assert.match(document, /(?:核心配置|doctor)[^\n]*(?:通过|完成)[^\n]*Jev/);
+    assert.match(document, /可选[^\n]*Jev[^\n]*(?:启用|使用|配置)/);
+    assert.match(document, /(?:跳过|没有权限|不启用)[^\n]*host-agent/i);
+    assert.match(document, /不得[^\n]*(?:聊天|prompt)[^\n]*(?:粘贴|发送|提供)[^\n]*(?:API Key|secret)|不得[^\n]*(?:粘贴|发送|提供)[^\n]*(?:API Key|secret)[^\n]*(?:聊天|prompt)/i);
+  }
 });
 
 test('macOS mailbox discovery enumerates the full Apple Mail account inventory', async () => {
@@ -195,7 +206,7 @@ test('bilingual Getting Started guides retain the complete operating contract', 
   for (const phrase of ['Codex', 'Claude Code', '每日自动化', '数据与隐私', '更新、迁移、备份与卸载', 'CareerOps', 'Jev', '新发布', '大语言模型']) {
     assert.match(chinese, new RegExp(phrase, 'i'));
   }
-  assert.match(english, /(?:without Jev|Jev is unavailable)[^\n]*(?:current Agent|current coding Agent)/i);
+  assert.match(english, /(?:without Jev|Jev is unavailable|declines or has no access)[^\n]*(?:current Agent|current coding Agent|host-agent)/i);
   assert.match(chinese, /Jev[^\n]*2026 年 9 月 15 日/);
 });
 

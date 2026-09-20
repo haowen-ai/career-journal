@@ -3,12 +3,12 @@
 [English](2026-09-19-job-search-ops-prd-design.en.md) | [简体中文](2026-09-19-job-search-ops-prd-design.md)
 
 **状态：** Review Draft  
-**版本：** 0.21
+**版本：** 0.22
 **日期：** 2026-09-19  
 **产品名称：** CAREER JOURNAL
 **交付形态：** 开源 GitHub 项目，提供 Agent 托管版本和通用 LLM API 版本
 
-**本版更新：** Agent 模式先更新已有仓库或安全地改用最新隔离副本，再识别电脑上已经登录的邮箱，只询问用户其中哪一个或多个用于求职；没有账号时再请用户登录邮件应用。Jev 不再是首次配置问题：宿主已有配置时复用，否则由当前 Agent 复核，不要求模型 Base URL 或额外 API Key。独立 CLI/API 模式继续支持 IMAPS 和 OpenAI-compatible 服务。
+**本版更新：** Agent 模式先更新已有仓库或安全地改用最新隔离副本，再识别电脑上已经登录的邮箱，只询问用户其中哪一个或多个用于求职；没有账号时再请用户登录邮件应用。Jev 不阻塞核心配置：宿主已有配置时复用，否则由当前 Agent 复核。核心配置通过 `doctor` 后，Agent 主动提供一次可选 Jev 启用选项；用户跳过、没有权限或不启用时保留 `host-agent`，凭据不得进入聊天或 Agent prompt。独立 CLI/API 模式继续支持 IMAPS 和 OpenAI-compatible 服务。
 
 ## 1. 产品概述
 
@@ -175,7 +175,7 @@ Codex 版本通过根目录 `AGENTS.md` 和仓库内 `career-journal` Skill 启�
 - 创建本地配置和数据目录
 - 导入候选人资料
 - 在提出任何邮箱配置问题前，先识别已经登录的宿主邮箱。Apple Mail 必须使用主窗口和展开后的 `All Inboxes` 账号行完整枚举，不能把当前选中邮件所属邮箱当作全部账号；名称未显示地址时，只读核对 Mail 设置 > 账户。清单完整后才询问用户其中哪一个或多个用于求职。Agent 自身作为宿主邮箱连接器，实际观察账号后记录可信验证，生成并导入有范围限制的只读批次，不等待单独的 Apple Mail 适配器
-- 已经配置 Jev 时直接复用，否则自动使用当前 Agent，不询问 Jev 权限、模型 Base URL、模型名或 API Key
+- 已经配置 Jev 时直接复用，否则先自动使用当前 Agent；核心配置通过 `doctor` 后，主动提供一次可选 Jev 启用选项
 - 按电脑检测时区实现两个必需时间点。Codex 使用一个共享 heartbeat 承载 20:00 和 20:15 两个分支，把同一真实 ID 登记到两个任务并分别核对准确命令；原生 OS 调度器可以使用独立定义
 - 调用 Codex 可用的文档、PDF、浏览器和自动化能力
 - 在执行前检查所需能力，不把“安装了 Skill”等同于“外部账号已经连接”
@@ -281,7 +281,7 @@ README 必须设置清晰可见的 “Built With / Open Source Acknowledgements�
 6. 选择地区和语言，并检测当前电脑的 IANA 时区
 7. 在询问连接参数前先识别宿主邮箱，只询问用户哪些已识别账号用于求职；没有账号时请用户登录邮件应用后继续
 8. 实际观察到每个选中账号后记录可信宿主验证，并为全部选中邮箱完成首次只读同步
-9. 仅在宿主已经配置 Jev 时复用；否则自动选择 `host-agent`，不询问 Jev 权限、Base URL、模型名或 API Key
+9. 宿主已经配置 Jev 时直接复用；否则先选择 `host-agent`。核心配置通过 `doctor` 后，主动提供一次可选 Jev 启用选项。用户跳过、没有权限或不启用时保留 `host-agent`；不得要求用户在聊天或 Agent prompt 中粘贴、发送或提供 API Key 或 secret
 10. 检查 CareerOps 与文档能力
 11. 在检测到的时区中实现两个必需时间点：20:00 `mail-sync` 和 20:15 `deadline-review`。Codex 创建一个共享 heartbeat 并把同一真实 ID 登记到两个任务；其他调度器可以创建独立定义。使用 `automation.toml`、launchd、cron 或 Windows Task Scheduler 的实时输出验证绑定命令
 12. 使用匹配的 ID 分别触发两个必需任务；Agent 作为宿主邮箱连接器，先为全部选中邮箱生成并导入只读批次，再运行邮件任务并在本地事务提交后分别推进游标
@@ -552,7 +552,7 @@ TypeSafe AI 于 2026 年 9 月 15 日开放 Jev early access。CAREER JOURNAL �
 
 ### 13.2 权限与配置
 
-Agent 模式不得询问用户是否拥有 Jev。宿主已经存在可发现、已配置的 Jev 能力时直接复用，否则自动使用当前 Agent，并在不需要额外端点或 Key 的情况下完成首次配置。独立 CLI/API 模式可以询问是否启用 Jev；启用时只保存 Key 的环境变量名称，未启用时可以配置 OpenAI-compatible 服务的 Base URL、模型名和 API Key 环境变量名称。真实 Key 不得写入配置、prompt、日志或 Git。
+Agent 模式不得让 Jev 阻塞核心配置。宿主已经存在可发现、已配置的 Jev 能力时直接复用，否则先自动使用当前 Agent。核心配置通过 `doctor` 后，Agent 主动询问一次用户是否要启用 Jev；用户跳过、没有权限或不启用时保留 `host-agent`。选择 Jev 时，只通过本地私密路径输入凭据，不得要求用户在聊天或 Agent prompt 中粘贴、发送或提供 API Key 或 secret。独立 CLI/API 模式可以询问是否启用 Jev；启用时只保存 Key 的环境变量名称，未启用时可以配置 OpenAI-compatible 服务的 Base URL、模型名和 API Key 环境变量名称。真实 Key 不得写入配置、prompt、日志或 Git。
 
 ```yaml
 decision_engine:

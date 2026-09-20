@@ -3,12 +3,12 @@
 [English](2026-09-19-job-search-ops-prd-design.en.md) | [简体中文](2026-09-19-job-search-ops-prd-design.md)
 
 **Status:** Review Draft
-**Version:** 0.21
+**Version:** 0.22
 **Date:** 2026-09-19
 **Product:** CAREER JOURNAL
 **Delivery:** Open-source GitHub project with an Agent-managed edition and a provider-neutral LLM API edition
 
-**Revision focus:** Agent-managed onboarding first refreshes or safely replaces a stale local checkout, then discovers mail accounts already signed in on the computer and asks only which one or more are used for job search. If no account is available, the user signs in to a mail app and the Agent resumes. Jev is not an onboarding question: an existing configured capability is reused, otherwise the current Agent reviews ambiguous candidates without a model Base URL or another API key. Standalone CLI/API mode continues to support IMAPS and OpenAI-compatible services.
+**Revision focus:** Agent-managed onboarding first refreshes or safely replaces a stale local checkout, then discovers mail accounts already signed in on the computer and asks only which one or more are used for job search. If no account is available, the user signs in to a mail app and the Agent resumes. Jev never blocks core onboarding: an existing configured capability is reused, otherwise the current Agent reviews ambiguous candidates without a model Base URL or another API key. After core onboarding passes `doctor`, the Agent makes one optional Jev offer. A user who declines, skips it, or has no access stays on `host-agent`; credentials never enter chat or an Agent prompt. Standalone CLI/API mode continues to support IMAPS and OpenAI-compatible services.
 
 ## 1. Product overview
 
@@ -192,7 +192,7 @@ After clone, the user may ask Codex to initialize CAREER JOURNAL. The system mus
 6. Choose locale and language, and detect the computer's current IANA time zone
 7. Attempt host mailbox discovery before asking for connection details; ask only which one or more discovered accounts are used for job search, or ask the user to sign in when none is available
 8. Record trusted-host verification after observing each selected account and complete a successful read-only sync for every selected mailbox
-9. Reuse Jev only when already configured; otherwise select `host-agent` automatically without asking for Jev access, a Base URL, a model name, or an API key
+9. Reuse Jev when already configured; otherwise select `host-agent` automatically, finish the core gates, then make one optional Jev offer after `doctor` passes. A user who declines, skips it, or has no access stays on `host-agent`; never ask the user to paste, send, or provide an API key or secret in chat or an Agent prompt
 10. Check CareerOps and document capabilities
 11. Create two real jobs in the detected time zone: `mail-sync` at 20:00 and `deadline-review` at 20:15; record real IDs and probe the saved Codex `automation.toml`, launchd, cron, or Windows Task Scheduler definition
 12. Trigger each job with its matching ID; the mail task reads every selected account and advances each cursor only after the local transaction commits
@@ -334,7 +334,7 @@ Attachments use SHA-256 content-addressed references. Secrets remain outside the
 
 TypeSafe AI released Jev in early access on September 15, 2026. CAREER JOURNAL supports it as the primary semantic decision engine after access is configured, keeping the project current with newly available decision technology. Deterministic rules run first for explicit, reviewable cases; Jev handles ambiguous cases that need semantic judgment. In Agent mode, the current Agent reviews candidates when Jev is absent or cannot return a usable decision. In standalone mode, an already configured structured LLM provides that fallback. Jev does not replace generative models used to draft resumes, cover letters, or interview materials.
 
-Agent-managed setup does not ask whether the user has Jev. It reuses an already configured Jev capability when discoverable; otherwise it selects the current Agent as the semantic reviewer and finishes without another endpoint or key. Standalone CLI/API setup may ask whether Jev is enabled and, when it is, stores only an environment reference such as `env:TYPESAFE_API_KEY`; if Jev is absent, that standalone path may configure an OpenAI-compatible base URL, model name, and API-key environment reference. Literal keys never enter config, prompts, logs, or Git. Before Jev questions, criteria, or thresholds change, the implementation reads the official TypeSafe Agent Skill and current API documentation.
+Agent-managed setup reuses an already configured Jev capability when discoverable; otherwise it selects the current Agent as the semantic reviewer while completing the core gates. After `doctor` passes, the Agent makes one optional Jev offer and asks whether the user wants to enable it. A user who declines, skips the offer, or has no access remains on `host-agent`. If the user chooses Jev, the Agent follows the official TypeSafe console and Skill through a private local credential path; it never asks the user to paste, send, or provide an API key or secret in chat or an Agent prompt. Standalone CLI/API setup may ask whether Jev is enabled and, when it is, stores only an environment reference such as `env:TYPESAFE_API_KEY`; if Jev is absent, that standalone path may configure an OpenAI-compatible base URL, model name, and API-key environment reference. Literal keys never enter config, prompts, logs, or Git. Before Jev questions, criteria, or thresholds change, the implementation reads the official TypeSafe Agent Skill and current API documentation.
 
 The v1 request uses `state`, `model`, and `questions`. Email classification uses one Choice question and reads `answers.classification.choice` plus `confidence`. Explicit rules avoid unnecessary API cost. Ambiguous messages go to Jev first when configured. Missing access, unavailable service, exhausted quota, malformed or unknown output, shadow mode, or low confidence falls back to the current Agent in Agent mode or the configured structured LLM in standalone mode. If that result is also missing, malformed, unknown, or below threshold, the message goes to manual review. HTTP 429 and 529 receive bounded backoff retries; 401 does not retry.
 

@@ -22,6 +22,24 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.18] - 2026-09-19
+
+### Added
+
+- Added one optional Jev enablement offer after the core Agent onboarding gates pass `doctor`
+
+### Changed
+
+- Agent-managed onboarding keeps `host-agent` active unless the user chooses Jev or a configured Jev capability is already discoverable
+
+### Fixed
+
+- Fixed first-run guidance that silently skipped Jev for users who already have access
+
+### Security
+
+- Jev credentials must enter through a private local path; the Agent must never request an API key or secret in chat or an Agent prompt
+
 ## [0.1.0-alpha.17] - 2026-09-19
 
 ### Added
