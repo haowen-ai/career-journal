@@ -18,6 +18,16 @@ export { BUILT_IN_TASKS };
 
 export const REQUIRED_TASK_TYPES = Object.freeze(['mail-sync', 'deadline-review']);
 
+function sharedCodexSchedules(tasks) {
+  const byType = new Map(tasks.map((task) => [task.type, task]));
+  return REQUIRED_TASK_TYPES
+    .filter((type) => byType.has(type))
+    .map((type) => {
+      const task = byType.get(type);
+      return { taskId: task.id, schedule: task.schedule, timezone: task.timezone };
+    });
+}
+
 function normalizeAccountIds(values) {
   return [...new Set((values ?? [])
     .map((value) => String(value ?? '').trim())
@@ -166,12 +176,42 @@ export function markTaskRegistration(db, id, registration) {
   if (requestedExecution?.platform && !['darwin', 'linux', 'win32'].includes(requestedExecution.platform)) {
     throw new Error('Scheduler execution binding platform is unsupported');
   }
+  const registeredAt = registration.registeredAt ?? new Date().toISOString();
+  if (Number.isNaN(Date.parse(registeredAt))) throw new Error('registeredAt must be an ISO timestamp');
   const duplicate = listTasks(db).find((candidate) => candidate.id !== id
     && candidate.config.registration?.driver?.toLowerCase() === driver
     && candidate.config.registration?.externalId === externalId);
-  if (duplicate) throw new Error(`External scheduler ${driver}/${externalId} is already registered to ${duplicate.type}`);
-  const registeredAt = registration.registeredAt ?? new Date().toISOString();
-  if (Number.isNaN(Date.parse(registeredAt))) throw new Error('registeredAt must be an ISO timestamp');
+  let sharedSchedules = null;
+  let duplicateConfig = null;
+  if (duplicate) {
+    const sharedTypes = new Set([task.type, duplicate.type]);
+    const requiredPair = sharedTypes.size === REQUIRED_TASK_TYPES.length
+      && REQUIRED_TASK_TYPES.every((type) => sharedTypes.has(type));
+    const duplicateExecution = duplicate.config.registration?.execution ?? null;
+    const sameExecution = requestedExecution != null
+      && duplicateExecution != null
+      && duplicateExecution.node === requestedExecution.node
+      && duplicateExecution.cli === requestedExecution.cli
+      && duplicateExecution.home === requestedExecution.home
+      && (duplicateExecution.platform ?? null) === requestedExecution.platform;
+    if (driver !== 'codex' || !requiredPair || duplicate.timezone !== task.timezone || !sameExecution) {
+      throw new Error(`External scheduler ${driver}/${externalId} is already registered to ${duplicate.type}; only the two required Codex tasks may share one matching heartbeat`);
+    }
+    sharedSchedules = sharedCodexSchedules([task, duplicate]);
+    duplicateConfig = {
+      ...duplicate.config,
+      registration: {
+        ...duplicate.config.registration,
+        status: 'pending-verification',
+        verified: false,
+        registeredAt: new Date(registeredAt).toISOString(),
+        sharedSchedules,
+        verifiedAt: null,
+        verifier: null,
+        lastExternalRunAt: null,
+      },
+    };
+  }
   const revision = taskBindingRevision(task);
   const previous = task.config.registration;
   const requestedExecutionMatches = requestedExecution == null
@@ -202,6 +242,7 @@ export function markTaskRegistration(db, id, registration) {
       notificationPolicy: task.notificationPolicy,
       bindingRevision: revision,
       execution: requestedExecution ?? (sameVerifiedClaim ? previous.execution ?? null : null),
+      ...(sharedSchedules ? { sharedSchedules } : {}),
       verifiedAt: sameVerifiedClaim ? previous.verifiedAt : null,
       verifier: sameVerifiedClaim ? previous.verifier : null,
       lastExternalRunAt: sameVerifiedClaim
@@ -209,7 +250,20 @@ export function markTaskRegistration(db, id, registration) {
         : null,
     },
   };
-  db.prepare('UPDATE automations SET config_json = ? WHERE id = ?').run(JSON.stringify(config), id);
+  // A shared heartbeat updates two task rows, so keep that pair atomic. The
+  // ordinary one-row path may be called inside the native installer transaction.
+  const startedTransaction = Boolean(duplicateConfig);
+  if (startedTransaction) db.exec('BEGIN IMMEDIATE');
+  try {
+    if (duplicateConfig) {
+      db.prepare('UPDATE automations SET config_json = ? WHERE id = ?').run(JSON.stringify(duplicateConfig), duplicate.id);
+    }
+    db.prepare('UPDATE automations SET config_json = ? WHERE id = ?').run(JSON.stringify(config), id);
+    if (startedTransaction) db.exec('COMMIT');
+  } catch (error) {
+    if (startedTransaction && db.inTransaction) db.exec('ROLLBACK');
+    throw error;
+  }
   return row(db.prepare('SELECT * FROM automations WHERE id = ?').get(id));
 }
 

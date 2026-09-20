@@ -405,6 +405,53 @@ test('Codex scheduler probe requires an exact indefinite daily recurrence', asyn
   }
 });
 
+test('one Codex heartbeat verifies the two required commands and schedules', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-codex-shared-'));
+  const codexHome = path.join(home, 'codex-home');
+  try {
+    await setup(home, {
+      timezone: 'America/Chicago',
+      email: { mode: 'configure', provider: 'host', address: 'candidate@example.test', settings: { connector: 'apple-mail' } },
+      provisionAutomations: true,
+    });
+    const context = await openHomeDatabase(home);
+    for (const task of listTasks(context.db).filter((item) => ['mail-sync', 'deadline-review'].includes(item.type))) {
+      markTaskRegistration(context.db, task.id, {
+        driver: 'codex', externalId: 'career-journal-daily',
+        execution: { node: '/opt/node/bin/node', cli: '/repo/bin/career-journal.mjs', home, platform: 'darwin' },
+      });
+    }
+    const tasks = listTasks(context.db).filter((item) => ['mail-sync', 'deadline-review'].includes(item.type));
+    const commands = tasks.map(codexCommandLineForTask);
+    const directory = path.join(codexHome, 'automations', 'career-journal-daily');
+    const fs = await import('node:fs/promises');
+    await fs.mkdir(directory, { recursive: true });
+    const writeAutomation = (prompt, rrule = 'FREQ=DAILY;BYHOUR=20;BYMINUTE=0,15;BYSECOND=0') => fs.writeFile(
+      path.join(directory, 'automation.toml'),
+      [
+        'version = 1',
+        'id = "career-journal-daily"',
+        'kind = "heartbeat"',
+        `prompt = ${JSON.stringify(prompt)}`,
+        'status = "ACTIVE"',
+        `rrule = ${JSON.stringify(rrule)}`,
+        'target_thread_id = "01a0a64b-06b5-79a1-97fd-1cb60a1f21c7"',
+      ].join('\n'),
+    );
+    await writeAutomation(`At 20:00 run mail-sync; at 20:15 run deadline-review in America/Chicago.\n${commands.join('\n')}`);
+    for (const task of tasks) assert.equal((await probeTaskRegistration(task, { codexHome })).ok, true);
+
+    await writeAutomation(`America/Chicago\n${commands[0]}`);
+    assert.equal((await probeTaskRegistration(tasks[1], { codexHome })).ok, false);
+
+    await writeAutomation(`America/Chicago\n${commands.join('\n')}`, 'FREQ=DAILY;BYHOUR=20;BYMINUTE=0,15,30;BYSECOND=0');
+    for (const task of tasks) assert.equal((await probeTaskRegistration(task, { codexHome })).ok, false);
+    context.db.close();
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
 test('cron and Windows probes require the bound task command in the scheduler output', async () => {
   const db = await import('../../src/storage/database.mjs').then(({ openDatabase, migrate }) => {
     const value = openDatabase(':memory:');

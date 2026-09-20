@@ -3,7 +3,7 @@
 [English](2026-09-19-job-search-ops-prd-design.en.md) | [简体中文](2026-09-19-job-search-ops-prd-design.md)
 
 **Status:** Review Draft
-**Version:** 0.20
+**Version:** 0.21
 **Date:** 2026-09-19
 **Product:** CAREER JOURNAL
 **Delivery:** Open-source GitHub project with an Agent-managed edition and a provider-neutral LLM API edition
@@ -129,7 +129,7 @@ The shared core contains deterministic behavior only:
 
 ### 7.2 Codex adapter
 
-The root instructions and repository-local `career-journal` Skill bootstrap the Codex edition. Before reading local instructions, the Agent must fetch the current upstream state and either fast-forward a clean checkout or use a fresh isolated clone. Initialization then inspects dependencies, creates ignored local config and data, and discovers signed-in host mail accounts before asking any mailbox setup question. Apple Mail discovery uses the main window and expanded `All Inboxes` account rows, not the selected message, and cross-checks Mail Settings > Accounts when display labels hide addresses. The Agent lets the user select one or more accounts only after the inventory is complete, records trusted-host evidence after observing each selected account, completes an initial read-only sync, creates and probes both required daily jobs in the computer-detected time zone, and uses host PDF, Documents, browser, and automation capabilities when appropriate. Onboarding stays incomplete until `doctor` confirms fresh verification and sync for every selected mailbox plus two live scheduler probes and matching runs.
+The root instructions and repository-local `career-journal` Skill bootstrap the Codex edition. Before reading local instructions, the Agent must fetch the current upstream state and either fast-forward a clean checkout or use a fresh isolated clone. Initialization then inspects dependencies, creates ignored local config and data, and discovers signed-in host mail accounts before asking any mailbox setup question. Apple Mail discovery uses the main window and expanded `All Inboxes` account rows, not the selected message, and cross-checks Mail Settings > Accounts when display labels hide addresses. The Agent lets the user select one or more accounts only after the inventory is complete. The Agent itself acts as the host mail connector, records trusted-host evidence, builds and imports bounded read-only batches, and completes the initial sync without waiting for a separate Apple Mail adapter. Because a Codex task supports one heartbeat, the adapter creates one shared heartbeat for the 20:00 and 20:15 schedules, binds its real ID to both task records, and probes the same saved definition against both exact commands. Onboarding stays incomplete until `doctor` confirms fresh verification and sync for every selected mailbox plus both task probes and matching runs.
 
 ### 7.3 General API adapter
 

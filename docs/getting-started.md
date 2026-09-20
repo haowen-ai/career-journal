@@ -7,7 +7,7 @@
 - Node.js 24 or newer
 - Git for installation and updates
 - A real read-only mailbox connection. Agent-managed setup can use accounts already signed in to the host mail app; standalone setup can use IMAPS over TLS
-- An AI Agent or scheduler that can create the two required jobs
+- An AI Agent or scheduler that can create the two required schedules
 - The user's choice of which discovered account or accounts are used for job search
 
 ## One-line Agent setup
@@ -18,7 +18,7 @@ Paste this one sentence into Codex, Claude Code, Cursor, or another repository-a
 Get the latest version of CAREER JOURNAL from https://github.com/haowenchen0811/career-journal and set it up automatically; if an existing checkout is present, fast-forward it safely or use a fresh isolated clone, then read the latest AGENTS.md and complete onboarding.
 ```
 
-The Agent first obtains a current checkout, then reads [`AGENTS.md`](../AGENTS.md) and the repository Skill, detects the computer's IANA time zone, configures the selected read-only mailboxes, creates the two required schedules, verifies them, runs them once, and finishes with `doctor`. It then asks the user whether they want to import existing applications. The user only handles an unavoidable login, authorization, account choice, or confirmation of proposed history records.
+The Agent first obtains a current checkout, then reads [`AGENTS.md`](../AGENTS.md) and the repository Skill, detects the computer's IANA time zone, configures the selected read-only mailboxes, creates the two required schedules, verifies them, runs them once, and finishes with `doctor`. In Codex it uses one shared Codex heartbeat for both times. The Agent itself acts as the host mail connector: it reads the selected account through the existing host capability, generates a bounded read-only host sync batch, and imports it with `email sync-host`; it does not wait for a separate Apple Mail adapter. It then asks the user whether they want to import existing applications. The user only handles an unavoidable login, authorization, account choice, or confirmation of proposed history records.
 
 On macOS, the Agent attempts discovery before asking any mailbox setup question. In Apple Mail it raises the main Mail window, shows the sidebar, expands `All Inboxes`, and enumerates every top-level account; the selected message's mailbox is not the complete account inventory. When labels hide addresses, it reads Mail Settings > Accounts without changing settings. If the account counts disagree, it must not report discovery complete. The Agent then asks only which one or more discovered accounts the user uses for job search. If none are accessible, it asks the user to sign in to Apple Mail or another supported mail app and then resumes. Jev does not block setup: reuse an already configured Jev capability when present; otherwise use the current coding Agent. In Agent-managed mode, do not ask whether the user has Jev, and do not ask for a model Base URL, model name, API key, or API-key environment variable. IMAPS and external model credentials belong only to the standalone CLI/API path below.
 
@@ -68,20 +68,20 @@ Setup detects the computer's IANA time zone and provisions these enabled task re
 | 20:00 | `mail-sync` | Verify and read the selected mailbox over TLS, then ingest recruiting updates |
 | 20:15 | `deadline-review` | Review applications in assessment, interview, or offer stages |
 
-The database records above do not wake the process. The commands below are the Codex path; native and other external schedulers are documented under Daily Automations. Create two real Codex jobs. Each must be ACTIVE and its saved definition must contain the correct daily schedule, detected time zone, and exact command binding. Replace the two shell variables below with the returned automation IDs, then register them:
+The database records above do not wake the process. The commands below are the Codex path; native and other external schedulers are documented under Daily Automations. A Codex task supports one heartbeat, so create one shared Codex heartbeat with `FREQ=DAILY;BYHOUR=20;BYMINUTE=0,15;BYSECOND=0`. Its prompt branches on local time: 20:00 performs the read-only host mailbox sync and then runs `mail-sync`; 20:15 runs `deadline-review`, retrying mail first when that day's sync did not succeed. Register the same real automation ID to both task records:
 
 ```sh
-node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURNAL_HOME" --task mail-sync --driver codex --external-id "$MAIL_SYNC_ID"
-node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURNAL_HOME" --task deadline-review --driver codex --external-id "$DEADLINE_REVIEW_ID"
+node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURNAL_HOME" --task mail-sync --driver codex --external-id "$DAILY_AUTOMATION_ID"
+node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURNAL_HOME" --task deadline-review --driver codex --external-id "$DAILY_AUTOMATION_ID"
 ```
 
-Each registration prints `codexCommandLine`. Before verification, update the matching heartbeat prompt so that returned string appears verbatim as a standalone line and the prompt states the detected IANA time zone. Then probe the saved jobs and trigger each one once:
+Each registration prints one `codexCommandLine`. Put both strings verbatim on separate lines in the shared heartbeat prompt and state the detected IANA time zone. The Agent itself is the host connector: before the mail command it must read the bounded recruiting-message window for every selected account, write one private read-only host sync batch per account, and call `email sync-host`. Then probe the same saved heartbeat against both task records and trigger each command once:
 
 ```sh
 node ./bin/career-journal.mjs automation verify --home "$CAREER_JOURNAL_HOME" --task mail-sync
 node ./bin/career-journal.mjs automation verify --home "$CAREER_JOURNAL_HOME" --task deadline-review
-node ./bin/career-journal.mjs automation run --id career-journal-mail-sync --home "$CAREER_JOURNAL_HOME" --external-id "$MAIL_SYNC_ID"
-node ./bin/career-journal.mjs automation run --id career-journal-deadline-review --home "$CAREER_JOURNAL_HOME" --external-id "$DEADLINE_REVIEW_ID"
+node ./bin/career-journal.mjs automation run --id career-journal-mail-sync --home "$CAREER_JOURNAL_HOME" --external-id "$DAILY_AUTOMATION_ID"
+node ./bin/career-journal.mjs automation run --id career-journal-deadline-review --home "$CAREER_JOURNAL_HOME" --external-id "$DAILY_AUTOMATION_ID"
 node ./bin/career-journal.mjs doctor --home "$CAREER_JOURNAL_HOME"
 node ./bin/career-journal.mjs start --home "$CAREER_JOURNAL_HOME"
 ```
@@ -110,7 +110,7 @@ $REPO/bin/career-journal.mjs application list --home $CAREER_JOURNAL_HOME --json
 
 ### Agent-managed onboarding
 
-Give the repository URL and one-line setup request to Codex, Claude Code, Cursor, or another repository-aware coding Agent. The Agent discovers signed-in mail accounts, asks which one or more are used for job search, and configures those accounts without asking for IMAP details. It creates the two required ACTIVE jobs in the detected time zone, binds each scheduler ID to its exact command, reads the saved definitions, and runs both once. If Jev is unavailable, the current Agent reviews ambiguous candidates without another model credential. Resume and cover-letter work routes through the separate `careerops-materials` Skill.
+Give the repository URL and one-line setup request to Codex, Claude Code, Cursor, or another repository-aware coding Agent. The Agent discovers signed-in mail accounts, asks which one or more are used for job search, and configures those accounts without asking for IMAP details. In Codex it creates one shared ACTIVE heartbeat containing both required times, binds the same scheduler ID to both exact commands, reads the saved definition, and runs both commands once. The Agent itself acts as the host mail connector and produces the bounded `email sync-host` input from the selected mailbox. If Jev is unavailable, the current Agent reviews ambiguous candidates without another model credential. Resume and cover-letter work routes through the separate `careerops-materials` Skill.
 
 ### Local API and semantic decisions
 
@@ -220,7 +220,7 @@ After the key exists in the environment, run `npm run test:jev-live` for an expl
 
 Setup provisions only `mail-sync` at 20:00 and `deadline-review` at 20:15 in the detected computer time zone. These defaults can be changed explicitly during setup or with `automation configure`. `daily-consolidation` is retained only for upgrade compatibility, and `backup create` remains an optional on-demand command. Neither is created during new onboarding.
 
-The scheduler that actually wakes the process lives outside CAREER JOURNAL. A Codex automation, service scheduler, or API host must create every job. `register-external` records a pending claim after successful creation; it neither creates nor verifies a job. Do not register a placeholder ID.
+The scheduler that actually wakes the process lives outside CAREER JOURNAL. A Codex automation, service scheduler, or API host must create the required schedules. `register-external` records a pending claim after successful creation; it neither creates nor verifies a schedule. Do not register a placeholder ID. Codex uses one shared heartbeat for the required pair; native schedulers may use separate jobs.
 
 - `mail-sync`: run `automation run --id career-journal-mail-sync --home <absolute-home> --external-id <registered-id>` in a host that securely supplies the configured IMAP environment variable
 - `deadline-review`: run `automation run --id career-journal-deadline-review --home <absolute-home> --external-id <registered-id>`
@@ -229,7 +229,7 @@ Each task keeps its own cursor and records success only after its handler finish
 
 ### Codex heartbeat registration
 
-Create each heartbeat first and keep the returned automation ID. Register that ID with driver `codex`; the command returns `codexCommandLine`, built from the absolute Node executable, repository CLI, data home, task ID, and external ID. Update the same heartbeat so its prompt contains that returned string **verbatim as a standalone line**, plus the detected IANA time zone. Do not reconstruct or shorten the command. The prompt for `mail-sync` may name `CAREER_JOURNAL_IMAP_PASSWORD`, but must never contain its value. Run `automation verify`, and then let the heartbeat invoke that exact line once. Verification reads `~/.codex/automations/<id>/automation.toml` and requires an ACTIVE daily job with the matching schedule, time zone, executable, CLI, task ID, data home, and external ID. A pending claim, a screenshot, a lookalike command, or a direct run before verification does not pass this gate.
+Create one shared heartbeat first and keep its automation ID. Register that same ID to `mail-sync` and `deadline-review` with driver `codex`; each command returns a `codexCommandLine` built from the absolute Node executable, repository CLI, data home, task ID, and external ID. Update the shared heartbeat so its prompt contains both returned strings **verbatim as standalone lines**, plus the detected IANA time zone and the local-time branch. Do not reconstruct or shorten either command. The Agent itself is the host connector and must generate and import each read-only host sync batch with `email sync-host` before the mail command. Run `automation verify` for both task records, then let the heartbeat invoke each exact line once. Verification reads `~/.codex/automations/<id>/automation.toml` and requires an ACTIVE daily heartbeat whose two times, time zone, commands, data home, and shared external ID match. A pending claim, screenshot, lookalike command, or direct run before verification does not pass this gate.
 
 ### Native schedulers
 
@@ -270,7 +270,7 @@ career-journal migrate --home ~/job-search --dry-run
 career-journal migrate --home ~/job-search --apply
 ```
 
-Back up before an upgrade, pull a tagged release, run `career-journal update --check`, and apply only the reported migration. The default backup preserves the artifact index and hashes, not the original files. To uninstall, remove both required external scheduler jobs, run `career-journal automation uninstall` for prepared definitions, preserve or export the selected data home, and then delete the cloned repository. Delete the data home only when you also want to remove all local records and archived artifacts.
+Back up before an upgrade, pull a tagged release, run `career-journal update --check`, and apply only the reported migration. The default backup preserves the artifact index and hashes, not the original files. To uninstall from Codex, remove the one shared heartbeat that carries both times; with an OS scheduler, remove the corresponding external jobs. Then run `career-journal automation uninstall` for prepared definitions, preserve or export the selected data home, and delete the cloned repository. Delete the data home only when you also want to remove all local records and archived artifacts.
 
 ### Compatibility with v0.1.0-alpha.5 and earlier
 

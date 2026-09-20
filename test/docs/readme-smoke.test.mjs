@@ -235,3 +235,27 @@ test('Getting Started keeps the mailbox and two-schedule verification contract',
   assert.match(english, /36 hours/i);
   assert.match(chinese, /36 小时/i);
 });
+
+test('Codex onboarding uses one shared heartbeat and the Agent performs host mail sync', async () => {
+  const [agentInstructions, englishSkill, chineseSkill, englishGuide, chineseGuide] = await Promise.all([
+    readFile('AGENTS.md', 'utf8'),
+    readFile('.agents/skills/career-journal/SKILL.md', 'utf8'),
+    readFile('.agents/skills/career-journal/SKILL.zh-CN.md', 'utf8'),
+    readFile('docs/getting-started.md', 'utf8'),
+    readFile('docs/getting-started.zh-CN.md', 'utf8'),
+  ]);
+  for (const document of [agentInstructions, englishSkill, englishGuide]) {
+    assert.match(document, /one shared (?:Codex )?heartbeat/i);
+    assert.match(document, /BYMINUTE=0,15/i);
+    assert.match(document, /Agent (?:itself )?(?:acts as|is) the host (?:mail )?connector/i);
+    assert.match(document, /(?:write|generate)[\s\S]{0,300}(?:read-only )?host sync batch/i);
+    assert.match(document, /email sync-host/i);
+  }
+  for (const document of [chineseSkill, chineseGuide]) {
+    assert.match(document, /一个共享的 Codex heartbeat|单个共享的 Codex heartbeat/);
+    assert.match(document, /BYMINUTE=0,15/);
+    assert.match(document, /Agent 自身就是宿主邮箱连接器|Agent 自己充当宿主邮箱连接器/);
+    assert.match(document, /(?:生成|写入)[\s\S]{0,300}只读同步批次/);
+    assert.match(document, /email sync-host/);
+  }
+});

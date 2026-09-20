@@ -283,7 +283,31 @@ test('external scheduler registration stores an unverified claim and binding rev
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
-test('duplicate external scheduler identity is rejected and registration can be cleared', () => {
+test('one Codex heartbeat can register both required job-search tasks', () => {
+  const db = openDatabase(':memory:'); migrate(db);
+  const mail = upsertTask(db, {
+    type: 'mail-sync', enabled: true, timezone: 'UTC', time: '20:00',
+    accountId: 'host:candidate@example.test', notificationPolicy: 'actionable',
+  });
+  const deadline = upsertTask(db, {
+    type: 'deadline-review', enabled: true, timezone: 'UTC', time: '20:15', notificationPolicy: 'actionable',
+  });
+  const execution = { node: '/opt/node/bin/node', cli: '/repo/bin/career-journal.mjs', home: '/data', platform: 'darwin' };
+  markTaskRegistration(db, mail.id, { driver: 'Codex', externalId: 'career-journal-daily', registeredAt: '2026-09-19T12:00:00.000Z', execution });
+  markTaskRegistration(db, deadline.id, { driver: 'codex', externalId: 'career-journal-daily', registeredAt: '2026-09-19T12:01:00.000Z', execution });
+  const registered = listTasks(db).filter((task) => ['mail-sync', 'deadline-review'].includes(task.type));
+  assert.equal(registered.length, 2);
+  for (const task of registered) {
+    assert.equal(task.config.registration.externalId, 'career-journal-daily');
+    assert.deepEqual(task.config.registration.sharedSchedules, [
+      { taskId: 'career-journal-mail-sync', schedule: '20:00', timezone: 'UTC' },
+      { taskId: 'career-journal-deadline-review', schedule: '20:15', timezone: 'UTC' },
+    ]);
+  }
+  db.close();
+});
+
+test('shared scheduler identity remains restricted to the required Codex pair', () => {
   const db = openDatabase(':memory:'); migrate(db);
   const first = upsertTask(db, { type: 'deadline-review', enabled: true, timezone: 'UTC', time: '20:15', notificationPolicy: 'actionable' });
   const second = upsertTask(db, { type: 'daily-consolidation', enabled: true, timezone: 'UTC', time: '22:00', notificationPolicy: 'actionable' });
@@ -294,7 +318,7 @@ test('duplicate external scheduler identity is rejected and registration can be 
   markTaskRegistration(db, first.id, { driver: 'Codex', externalId: 'shared-id', registeredAt: '2026-09-19T12:00:00.000Z' });
   assert.throws(
     () => markTaskRegistration(db, second.id, { driver: 'codex', externalId: 'shared-id' }),
-    /already registered.*deadline-review/i,
+    /already registered.*deadline-review|shared.*required/i,
   );
   const cleared = clearTaskRegistration(db, first.id);
   assert.equal(cleared.config.registration, undefined);

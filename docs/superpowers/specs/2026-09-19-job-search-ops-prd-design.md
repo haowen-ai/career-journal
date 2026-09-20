@@ -3,7 +3,7 @@
 [English](2026-09-19-job-search-ops-prd-design.en.md) | [简体中文](2026-09-19-job-search-ops-prd-design.md)
 
 **状态：** Review Draft  
-**版本：** 0.20
+**版本：** 0.21
 **日期：** 2026-09-19  
 **产品名称：** CAREER JOURNAL
 **交付形态：** 开源 GitHub 项目，提供 Agent 托管版本和通用 LLM API 版本
@@ -174,9 +174,9 @@ Codex 版本通过根目录 `AGENTS.md` 和仓库内 `career-journal` Skill 启�
 - 检查运行环境和依赖 Skill
 - 创建本地配置和数据目录
 - 导入候选人资料
-- 在提出任何邮箱配置问题前，先识别已经登录的宿主邮箱。Apple Mail 必须使用主窗口和展开后的 `All Inboxes` 账号行完整枚举，不能把当前选中邮件所属邮箱当作全部账号；名称未显示地址时，只读核对 Mail 设置 > 账户。清单完整后才询问用户其中哪一个或多个用于求职；实际观察到账号后记录可信宿主验证，并为每个选中邮箱完成首次只读同步
+- 在提出任何邮箱配置问题前，先识别已经登录的宿主邮箱。Apple Mail 必须使用主窗口和展开后的 `All Inboxes` 账号行完整枚举，不能把当前选中邮件所属邮箱当作全部账号；名称未显示地址时，只读核对 Mail 设置 > 账户。清单完整后才询问用户其中哪一个或多个用于求职。Agent 自身作为宿主邮箱连接器，实际观察账号后记录可信验证，生成并导入有范围限制的只读批次，不等待单独的 Apple Mail 适配器
 - 已经配置 Jev 时直接复用，否则自动使用当前 Agent，不询问 Jev 权限、模型 Base URL、模型名或 API Key
-- 按电脑检测时区实际创建两个必需的每日任务，并探测 Codex heartbeat 或原生 OS 定义
+- 按电脑检测时区实现两个必需时间点。Codex 使用一个共享 heartbeat 承载 20:00 和 20:15 两个分支，把同一真实 ID 登记到两个任务并分别核对准确命令；原生 OS 调度器可以使用独立定义
 - 调用 Codex 可用的文档、PDF、浏览器和自动化能力
 - 在执行前检查所需能力，不把“安装了 Skill”等同于“外部账号已经连接”
 - 在 `career-journal doctor` 确认邮箱实时验证、成功同步、两项必需调度器实时探测和匹配运行之前，不将 onboarding 标记为完成
@@ -283,8 +283,8 @@ README 必须设置清晰可见的 “Built With / Open Source Acknowledgements�
 8. 实际观察到每个选中账号后记录可信宿主验证，并为全部选中邮箱完成首次只读同步
 9. 仅在宿主已经配置 Jev 时复用；否则自动选择 `host-agent`，不询问 Jev 权限、Base URL、模型名或 API Key
 10. 检查 CareerOps 与文档能力
-11. 在检测到的时区中创建两个必需的每日任务：20:00 `mail-sync` 和 20:15 `deadline-review`，记录真实 ID，并用 Codex `automation.toml`、launchd、cron 或 Windows Task Scheduler 的实时输出验证绑定命令
-12. 使用对应 ID 分别触发两个必需任务；邮件任务覆盖全部选中邮箱，并在本地事务提交后分别推进游标
+11. 在检测到的时区中实现两个必需时间点：20:00 `mail-sync` 和 20:15 `deadline-review`。Codex 创建一个共享 heartbeat 并把同一真实 ID 登记到两个任务；其他调度器可以创建独立定义。使用 `automation.toml`、launchd、cron 或 Windows Task Scheduler 的实时输出验证绑定命令
+12. 使用匹配的 ID 分别触发两个必需任务；Agent 作为宿主邮箱连接器，先为全部选中邮箱生成并导入只读批次，再运行邮件任务并在本地事务提交后分别推进游标
 13. 运行 `career-journal doctor` 作为 onboarding 门禁；任一邮箱实时验证、成功同步、调度器探测或匹配运行缺失时，setup 保持未完成
 14. 创建或导入第一条岗位记录
 

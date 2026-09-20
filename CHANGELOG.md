@@ -22,6 +22,26 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.17] - 2026-09-19
+
+### Added
+
+- Added support for registering `mail-sync` and `deadline-review` to one shared Codex heartbeat with exact 20:00 and 20:15 branches
+- Added explicit Agent-hosted Apple Mail synchronization instructions using bounded `email sync-host` batches
+
+### Changed
+
+- Codex onboarding now creates one heartbeat with `BYMINUTE=0,15` and verifies both CAREER JOURNAL task bindings against the same saved definition
+
+### Fixed
+
+- Fixed onboarding failure when Codex allows only one heartbeat for the current task
+- Fixed the incorrect assumption that Agent-managed Apple Mail requires a separate callable adapter
+
+### Security
+
+- Host email remains read-only, batch files stay in the private data workspace, and mailbox credentials are never stored
+
 ## [0.1.0-alpha.16] - 2026-09-19
 
 ### Added

@@ -370,8 +370,7 @@ function parseTopLevelToml(source) {
   return fields;
 }
 
-function rruleMatchesSchedule(rrule, schedule) {
-  const [expectedHour, expectedMinute] = schedule.split(':').map(Number);
+function rruleMatchesSchedules(rrule, schedules) {
   const allowed = new Set(['FREQ', 'INTERVAL', 'BYHOUR', 'BYMINUTE', 'BYSECOND']);
   const fields = new Map();
   for (const token of String(rrule ?? '').split(';')) {
@@ -379,13 +378,21 @@ function rruleMatchesSchedule(rrule, schedule) {
     if (!match || !allowed.has(match[1]) || fields.has(match[1])) return false;
     fields.set(match[1], match[2]);
   }
-  const singleInteger = (value, expected, max) => /^\d{1,2}$/.test(value ?? '')
-    && Number(value) === expected
-    && Number(value) <= max;
+  const integerList = (value, max) => {
+    if (!/^\d{1,2}(?:,\d{1,2})*$/.test(value ?? '')) return null;
+    const values = value.split(',').map(Number);
+    if (values.some((item) => item > max) || new Set(values).size !== values.length) return null;
+    return values;
+  };
+  const hours = integerList(fields.get('BYHOUR'), 23);
+  const minutes = integerList(fields.get('BYMINUTE'), 59);
+  if (!hours || !minutes) return false;
+  const actual = hours.flatMap((hour) => minutes.map((minute) => `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`)).sort();
+  const expected = [...new Set(schedules)].sort();
   return fields.get('FREQ') === 'DAILY'
     && (!fields.has('INTERVAL') || fields.get('INTERVAL') === '1')
-    && singleInteger(fields.get('BYHOUR'), expectedHour, 23)
-    && singleInteger(fields.get('BYMINUTE'), expectedMinute, 59)
+    && actual.length === expected.length
+    && actual.every((value, index) => value === expected[index])
     && (!fields.has('BYSECOND') || fields.get('BYSECOND') === '0');
 }
 
@@ -421,7 +428,11 @@ async function probeCodex(task, options) {
     if (status !== 'ACTIVE') return { ok: false, detail: 'Codex automation must be ACTIVE' };
     const systemTimezone = options.systemTimezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
     if (systemTimezone !== task.timezone) return { ok: false, detail: 'Codex host timezone does not match the task timezone' };
-    if (!rrule || !rruleMatchesSchedule(rrule, task.schedule)) return { ok: false, detail: 'Codex automation schedule does not match the task' };
+    const sharedSchedules = registration.sharedSchedules;
+    const expectedSchedules = Array.isArray(sharedSchedules) && sharedSchedules.length > 1
+      ? sharedSchedules.map((item) => item?.schedule)
+      : [task.schedule];
+    if (!rrule || !rruleMatchesSchedules(rrule, expectedSchedules)) return { ok: false, detail: 'Codex automation schedule does not match the task' };
     const expectedCommand = codexCommandLineForTask(task);
     const commandMatches = Boolean(expectedCommand)
       && prompt.split(/\r?\n/).some((line) => line === expectedCommand);

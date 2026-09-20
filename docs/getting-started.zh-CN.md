@@ -7,7 +7,7 @@
 - Node.js 24 或更新版本
 - Git，用于安装和更新
 - 一个真实、只读的邮箱连接。Agent 模式可以使用宿主邮件应用中已经登录的账号；独立模式可以使用 TLS IMAPS
-- 一个能够按时执行两个必需任务的 Agent 或调度器
+- 一个能够按时执行两个必需时间点的 Agent 或调度器
 - 用户明确选择哪些已识别账号用于求职，可以选择一个或多个
 
 ## 一句话安装
@@ -18,7 +18,7 @@
 请从 https://github.com/haowenchen0811/career-journal 获取最新版本并自动安装配置 CAREER JOURNAL；如果本机已有旧副本，请安全快进，无法安全快进时使用新的隔离副本，然后读取最新 AGENTS.md 并完成首次配置。
 ```
 
-Agent 会先取得最新仓库副本，再读取 [`AGENTS.md`](../AGENTS.md) 和仓库 Skill，检测电脑的 IANA 时区，配置用户选择的只读邮箱，创建并验证两个必需的定时任务，各运行一次，最后执行 `doctor`。技术配置通过后，Agent 会询问用户是否需要导入历史投递。用户只需处理无法代办的登录、授权、账号选择，以及确认待导入的历史记录。
+Agent 会先取得最新仓库副本，再读取 [`AGENTS.md`](../AGENTS.md) 和仓库 Skill，检测电脑的 IANA 时区，配置用户选择的只读邮箱，创建并验证两个必需的时间点，各运行一次，最后执行 `doctor`。在 Codex 中，这两个时间点由一个共享的 Codex heartbeat 承载。Agent 自身就是宿主邮箱连接器：它通过现有宿主能力只读获取选中邮箱的邮件，生成有大小限制的只读同步批次，再使用 `email sync-host` 导入，不需要等待单独的 Apple Mail 适配器。技术配置通过后，Agent 会询问用户是否需要导入历史投递。用户只需处理无法代办的登录、授权、账号选择，以及确认待导入的历史记录。
 
 在 macOS 上，Agent 必须先尝试识别 Apple Mail 邮箱账号，再提出任何邮箱配置问题。打开 Mail 主窗口、显示侧边栏、展开 `All Inboxes`，枚举全部顶层账号；当前选中邮件所属邮箱不能代表完整账号清单。如果界面只显示名称，则以只读方式查看 Mail 设置 > 账户，不修改任何设置。比较两个位置的账号数量；数量不一致时，不得声称发现完整或配置完成。随后只询问用户哪些已识别账号用于求职。如果没有可访问账号，Agent 会请用户登录 Apple Mail 或其他受支持的邮件应用，再继续配置。Jev 不得阻塞首次配置：宿主已经配置时直接复用，否则由当前编程 Agent 复核。Agent 模式不得询问用户是否有 Jev，也不得询问模型 Base URL、模型名、API Key 或 API Key 环境变量名。IMAPS 和外部模型凭据只属于后面的独立 CLI/API 配置。
 
@@ -68,27 +68,27 @@ node ./bin/career-journal.mjs setup \
 | 20:00 | `mail-sync` | 通过 TLS 验证并只读抓取所选邮箱，再导入招聘进展 |
 | 20:15 | `deadline-review` | 检查测评、面试或 Offer 阶段的申请 |
 
-这些数据库记录不会自动执行。使用 Codex 时，还要真正创建两个 heartbeat，并让每个 heartbeat 在正确的本地时间运行对应命令；使用本机或其他调度器时，请参阅“每日自动化”。Codex 中的两个任务都必须处于 `ACTIVE` 状态，保存的定义要包含正确的每日时间、检测到的时区和完整命令。创建后，把下面两个 shell 变量替换成 Codex 返回的 automation ID，再把它们登记到 CAREER JOURNAL：
+这些数据库记录不会自动执行。Codex 的同一任务只能创建一个 heartbeat，因此应创建一个共享的 Codex heartbeat，规则为 `FREQ=DAILY;BYHOUR=20;BYMINUTE=0,15;BYSECOND=0`。prompt 按本地时间执行：20:00 先完成只读邮箱同步，再运行 `mail-sync`；20:15 运行 `deadline-review`，如果当天邮箱同步尚未成功，则先重试邮箱。把同一个真实 automation ID 分别登记到 CAREER JOURNAL 的两个任务：
 
 ```sh
-node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURNAL_HOME" --task mail-sync --driver codex --external-id "$MAIL_SYNC_ID"
-node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURNAL_HOME" --task deadline-review --driver codex --external-id "$DEADLINE_REVIEW_ID"
+node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURNAL_HOME" --task mail-sync --driver codex --external-id "$DAILY_AUTOMATION_ID"
+node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURNAL_HOME" --task deadline-review --driver codex --external-id "$DAILY_AUTOMATION_ID"
 ```
 
-每次登记都会输出 `codexCommandLine`。验证前，编辑对应 heartbeat 的 prompt，把这条字符串完整地单独放在一行中，并写明检测到的 IANA 时区。随后检查 Codex 中实际保存的任务定义，再分别运行一次：
+每次登记都会输出一条 `codexCommandLine`。把两条字符串完整地分行写入同一个 heartbeat prompt，并写明检测到的 IANA 时区。Agent 自己充当宿主邮箱连接器：运行邮件命令前，它必须读取每个选中账号中限定范围的招聘邮件，在私有数据目录中写入每个账号的只读同步批次，再调用 `email sync-host`。随后使用两个任务分别核对同一份 heartbeat 定义，并各运行一次：
 
 ```sh
 node ./bin/career-journal.mjs automation verify --home "$CAREER_JOURNAL_HOME" --task mail-sync
 node ./bin/career-journal.mjs automation verify --home "$CAREER_JOURNAL_HOME" --task deadline-review
-node ./bin/career-journal.mjs automation run --id career-journal-mail-sync --home "$CAREER_JOURNAL_HOME" --external-id "$MAIL_SYNC_ID"
-node ./bin/career-journal.mjs automation run --id career-journal-deadline-review --home "$CAREER_JOURNAL_HOME" --external-id "$DEADLINE_REVIEW_ID"
+node ./bin/career-journal.mjs automation run --id career-journal-mail-sync --home "$CAREER_JOURNAL_HOME" --external-id "$DAILY_AUTOMATION_ID"
+node ./bin/career-journal.mjs automation run --id career-journal-deadline-review --home "$CAREER_JOURNAL_HOME" --external-id "$DAILY_AUTOMATION_ID"
 node ./bin/career-journal.mjs doctor --home "$CAREER_JOURNAL_HOME"
 node ./bin/career-journal.mjs start --home "$CAREER_JOURNAL_HOME"
 ```
 
 IMAPS 邮件处理器会先完成账号认证，再用 `EXAMINE` 以只读方式打开邮箱，并通过 `BODY.PEEK[]` 获取邮件。只有邮件成功写入本地后，系统才会更新 UID 游标；如果邮箱没有新邮件，空结果仍算一次成功同步。
 
-只有 `doctor` 同时通过邮箱和自动化检查，首次配置才算完成。邮箱检查要求最近 36 小时内至少有一次真实的 IMAPS 认证和成功只读同步；自动化检查要求系统能够读取调度器中实际保存的任务定义，而且两个必需任务都曾使用各自登记的外部 ID 成功运行一次。以后再次执行 `setup` 时，已保存的时间、通知策略、启用状态、登记信息和时区都会保留，除非用户明确要求修改。
+只有 `doctor` 同时通过邮箱和自动化检查，首次配置才算完成。邮箱检查要求最近 36 小时内至少有一次真实的 IMAPS 认证或可信宿主验证，以及一次成功只读同步；自动化检查要求系统能够读取调度器中实际保存的定义，而且两个必需任务都曾使用匹配的外部 ID 成功运行一次。在 Codex 中，两项任务可以共享同一个真实 automation ID。以后再次执行 `setup` 时，已保存的时间、通知策略、启用状态、登记信息和时区都会保留，除非用户明确要求修改。
 
 可以在仓库中使用 `node ./bin/career-journal.mjs ...` 或随项目提供的 `./career-journal ...` 启动器。如果当前 Node.js 安装包含 npm，可运行 `npm link` 全局安装 `career-journal` 命令。
 
@@ -98,7 +98,7 @@ IMAPS 邮件处理器会先完成账号认证，再用 `EXAMINE` 以只读方式
 
 ### Agent 自动配置
 
-把仓库地址和一句话安装要求交给 Codex、Claude Code、Cursor 或其他能够读取仓库的编程 Agent。Agent 会先识别已经登录的邮箱账号，只询问哪一个或多个用于求职，不会要求用户填写 IMAP 技术参数。随后按照电脑检测到的时区创建两个必需的 `ACTIVE` heartbeat，并把每个 automation ID 与对应的完整命令绑定。
+把仓库地址和一句话安装要求交给 Codex、Claude Code、Cursor 或其他能够读取仓库的编程 Agent。Agent 会先识别已经登录的邮箱账号，只询问哪一个或多个用于求职，不会要求用户填写 IMAP 技术参数。随后按照电脑检测到的时区创建单个共享的 Codex heartbeat，用两个每日时间点分别运行邮件同步和截止事项检查，并把同一个 automation ID 与两条完整命令绑定。Agent 自身就是宿主邮箱连接器，会为所选邮箱生成 `email sync-host` 所需的只读批次。
 
 完成后，Agent 会重新读取实际保存的自动化定义，检查时间、时区和命令，再分别运行一次。只有每个选中邮箱和两个任务都通过 `doctor`，技术配置才会结束；随后 Agent 会提供先确认再写入的可选历史投递导入。宿主邮箱批次本身不能证明账号身份，Agent 必须在实际看到已登录账号后记录可信宿主验证。简历和求职信任务由独立的 `careerops-materials` Skill 处理。
 
@@ -223,11 +223,11 @@ CAREER JOURNAL 自己不会在后台等待时间并启动任务。Codex 自动�
 
 ### Codex heartbeat 登记
 
-先在 Codex 中创建 heartbeat，并保存返回的 automation ID。再使用 `codex` driver 登记这个 ID。登记命令会返回一条 `codexCommandLine`，其中已经包含 Node 可执行文件的绝对路径、仓库 CLI、数据目录、任务 ID 和外部 ID。
+先在 Codex 中创建一个共享的 heartbeat，并保存返回的 automation ID。再使用 `codex` driver，把同一个 ID 分别登记到 `mail-sync` 和 `deadline-review`。两次登记各返回一条 `codexCommandLine`，其中包含 Node 可执行文件的绝对路径、仓库 CLI、数据目录、任务 ID 和外部 ID。
 
-接着编辑同一个 heartbeat，把返回的字符串**完整地单独放在 prompt 的一行中**，并写明检测到的 IANA 时区；不要自行改写或缩短命令。`mail-sync` 的 prompt 可以写环境变量名 `CAREER_JOURNAL_IMAP_PASSWORD`，但不能包含密码值。然后运行 `automation verify`，再让 heartbeat 使用这条准确命令执行一次。
+接着编辑这个共享 heartbeat，把两条字符串**完整地分别单独放在 prompt 的一行中**，并写明检测到的 IANA 时区和本地时间分支；不要自行改写或缩短命令。Agent 自身就是宿主邮箱连接器，必须先生成并通过 `email sync-host` 导入每个邮箱的只读同步批次，再运行邮件命令。然后分别运行两次 `automation verify`，再让 heartbeat 各执行一次准确命令。
 
-验证过程会读取 `~/.codex/automations/<id>/automation.toml`，确认处于 `ACTIVE` 状态的每日任务在时间、时区、可执行文件、CLI、任务 ID、数据目录和外部 ID 上完全一致。仅仅登记一个待验证 ID、提供截图、使用相似命令，或在验证之前直接运行任务，都不能通过检查。
+验证过程会读取 `~/.codex/automations/<id>/automation.toml`，确认处于 `ACTIVE` 状态的每日 heartbeat 在两个时间点、时区、两条命令、数据目录和共享外部 ID 上完全一致。仅登记待验证 ID、提供截图、使用相似命令，或在验证之前直接运行任务，都不能通过检查。
 
 ### 本机调度器
 
@@ -272,7 +272,7 @@ career-journal migrate --home ~/job-search --apply
 
 升级前先创建备份，再拉取明确的版本标签，运行 `career-journal update --check`，只执行命令实际列出的迁移。默认备份会保留材料索引和哈希，但不包含材料原文件。
 
-卸载时，先从 Codex 或操作系统中删除两个必需的外部调度任务，再对生成的定义运行 `career-journal automation uninstall`。确认已经保留或导出所需数据后，才能删除克隆的仓库。只有确实希望清除全部本地申请记录和归档材料时，才删除数据目录。
+卸载时，先从 Codex 中删除承载两个时间点的共享 heartbeat；使用操作系统调度器时，则删除对应的外部任务。随后对生成的定义运行 `career-journal automation uninstall`。确认已经保留或导出所需数据后，才能删除克隆的仓库。只有确实希望清除全部本地申请记录和归档材料时，才删除数据目录。
 
 ### 兼容 v0.1.0-alpha.5 及更早版本
 

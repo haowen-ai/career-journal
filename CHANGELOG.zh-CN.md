@@ -22,6 +22,26 @@
 
 - 无
 
+## [0.1.0-alpha.17] - 2026-09-19
+
+### 新增
+
+- 支持把 `mail-sync` 和 `deadline-review` 登记到同一个 Codex heartbeat，并严格对应 20:00 与 20:15 两个分支
+- 明确 Agent 通过有范围限制的 `email sync-host` 批次完成 Apple Mail 只读同步
+
+### 变更
+
+- Codex 首次配置改为创建一个含 `BYMINUTE=0,15` 的 heartbeat，并使用同一份实际定义验证两个 CAREER JOURNAL 任务绑定
+
+### 修复
+
+- 修复当前 Codex 任务只能创建一个 heartbeat 时无法完成首次配置的问题
+- 修复 Agent 模式错误等待独立 Apple Mail 适配器的问题
+
+### 安全
+
+- 宿主邮箱保持只读，批次文件保存在私有数据目录，邮箱凭据不会写入 CAREER JOURNAL
+
 ## [0.1.0-alpha.16] - 2026-09-19
 
 ### 新增
