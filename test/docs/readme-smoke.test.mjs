@@ -43,6 +43,16 @@ test('README is a concise product landing page with one Agent setup sentence', a
   assert.match(chinese, /## 一句话安装/);
   assert.match(english, /Codex, Claude Code/i);
   assert.match(chinese, /Codex、Claude Code/);
+  const englishLead = english.slice(0, english.indexOf('## One-line setup'));
+  const chineseLead = chinese.slice(0, chinese.indexOf('## 一句话安装'));
+  assert.match(englishLead, /Jev-first decisions/i, 'Jev must be visible in the English product introduction');
+  assert.match(englishLead, /newly released[\s\S]*early access/i);
+  assert.match(englishLead, /without Jev[\s\S]*current Agent/i);
+  assert.match(englishLead, /https:\/\/typesafe\.ai\/blog\/introducing-system-one-models-and-jev/);
+  assert.match(chineseLead, /Jev 优先判断/, 'Jev 必须出现在中文产品简介中');
+  assert.match(chineseLead, /最新发布[\s\S]*早期体验/);
+  assert.match(chineseLead, /没有 Jev[\s\S]*当前 Agent/);
+  assert.match(chineseLead, /https:\/\/typesafe\.ai\/blog\/introducing-system-one-models-and-jev/);
   for (const readme of [english, chinese]) {
     assert.match(readme, /https:\/\/github\.com\/haowenchen0811\/career-journal/);
     assert.match(readme, /docs\/getting-started/);

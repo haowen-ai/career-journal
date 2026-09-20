@@ -4,6 +4,8 @@
 
 A local-first job-search workspace for people and AI agents. CAREER JOURNAL keeps applications, recruiting evidence, submitted materials, and next actions together without sending the database to a hosted service.
 
+> **Jev-first decisions.** CAREER JOURNAL supports TypeSafe AI's newly released [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev), now in early access, to turn recruiting emails into typed decisions with confidence scores. When enabled, every recruiting email goes to Jev first. Without Jev, the current Agent's language model handles the same review, so the workflow still works.
+
 ## One-line setup
 
 Paste this one sentence into **Codex, Claude Code, Cursor, or another repository-aware coding Agent**:
@@ -27,7 +29,6 @@ The Agent handles cloning, setup, mailbox configuration, local time-zone detecti
 - Discovers signed-in mail accounts, then reads the one or more accounts the user selects in read-only mode
 - Keeps generated drafts, verified files, and the exact submitted resume or cover letter distinct
 - Runs locally with SQLite and a browser dashboard at `http://career-journal.localhost:<port>`
-- Sends every recruiting email to the newly released **Jev** first when Jev is enabled, then falls back in order to a configured language model, local rules, and manual review when Jev is unavailable or cannot return a valid result
 
 ## Built for Agent workflows
 

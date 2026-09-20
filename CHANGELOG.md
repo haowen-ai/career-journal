@@ -22,6 +22,24 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.23] - 2026-09-19
+
+### Added
+
+- Added a prominent Jev-first product callout to both public landing pages, linked to TypeSafe AI's launch announcement
+
+### Changed
+
+- Explained above the setup instructions that enabled Jev evaluates every recruiting email first and that the current Agent's language model keeps the workflow available for users without Jev access
+
+### Fixed
+
+- Fixed the public landing pages hiding Jev support at the end of a feature list instead of presenting it as a core product capability
+
+### Security
+
+- None
+
 ## [0.1.0-alpha.22] - 2026-09-19
 
 ### Added
