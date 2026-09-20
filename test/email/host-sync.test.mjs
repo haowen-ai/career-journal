@@ -217,7 +217,7 @@ test('exact replay is a no-op while a changed replay is a conflict', async () =>
   } finally { context.db.close(); await rm(home, { recursive: true, force: true }); }
 });
 
-test('a Jev outage falls back to the structured LLM and commits the host batch atomically', async () => {
+test('a Jev outage sends every host-sync message to the structured LLM and commits atomically', async () => {
   const { home, context } = await createHostHome();
   try {
     createApplication(context.db, { company: 'Acme', role: 'Data Analyst', status: 'applied' }, '2026-09-19T00:00:00Z');
@@ -241,12 +241,14 @@ test('a Jev outage falls back to the structured LLM and commits the host batch a
       ],
     }));
 
+    let llmCalls = 0;
     const result = await syncHostBatch(context.db, ACCOUNT_ID, retryBatch, {
       jev: { accessState: 'enabled', mode: 'active', threshold: 0.8, decide: async () => { throw new Error('temporary Jev outage'); } },
-      structuredLlm: async () => ({ classification: 'assessment', confidence: 0.91 }),
+      structuredLlm: async () => { llmCalls += 1; return { classification: 'assessment', confidence: 0.91 }; },
     }, '2026-09-19T02:01:00Z');
     assert.equal(result.created, 2);
-    assert.deepEqual(context.db.prepare('SELECT engine FROM decision_traces ORDER BY id').all().map((row) => row.engine).sort(), ['rules', 'structured-llm']);
+    assert.equal(llmCalls, 2);
+    assert.deepEqual(context.db.prepare('SELECT engine FROM decision_traces ORDER BY id').all().map((row) => row.engine), ['structured-llm', 'structured-llm']);
     assert.equal(context.db.prepare('SELECT COUNT(*) count FROM application_events').get().count, 2);
     const committed = context.db.prepare(`SELECT cursor, revision, last_run_id lastRunId, last_batch_hash lastBatchHash,
       last_fetched_at lastFetchedAt FROM email_accounts WHERE id = ?`).get(ACCOUNT_ID);

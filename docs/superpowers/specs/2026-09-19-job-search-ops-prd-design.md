@@ -228,7 +228,7 @@ interface ModelProvider {
 | DOCX 创建与检查 | Documents Skill / document adapter | 可选 | 用户要求 DOCX | 提供可用格式或提示启用依赖 |
 | 邮件读取 | Agent 模式使用已识别的只读宿主账号和可信宿主证明；独立模式使用内置只读 IMAPS 客户端 | onboarding 必需 | 选择只读求职邮箱并执行首次同步 | setup 保持未完成；手动 EML 和没有实际观察账号证明的宿主 JSON 不能替代实时验证 |
 | 定时任务 | Codex Automation、可探测的操作系统调度器或符合同一契约的宿主 | onboarding 必需 | 注册两个必需的每日任务 | 单纯 `register-external` 仅形成待验证声明；探测失败时 setup 保持未完成 |
-| Jev 决策 | TypeSafe adapter / `typesafe-ai` Skill | 配置后作为主要语义引擎 | 用户已获得 Jev 权限并启用 | 明确规则、已配置的大语言模型，然后人工复核 |
+| Jev 决策 | TypeSafe adapter / `typesafe-ai` Skill | 启用后作为主要语义判断工具，先判断每封求职邮件 | 用户已获得 Jev 权限并启用 | 已配置的大语言模型、本地规则，然后人工复核 |
 | Wiki / 长期知识 | Wiki adapter | 可选 | 用户主动启用跨任务知识库 | 使用项目本地配置与证据库 |
 
 开发与安装阶段使用的 Skill，例如 Skill Creator、Skill Installer 或宿主产品文档 Skill，不应伪装为最终用户的运行时硬依赖；但安装器必须记录它们生成或安装了哪些运行时组件。
@@ -540,7 +540,7 @@ README 首页必须以一句话安装指令开头。用户把这句话交给 Cod
 
 ### 13.1 定位
 
-TypeSafe AI 于 2026 年 9 月 15 日开放 Jev early access。CAREER JOURNAL 已完成适配，并在用户配置后把 Jev 作为主要语义决策引擎，以便及时支持新出现的决策技术。固定规则先处理明确、可检查的场景；Jev 处理需要语义理解的模糊场景。Agent 模式没有 Jev 或 Jev 无法给出可用结果时，由当前 Agent 复核；独立模式可以改用用户已配置的大语言模型。Jev 不替代生成 Resume、Cover Letter 或面试材料的大语言模型。
+TypeSafe AI 于 2026 年 9 月 15 日开放 Jev early access。CAREER JOURNAL 已完成适配。用户启用 Jev 后，每封求职邮件都先由 Jev 判断。Jev 无法给出可用结果时，再使用已配置的大语言模型、本地规则和人工复核。Jev 不替代用来生成 Resume、Cover Letter 或面试材料的大语言模型。
 
 适合的使用场景：
 
@@ -564,8 +564,8 @@ decision_engine:
     secret_ref: env:TYPESAFE_API_KEY
     threshold: 0.8
   fallback:
-    - deterministic_rules
     - structured_llm
+    - deterministic_rules
     - manual_review
 ```
 
@@ -573,9 +573,9 @@ decision_engine:
 
 ### 13.3 Fallback 和安全门
 
-- 明确规则先运行，以减少费用并保持可解释性
-- 配置 Jev 后，模糊邮件优先交给 Jev；没有 Jev，或者 Jev 不可用、额度不足、格式错误、处于 `shadow` 模式、结果未知或置信度不足时，Agent 模式由当前 Agent 复核，独立模式改用已配置的大语言模型
-- 大语言模型未配置、返回格式错误、结果未知或置信度不足时，邮件进入人工复核
+- 启用 Jev 后，每封求职邮件都先交给 Jev
+- Jev 不可用、额度不足、格式错误、处于 `shadow` 模式、结果未知或置信度不足时，再使用已配置的大语言模型
+- 大语言模型未配置或无法给出可用结果时，本地规则处理含义明确、可以直接核对的场景；其余邮件进入人工复核
 - 429 和 529 按有限指数退避重试；401 不重试
 - Jev 和大语言模型输出只产生候选决策，必须通过 schema 和状态机验证
 - 关键事件需保留原始邮件或用户确认，不能仅凭 Jev 分数更新

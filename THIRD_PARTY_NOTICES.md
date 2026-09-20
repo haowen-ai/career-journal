@@ -21,7 +21,7 @@ No career-ops source code is copied into this repository. Users install it separ
 - License: MIT; preserved in `LICENSES/typesafe-ai-skills-MIT.txt`
 - Use here: agent guidance for the primary Jev semantic decision adapter when a user configures access; no access is assumed
 
-No TypeSafe Agent Skill source code is copied into this repository. The tracker continues to work without Jev, while ambiguous semantic decisions are queued for manual review instead of falling back to a generic LLM.
+No TypeSafe Agent Skill source code is copied into this repository. The tracker continues to work without Jev. When Jev is enabled, it evaluates every recruiting email first; configured language models, local rules, and manual review provide the fallback path.
 
 ## Tabler Icons
 

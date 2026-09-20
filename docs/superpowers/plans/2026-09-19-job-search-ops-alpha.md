@@ -251,7 +251,7 @@ test('does not invent an email account', async () => {
 - [ ] **Step 2: Run tests and confirm missing provider implementation**
 - [ ] **Step 3: Implement an OpenAI-compatible adapter behind the provider interface without domain imports**
 - [ ] **Step 4: Write failing router tests for deterministic classification, Jev waitlisted state, shadow mode, low-confidence fallback, and schema rejection**
-- [ ] **Step 5: Implement rules-first routing, optional TypeSafe `v1/systemone` adapter, shadow traces, and structured-LLM fallback**
+- [ ] **Step 5: Implement Jev-first routing, optional TypeSafe `v1/systemone` adapter, shadow traces, structured-LLM fallback, and final local-rule fallback**
 - [ ] **Step 6: Run targeted tests and full suite**
 - [ ] **Step 7: Commit with `feat: add provider and decision adapters`**
 
@@ -349,4 +349,3 @@ test('does not invent an email account', async () => {
 - [ ] **Step 5: Clone the public tag into a new directory and run `scripts/fresh-clone-smoke.sh` against the GitHub URL**
 - [ ] **Step 6: Record fresh-clone evidence, discovered issues, fixes, and the next version decision in `docs/dogfood/0.1.0-alpha.1.md`**
 - [ ] **Step 7: Re-run final verification and report the repository URL, tag, tested commands, known limitations, and new-user test path**
-

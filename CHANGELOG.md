@@ -22,6 +22,25 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.22] - 2026-09-19
+
+### Added
+
+- Added regression coverage proving that enabled Jev and configured structured-LLM providers evaluate recruiting emails before local rules
+
+### Changed
+
+- Jev now evaluates every recruiting email first when enabled; unusable Jev results fall back to the configured structured LLM, then local rules, and finally manual review
+- Rewrote the public Chinese README with a DeepSeek editorial pass and simplified the Chinese onboarding guide and Skill copy for everyday readers
+
+### Fixed
+
+- Removed documentation and runtime behavior that could bypass Jev for emails already recognized by deterministic rules
+
+### Security
+
+- Jev credentials remain in the configured private secret store and are never added to Git, prompts, logs, exports, or backups
+
 ## [0.1.0-alpha.21] - 2026-09-19
 
 ### Added

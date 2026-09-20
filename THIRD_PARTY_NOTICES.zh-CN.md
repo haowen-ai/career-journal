@@ -21,7 +21,7 @@ CAREER JOURNAL 会对它所集成的独立开源成果保留完整署名。在�
 - 许可证：MIT；原文保存于 `LICENSES/typesafe-ai-skills-MIT.txt`
 - 在本项目中的用途：用户配置权限后，用该 Agent Skill 指导主要 Jev 语义决策适配器；项目不会假设用户已经获得访问权限
 
-本仓库没有复制 TypeSafe Agent Skill 的源代码。未配置 Jev 时仍可使用记录功能；模糊语义决策会进入人工复核，不会回退通用大模型。
+本仓库没有复制 TypeSafe Agent Skill 的源代码。未配置 Jev 时仍可使用记录功能。启用 Jev 后，每封求职邮件都先交给 Jev；已配置的大语言模型、本地规则和人工复核负责后续兜底。
 
 ## Tabler Icons
 

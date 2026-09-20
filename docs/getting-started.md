@@ -116,7 +116,7 @@ Give the repository URL and one-line setup request to Codex, Claude Code, Cursor
 
 ### Local API and semantic decisions
 
-Run `career-journal start --home <data-directory>` for the loopback dashboard and JSON API. The standalone path uses the built-in IMAPS client plus a scheduler that can securely expose named environment variables to `mail-sync`. `automation install` can install and probe `deadline-review` on macOS, Linux, or Windows; the current alpha refuses native installation of `mail-sync` because those generated definitions do not yet have a safe cross-platform secret provider. Explicit deterministic rules run first at no model cost. The newly released Jev is preferred when configured. Standalone deployments can fall back to a configured structured LLM; Agent-managed deployments use the current Agent. Every result remains review evidence and never changes an application status by itself.
+Run `career-journal start --home <data-directory>` for the loopback dashboard and JSON API. The standalone path uses the built-in IMAPS client plus a scheduler that can securely expose named environment variables to `mail-sync`. `automation install` can install and probe `deadline-review` on macOS, Linux, or Windows; the current alpha refuses native installation of `mail-sync` because those generated definitions do not yet have a safe cross-platform secret provider. When Jev is enabled, every recruiting email goes to Jev first. If Jev is unavailable or cannot return a valid high-confidence decision, CAREER JOURNAL tries the configured structured LLM, then local rules, and finally manual review. Every result remains review evidence and never changes an application status by itself.
 
 ## Email Integration
 
@@ -210,11 +210,10 @@ The `careerops-materials` Skill loads the built-in defaults and every configured
 
 ## Decision Providers
 
-- **Deterministic rules:** handle explicit, reviewable cases first and avoid unnecessary API cost
-- **Jev:** the primary semantic classifier for ambiguous recruiting messages. TypeSafe AI released it in early access on September 15, 2026. Configure access with `--jev-secret-ref env:TYPESAFE_API_KEY`; the v1 adapter sends `state` plus one typed Choice question and validates the returned choice and confidence
-- **Current Agent:** the default Agent-managed fallback when Jev is unavailable; no additional endpoint or API key is needed
-- **Structured LLM fallback:** an optional standalone CLI/API path. Configure an OpenAI-compatible service with `--model-provider openai-compatible --model-base-url <url> --model-name <model> --model-secret-ref env:MODEL_API_KEY`
-- **Manual review:** receives decisions when no configured path returns a valid, confident classification
+- **Jev first:** The newly released Jev entered TypeSafe AI early access on September 15, 2026. Once enabled, every recruiting email goes to Jev. Configure access with `--jev-secret-ref env:TYPESAFE_API_KEY`; the v1 adapter sends `state` plus one typed Choice question and validates the returned choice and confidence
+- **Structured LLM fallback:** used when Jev is unavailable, errors, or returns an invalid or low-confidence result. Standalone CLI/API mode can configure it with `--model-provider openai-compatible --model-base-url <url> --model-name <model> --model-secret-ref env:MODEL_API_KEY`
+- **Local-rule fallback:** used after semantic providers are unavailable or fail, for explicit cases the application can verify directly
+- **Manual review:** used only when the earlier paths cannot return a reliable decision
 
 After the key exists in the environment, run `npm run test:jev-live` for an explicit three-request contract and classification smoke test. It reports classifications, confidence, and token usage without printing the key. This live test is never part of the ordinary offline test suite or daily automation, so it cannot spend credit silently.
 

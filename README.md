@@ -27,7 +27,7 @@ The Agent handles cloning, setup, mailbox configuration, local time-zone detecti
 - Discovers signed-in mail accounts, then reads the one or more accounts the user selects in read-only mode
 - Keeps generated drafts, verified files, and the exact submitted resume or cover letter distinct
 - Runs locally with SQLite and a browser dashboard at `http://career-journal.localhost:<port>`
-- Uses deterministic rules first, newly released **Jev** when available, and the current Agent for ambiguous cases without another model key
+- Sends every recruiting email to the newly released **Jev** first when Jev is enabled, then falls back in order to a configured language model, local rules, and manual review when Jev is unavailable or cannot return a valid result
 
 ## Built for Agent workflows
 

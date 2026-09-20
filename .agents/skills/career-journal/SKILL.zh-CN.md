@@ -10,7 +10,7 @@
 1. Agent 模式优先使用宿主已有的邮箱能力。在 macOS 上，必须先尝试识别 Apple Mail 邮箱账号，再提出任何邮箱配置问题。打开 Mail 主窗口、显示侧边栏、展开 `All Inboxes`，并枚举全部顶层账号行和账号分区；当前选中邮件所属邮箱不能代表完整账号清单。如果界面只显示账号名称，使用只读方式打开 Mail 设置 > 账户，将名称对应到邮箱地址。比较侧边栏与账户面板的数量；数量不一致时，不得声称发现完整或配置完成。展示全部邮箱地址后，只询问用户其中哪一个或多个用于求职。宿主已经能读取账号时，不要询问 IMAP 主机、用户名、密码或凭据环境变量名。
 2. 如果没有可访问的邮箱账号，请用户先登录 Apple Mail 或其他受支持的邮件应用，然后继续识别。只有用户明确选择独立 CLI/API 模式时，才改用 IMAPS 配置。不得要求用户把 secret 粘贴到对话中。
 3. 将用户选中的每个邮箱配置成只读 `host` 账号，使用 `apple-mail` 等稳定的 connector 名称。宿主集成实际显示并确认对应地址后，使用 `email verify-host` 记录可信宿主验证。一个 `mail-sync` 任务必须覆盖全部选中账号。在 Agent 模式中，Agent 自身就是宿主邮箱连接器，不需要等待单独的 Apple Mail 适配器。生成批次前，先通过 `email list` 读取账号已保存的游标，并将其原样写入 `beforeCursor`。检索时使用小范围重叠窗口，分页读取全部结果，在移动游标前检查重叠窗口中每一封匹配的邮件，并按邮件服务提供的稳定 ID 去重。随后在私有数据目录中为每个账号生成有大小限制的只读同步批次，使用 `email sync-host` 成功导入；导入成功前不得运行 `automation run`。
-4. Jev 是可选增强项，不得阻塞核心配置。如果宿主已经存在可发现、已配置的 Jev 能力，则直接复用；否则先配置 `--model-provider host-agent`，继续完成邮箱和定时任务。核心配置通过 `doctor` 后，主动提供一次可选 Jev 启用选项，询问用户现在是否要使用 Jev。用户跳过、没有权限或不启用时，保留 `host-agent`。用户选择 Jev 时，协助使用官方 [TypeSafe Agent Skill](https://github.com/typesafe-ai/skills/tree/main/skills/typesafe-ai) 和控制台。Agent 模式不得询问 Base URL，也不得要求用户在聊天或 Agent prompt 中粘贴、发送或提供 API Key 或 secret。在 macOS 上，把新建 Key 保存到系统钥匙串，并配置 `keychain:career-journal-typesafe:<本地账户>`；其他系统使用本地私密凭据路径，配置中只保存 secret reference。
+4. 可选的 Jev 配置不得阻塞核心配置。当前环境已经配置 Jev 时直接复用；否则先配置 `--model-provider host-agent`，由当前编程 Agent 负责语义判断，并继续完成邮箱和定时任务。核心配置通过 `doctor` 后，主动询问一次用户是否要启用 Jev。用户选择跳过、没有权限或暂时不启用时，继续使用 `host-agent`。启用后，Jev 是主要语义判断工具，每封求职邮件都先交给它判断；Jev 不可用、报错、置信度不足或输出无效时，再使用已配置的大语言模型，本地规则作为下一层兜底，最后才人工复核。用户选择 Jev 时，协助使用官方 [TypeSafe Agent Skill](https://github.com/typesafe-ai/skills/tree/main/skills/typesafe-ai) 和控制台。Agent 模式不得询问 Base URL，也不得要求用户在聊天或 Agent prompt 中粘贴、发送或提供 API Key 或 secret。在 macOS 上，把新建 Key 保存到系统钥匙串，并配置 `keychain:career-journal-typesafe:<本地账户>`；其他系统使用本地私密凭据路径，配置中只保存 secret reference。
 5. 仓库命令使用 `node ./bin/career-journal.mjs ...` 或 `./career-journal ...`；不要假设全局命令已安装。除非用户明确修改，否则使用电脑检测到的 IANA 时区。
 6. 通过宿主自动化能力实现两个每日时间点：20:00 `mail-sync` 和 20:15 `deadline-review`。Codex 的同一任务只能创建一个 heartbeat，因此要创建一个共享的 Codex heartbeat，规则为 `FREQ=DAILY;BYHOUR=20;BYMINUTE=0,15;BYSECOND=0`。prompt 按本地时间选择分支；如果当天邮件同步尚未成功，20:15 先重试邮件再检查截止事项。在 Codex Desktop 中使用 `automation_update`。不得重复创建，也不得添加 `daily-consolidation` 或定时备份。
 7. 将同一个 Codex automation ID 分别登记到 CAREER JOURNAL 的两个任务，把两条返回的 `codexCommandLine` 原样分行写入同一个 heartbeat prompt，再分别验证并各触发一次。运行邮件命令前，Agent 必须检查全部选中邮箱，写入并通过 `email sync-host` 导入每个邮箱的只读同步批次，成功后才能调用 `automation run`。
@@ -32,9 +32,9 @@
 - Email：Agent 模式使用用户选中的宿主邮箱、`email verify-host` 和 `email sync-host`；独立模式使用 IMAPS；手动 EML 仅为一次性备用方式
 - 定时检查：创建真实宿主 automation，用 `automation register-external` 记录，以相同外部 ID 触发，并通过 `doctor` 验证
 - 跨项目长期知识：仅在用户请求时使用宿主 Wiki 能力
-- Jev：配置后作为主要语义分类器；没有 Jev 时由当前 Agent 复核模糊候选。独立部署可以使用已配置的大语言模型，最终仍由人工确认
+- Jev：启用后先判断每封求职邮件；无法给出可用结果时依次使用已配置的大语言模型、本地规则和人工复核
 
-CareerOps 是由 Santiago Fernández de Valderrama 独立维护、使用 MIT 许可证的 [career-ops-hq/career-ops](https://github.com/career-ops-hq/career-ops) 项目。CAREER JOURNAL 通过仓库内 `careerops-materials` 适配器路由材料任务，并且必须保留上游署名。TypeSafe Agent Skill 由 [TypeSafe AI](https://github.com/typesafe-ai/skills) 独立维护并采用 MIT 许可证，用于指导 Jev 集成，但源代码没有复制进本仓库。未配置 Jev 时，Agent 模式由当前 Agent 处理语义模糊的候选；独立模式可以使用已配置的大语言模型，人工复核是最终回退。
+CareerOps 是由 Santiago Fernández de Valderrama 独立维护、使用 MIT 许可证的 [career-ops-hq/career-ops](https://github.com/career-ops-hq/career-ops) 项目。CAREER JOURNAL 通过仓库内 `careerops-materials` 适配器处理材料任务，并保留上游署名。TypeSafe Agent Skill 由 [TypeSafe AI](https://github.com/typesafe-ai/skills) 独立维护并采用 MIT 许可证，用于指导 Jev 集成，但源代码没有复制进本仓库。没有启用 Jev 时，Agent 模式由当前 Agent 判断邮件；独立模式可以使用已配置的大语言模型，本地规则和人工复核负责最后兜底。
 
 ## 证据规则
 

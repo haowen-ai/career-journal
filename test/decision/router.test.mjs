@@ -3,7 +3,20 @@ import assert from 'node:assert/strict';
 import { decide } from '../../src/decision/router.mjs';
 import { configuredDecisionAdapters } from '../../src/commands/email.mjs';
 
-test('waitlisted Jev is never called and deterministic rules handle known email', async () => {
+test('active Jev evaluates every email before deterministic rules', async () => {
+  let calls = 0;
+  const result = await decide({ kind: 'email-classification', text: 'We would like to schedule an interview' }, {
+    jev: {
+      accessState: 'enabled', mode: 'active', threshold: 0.8,
+      decide: async () => { calls += 1; return { classification: 'assessment', confidence: 0.97 }; },
+    },
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.decision.classification, 'assessment');
+  assert.equal(result.engine, 'jev');
+});
+
+test('waitlisted Jev is never called and rules remain the final local fallback', async () => {
   let calls = 0;
   const result = await decide({ kind: 'email-classification', text: 'We would like to schedule an interview' }, {
     jev: { accessState: 'waitlisted', decide: async () => { calls += 1; } },
@@ -40,9 +53,9 @@ test('low-confidence and malformed Jev decisions fall back to the configured str
   }
 });
 
-test('configured structured LLM is the default semantic engine when Jev is unavailable', async () => {
+test('configured structured LLM evaluates every email when Jev is unavailable', async () => {
   let llmCalls = 0;
-  const result = await decide({ kind: 'email-classification', text: 'Ambiguous' }, {
+  const result = await decide({ kind: 'email-classification', text: 'We would like to schedule an interview' }, {
     structuredLlm: async () => { llmCalls += 1; return { classification: 'offer', confidence: 0.93 }; },
   });
   assert.equal(result.engine, 'structured-llm');

@@ -6,7 +6,7 @@
 
 - Node.js 24 或更新版本
 - Git，用于安装和更新
-- 一个真实、只读的邮箱连接。Agent 模式可以使用宿主邮件应用中已经登录的账号；独立模式可以使用 TLS IMAPS
+- 一个真实、只读的邮箱连接。Agent 模式可以使用电脑邮件应用中已经登录的账号；独立模式可以使用 TLS IMAPS
 - 一个能够按时执行两个必需时间点的 Agent 或调度器
 - 用户明确选择哪些已识别账号用于求职，可以选择一个或多个
 
@@ -18,9 +18,9 @@
 请从 https://github.com/haowenchen0811/career-journal 获取最新版本并自动安装配置 CAREER JOURNAL；如果本机已有旧副本，请安全快进，无法安全快进时使用新的隔离副本，然后读取最新 AGENTS.md 并完成首次配置。
 ```
 
-Agent 会先取得最新仓库副本，再读取 [`AGENTS.md`](../AGENTS.md) 和仓库 Skill，检测电脑的 IANA 时区，配置用户选择的只读邮箱，创建并验证两个必需的时间点，各运行一次，最后执行 `doctor`。在 Codex 中，这两个时间点由一个共享的 Codex heartbeat 承载。Agent 自身就是宿主邮箱连接器：它通过现有宿主能力只读获取选中邮箱的邮件，生成有大小限制的只读同步批次，再使用 `email sync-host` 导入，不需要等待单独的 Apple Mail 适配器。技术配置通过后，Agent 会询问用户是否需要导入历史投递。用户只需处理无法代办的登录、授权、账号选择，以及确认待导入的历史记录。
+Agent 会先取得最新仓库副本，再读取 [`AGENTS.md`](../AGENTS.md) 和仓库 Skill，检测电脑的 IANA 时区，配置用户选择的只读邮箱，创建并验证两个每日任务，各运行一次，最后执行 `doctor`。在 Codex 中，这两个时间点由一个共享的 Codex heartbeat 承载。Agent 会直接使用当前环境已有的邮箱能力，只读获取所选邮箱中的招聘邮件，整理成有大小限制的同步批次，再通过 `email sync-host` 导入，不需要等待单独的 Apple Mail 适配器。技术配置通过后，Agent 会询问用户是否需要导入历史投递。用户只需处理无法代办的登录、授权、账号选择，以及确认待导入的历史记录。
 
-在 macOS 上，Agent 必须先尝试识别 Apple Mail 邮箱账号，再提出任何邮箱配置问题。打开 Mail 主窗口、显示侧边栏、展开 `All Inboxes`，枚举全部顶层账号；当前选中邮件所属邮箱不能代表完整账号清单。如果界面只显示名称，则以只读方式查看 Mail 设置 > 账户，不修改任何设置。比较两个位置的账号数量；数量不一致时，不得声称发现完整或配置完成。随后只询问用户哪些已识别账号用于求职。如果没有可访问账号，Agent 会请用户登录 Apple Mail 或其他受支持的邮件应用，再继续配置。Jev 不得阻塞核心配置：宿主已经配置时直接复用，否则先由当前编程 Agent 复核。核心配置通过 `doctor` 后，Agent 主动提供一次可选 Jev 启用选项，询问用户现在是否要使用 Jev。用户跳过、没有权限或不启用时，保留 `host-agent`。用户选择 Jev 时，Agent 协助使用官方控制台和 Skill。Agent 模式不得询问 Base URL，也不得要求用户在聊天或 Agent prompt 中粘贴、发送或提供 API Key 或 secret。在 macOS 上，Agent 会把新建 Key 保存到系统钥匙串，CAREER JOURNAL 只接收 `keychain:career-journal-typesafe:<本地账户>` 引用。IMAPS 和外部模型凭据只属于后面的独立 CLI/API 配置。
+在 macOS 上，Agent 必须先识别 Apple Mail 中已经登录的邮箱账号，再提出配置问题。它会打开 Mail 主窗口、显示侧边栏、展开 `All Inboxes`，列出全部顶层账号；当前选中邮件不能代表完整账号清单。如果界面只显示账号名称，Agent 会只读查看 Mail 设置 > 账户，不修改任何设置。两个位置显示的账号数量不一致时，不得声称已经找全或完成配置。接下来，Agent 只询问哪些已识别邮箱用于求职。如果没有可访问的账号，用户先登录 Apple Mail 或其他受支持的邮件应用，Agent 再继续配置。可选的 Jev 配置不会阻塞基础配置：已经配置时直接复用，否则先用当前编程 Agent 完成邮箱和自动化设置。`doctor` 通过后，Agent 会询问一次是否启用 Jev；用户选择跳过、没有权限或暂时不启用时，继续使用 `host-agent`。用户选择启用时，Agent 协助使用官方控制台和 Skill；启用后，每封求职邮件都先交给 Jev 判断。Agent 模式不得询问 Base URL，也不得要求用户在聊天或 Agent prompt 中粘贴、发送或提供 API Key 或 secret。在 macOS 上，Agent 会把新建 Key 保存到系统钥匙串，CAREER JOURNAL 只接收 `keychain:career-journal-typesafe:<本地账户>` 引用。IMAPS 和外部模型凭据只用于后面的独立 CLI/API 配置。
 
 ### 可选的历史投递导入
 
@@ -108,7 +108,7 @@ IMAPS 邮件处理器会先完成账号认证，再用 `EXAMINE` 以只读方式
 
 运行 `career-journal start --home <data-directory>` 可以启动本地看板和 JSON API。通用方案使用内置 IMAPS 客户端，并要求调度器能把指定的 IMAP 和决策服务环境变量安全提供给 `mail-sync`。
 
-在 macOS、Linux 或 Windows 上，`automation install` 目前可以安装并检查 `deadline-review`。独立模式会拒绝直接安装需要凭据的 `mail-sync`，因为自动生成的系统任务还没有安全、跨平台的凭据注入方式。含义明确的邮件先走固定规则；配置 Jev 后优先使用 Jev。Agent 模式没有 Jev 时由当前 Agent 复核，独立模式可以使用已配置的大语言模型。所有结果只生成待审核记录，不会直接改变申请状态。
+在 macOS、Linux 或 Windows 上，`automation install` 目前可以安装并检查 `deadline-review`。独立模式会拒绝直接安装需要凭据的 `mail-sync`，因为自动生成的系统任务还没有安全、跨平台的凭据注入方式。启用 Jev 后，每封求职邮件都先由 Jev 判断。Jev 不可用、报错、置信度不足或输出无效时，再交给已配置的大语言模型；没有可用模型时由本地规则兜底，仍无法确定才进入人工复核。所有结果只生成待审核记录，不会直接改变申请状态。
 
 ## 邮箱集成
 
@@ -204,11 +204,10 @@ career-journal setup --home ~/job-search --material-rules /path/to/personal-resu
 
 ## 招聘邮件如何做判断
 
-- **固定规则：** 先处理含义明确、可以直接检查的场景，避免产生不必要的 API 费用
-- **新发布的 Jev：** TypeSafe AI 于 2026 年 9 月 15 日开放 early access。CAREER JOURNAL 已完成适配，并在用户配置后把 Jev 作为首选语义判断引擎。使用 `--jev-secret-ref env:TYPESAFE_API_KEY` 配置；v1 适配器会发送 `state` 和一个选项固定的 Choice 问题，并检查返回选项与置信度
-- **当前 Agent：** Agent 模式没有 Jev 时的默认处理方式，不需要额外的模型地址或 API Key
-- **大语言模型回退：** 独立 CLI/API 模式的可选能力。配置命令为 `--model-provider openai-compatible --model-base-url <url> --model-name <model> --model-secret-ref env:MODEL_API_KEY`
-- **人工复核：** 没有任何已配置路径能给出格式正确、置信度达标的判断时，由用户复核
+- **Jev 优先：** TypeSafe AI 于 2026 年 9 月 15 日开放了新发布的 Jev early access。用户启用后，每封求职邮件都先交给 Jev。使用 `--jev-secret-ref env:TYPESAFE_API_KEY` 配置；v1 适配器会发送 `state` 和一个选项固定的 Choice 问题，并检查返回选项与置信度
+- **大语言模型兜底：** Jev 不可用、报错、置信度不足或输出无效时，再交给已配置的大语言模型。独立 CLI/API 模式可使用 `--model-provider openai-compatible --model-base-url <url> --model-name <model> --model-secret-ref env:MODEL_API_KEY`
+- **本地规则兜底：** 没有可用的大语言模型，或模型也没有给出可用结果时，再处理含义明确、能够直接核对的场景
+- **人工复核：** 以上方式都无法可靠判断时，由用户确认
 
 在环境变量中提供 Key 后，可以手动运行 `npm run test:jev-live`，用三次真实请求检查 API 格式和分类结果。命令只输出分类、置信度和 token 用量，不会打印 Key。这个测试不会加入普通离线测试或每日自动任务，因此不会在后台自动消耗额度。
 

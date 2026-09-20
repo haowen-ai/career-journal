@@ -4,9 +4,6 @@ import { validateEmailDecision } from './structured-llm.mjs';
 export async function decide(input, adapters = {}) {
   if (input?.kind !== 'email-classification') throw new Error(`Unsupported decision kind: ${input?.kind ?? 'missing'}`);
   const ruleDecision = classifyEmailWithRules(input.text);
-  if (ruleDecision.classification !== 'unknown') {
-    return { decision: ruleDecision, engine: 'rules', applied: true };
-  }
 
   let shadow;
   const jev = adapters.jev;
@@ -41,6 +38,9 @@ export async function decide(input, adapters = {}) {
       && (candidate.confidence ?? 0) >= threshold) {
       return { decision: candidate, engine: 'structured-llm', applied: true, ...(shadow ? { shadow } : {}) };
     }
+  }
+  if (ruleDecision.classification !== 'unknown') {
+    return { decision: ruleDecision, engine: 'rules', applied: true, ...(shadow ? { shadow } : {}) };
   }
   return { decision: ruleDecision, engine: 'manual-review', applied: false, ...(shadow ? { shadow } : {}) };
 }
