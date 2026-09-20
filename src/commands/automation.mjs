@@ -24,6 +24,8 @@ import { syncImapEmailAccount } from '../email/imap-sync.mjs';
 import { isLiveVerifiedEmailAccount, listEmailAccounts } from '../email/accounts.mjs';
 import { configuredDecisionAdapters } from './email.mjs';
 
+const HOST_SYNC_RUN_MAX_AGE_MS = 30 * 60 * 1000;
+
 const automationId = (parsed, tasks = []) => parsed.options.id
   ?? (parsed.options.task ? tasks.find((task) => task.type === parsed.options.task)?.id ?? `career-journal-${parsed.options.task}` : null);
 
@@ -133,11 +135,14 @@ export async function automationCommand(parsed, io, runtime) {
               const reference = Date.now();
               const successfulAt = Date.parse(account.lastSuccessAt ?? '');
               const fetchedAt = Date.parse(account.lastFetchedAt ?? '');
-              const recent = [successfulAt, fetchedAt].every((value) => !Number.isNaN(value)
+              const freshForRun = [successfulAt, fetchedAt].every((value) => !Number.isNaN(value)
                 && value <= reference + 5 * 60 * 1000
-                && reference - value <= 36 * 60 * 60 * 1000);
-              if (!isLiveVerifiedEmailAccount(account) || !recent || account.error) {
+                && reference - value <= HOST_SYNC_RUN_MAX_AGE_MS);
+              if (!isLiveVerifiedEmailAccount(account) || account.error) {
                 throw new Error(`Host mailbox ${account.address} needs a fresh trusted-host verification and read-only sync`);
+              }
+              if (!freshForRun) {
+                throw new Error(`Host mailbox ${account.address} needs a fresh host sync immediately before automation run`);
               }
               results.push({ accountId, changed: 0, created: 0, cursor: account.cursor });
             } else {

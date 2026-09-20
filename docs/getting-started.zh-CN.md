@@ -159,7 +159,7 @@ career-journal email verify-host --home ~/job-search --account host:candidate@ex
 career-journal email sync-host --home ~/job-search --account host:candidate@example.com --file /private/path/mail-batch.json
 ```
 
-`accountId`、`connector` 和 `externalTaskId` 必须分别与已配置邮箱和当前 `mail-sync` 任务的登记信息一致。`beforeCursor` 必须等于 CAREER JOURNAL 已保存的同步位置，`afterCursor` 表示本次获取完成后的新位置，`runId` 必须在每次获取时保持唯一。运行方应使用略有重叠的时间窗口，并按邮件服务返回的邮件 ID 去重。
+`accountId`、`connector` 和 `externalTaskId` 必须分别与已配置邮箱和当前 `mail-sync` 任务的登记信息一致。生成批次前应立即通过 `email list` 读取当前游标，`beforeCursor` 必须原样复制这个已保存的值。`afterCursor` 表示本次获取完成后的新位置，`runId` 必须在每次获取时保持唯一。运行方必须使用略有重叠的时间窗口，分页读完全部结果，在推进游标前检查每一封匹配邮件，并按邮件服务返回的稳定邮件 ID 去重。只有批次成功导入后，才能运行邮件自动任务命令。
 
 CAREER JOURNAL 会拒绝过期或顺序错误的批次，并在同一个数据库事务中写入全部邮件证据和两个同步位置；如果发生并发冲突或处理中途失败，不会留下只写入一部分的数据。`docs/examples/initial-mail-sync.json` 只是合成测试数据，不能证明某个真实连接器或邮箱已经可用。手动导入 EML 仅用于临时补充单封邮件，不能代替每日邮箱同步，也不能让 `doctor` 通过：
 

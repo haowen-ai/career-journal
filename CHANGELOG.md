@@ -22,6 +22,25 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [0.1.0-alpha.20] - 2026-09-19
+
+### Added
+
+- Added regression coverage for host mail runs that try to reuse an earlier sync
+
+### Changed
+
+- Agent mail collection now reads the saved cursor first, uses an overlap window, paginates every result page, and imports every matching message before advancing the cursor
+
+### Fixed
+
+- Prevented `mail-sync` from reporting a successful daily check when the host mailbox had not been synchronized during the preceding 30 minutes
+- Prevented same-day recruiting messages from being silently skipped when a host batch was built from an inferred or stale cursor
+
+### Security
+
+- The stricter mail gate remains read-only and stores no mailbox credentials or authentication links
+
 ## [0.1.0-alpha.19] - 2026-09-19
 
 ### Added
