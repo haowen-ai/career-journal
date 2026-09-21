@@ -21,6 +21,17 @@ import { automationCommand } from '../../src/commands/automation.mjs';
 import { memoryIO } from '../../test-utils/helpers.mjs';
 import { renderScheduler } from '../../src/automation/platform.mjs';
 
+function rollingCoverage(fetchedAt) {
+  const windowEnd = new Date(fetchedAt);
+  return {
+    mode: 'rolling-24h-all-messages',
+    windowStart: new Date(windowEnd.getTime() - 24 * 60 * 60 * 1000).toISOString(),
+    windowEnd: windowEnd.toISOString(),
+    allMessages: true,
+    paginationComplete: true,
+  };
+}
+
 function launchdPrint({
   node = '/opt/node/bin/node',
   cli = '/repo/bin/career-journal.mjs',
@@ -131,6 +142,7 @@ test('doctor rejects recorded runs when the live scheduler probe cannot find the
       afterCursor: 'initial-probe',
       runId: 'initial-probe-run',
       fetchedAt,
+      coverage: rollingCoverage(fetchedAt),
       externalTaskId: 'external-mail-sync',
       messages: [],
     }, {}, fetchedAt);

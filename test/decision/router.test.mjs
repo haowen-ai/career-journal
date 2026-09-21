@@ -14,6 +14,8 @@ test('active Jev evaluates every email before deterministic rules', async () => 
   assert.equal(calls, 1);
   assert.equal(result.decision.classification, 'assessment');
   assert.equal(result.engine, 'jev');
+  assert.equal(result.jevAttempted, true);
+  assert.equal(result.jevOutcome, 'applied');
 });
 
 test('waitlisted Jev is never called and rules remain the final local fallback', async () => {
@@ -24,6 +26,8 @@ test('waitlisted Jev is never called and rules remain the final local fallback',
   assert.equal(calls, 0);
   assert.equal(result.decision.classification, 'interview');
   assert.equal(result.engine, 'rules');
+  assert.equal(result.jevAttempted, false);
+  assert.equal(result.jevOutcome, 'not-enabled');
 });
 
 test('shadow Jev records its candidate and falls back to the configured structured LLM', async () => {
@@ -50,6 +54,7 @@ test('low-confidence and malformed Jev decisions fall back to the configured str
     assert.equal(result.decision.classification, 'application_confirmation');
     assert.equal(result.applied, true);
     assert.equal(llmCalls, 1);
+    assert.equal(result.jevAttempted, true);
   }
 });
 
@@ -78,6 +83,7 @@ test('Jev errors and confident unknown decisions fall back to the configured str
     assert.equal(result.decision.classification, 'assessment');
     assert.equal(result.applied, true);
     assert.equal(llmCalls, 1);
+    assert.equal(result.jevAttempted, true);
   }
 });
 

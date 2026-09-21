@@ -4,7 +4,7 @@
 
 A local-first job-search workspace for people and AI agents. CAREER JOURNAL keeps applications, recruiting evidence, submitted materials, and next actions together without sending the database to a hosted service.
 
-> **Jev-first decisions.** CAREER JOURNAL supports TypeSafe AI's newly released [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev), now in early access, to turn recruiting emails into typed decisions with confidence scores. When enabled, every recruiting email goes to Jev first. Without Jev, the current Agent's language model handles the same review, so the workflow still works.
+> **Jev-first decisions.** CAREER JOURNAL supports TypeSafe AI's newly released [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev), now in early access. Each daily run reads every message received in the user-selected mailboxes during the previous 24 hours, without keyword prefiltering, and sends each message to Jev before deciding whether it is job-search related. Without Jev, the current Agent's language model handles the review, so the workflow still works.
 
 ## One-line setup
 

@@ -22,6 +22,17 @@ import { openHomeDatabase } from '../../src/runtime/home.mjs';
 import { memoryIO } from '../../test-utils/helpers.mjs';
 import { loadConfig } from '../../src/config/store.mjs';
 
+function rollingCoverage(fetchedAt) {
+  const windowEnd = new Date(fetchedAt);
+  return {
+    mode: 'rolling-24h-all-messages',
+    windowStart: new Date(windowEnd.getTime() - 24 * 60 * 60 * 1000).toISOString(),
+    windowEnd: windowEnd.toISOString(),
+    allMessages: true,
+    paginationComplete: true,
+  };
+}
+
 class FakeImapSocket extends Duplex {
   constructor({ rejectLogin = false, messages = {} } = {}) {
     super();
@@ -200,6 +211,7 @@ test('caller-authored host batches cannot advance an IMAP account, even after li
       afterCursor: 'uid-77:42',
       runId: 'imap-run-42',
       fetchedAt: '2026-09-19T12:05:00.000Z',
+      coverage: rollingCoverage('2026-09-19T12:05:00.000Z'),
       externalTaskId: 'imap-mail-sync',
       messages: [],
     };
@@ -330,6 +342,9 @@ test('adding a mailbox clears aggregate task health and keeps independent IMAPS 
 test('email sync-imap CLI completes the live mailbox path and persists verified setup state', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-imap-cli-'));
   try {
+    const syncAt = new Date().toISOString();
+    const registeredAt = new Date(Date.parse(syncAt) - 60 * 60 * 1000).toISOString();
+    const schedulerVerifiedAt = new Date(Date.parse(syncAt) - 59 * 60 * 1000).toISOString();
     await setup(home, {
       timezone: 'UTC',
       email: {
@@ -340,15 +355,16 @@ test('email sync-imap CLI completes the live mailbox path and persists verified 
     });
     const context = await openHomeDatabase(home);
     const task = context.db.prepare("SELECT id FROM automations WHERE task_type = 'mail-sync'").get();
-    markTaskRegistration(context.db, task.id, { driver: 'test', externalId: 'imap-cli-job', registeredAt: '2026-09-19T11:00:00.000Z' });
-    verifyTaskRegistration(context.db, task.id, { method: 'trusted-host', verifiedAt: '2026-09-19T11:01:00.000Z' });
+    markTaskRegistration(context.db, task.id, { driver: 'test', externalId: 'imap-cli-job', registeredAt });
+    verifyTaskRegistration(context.db, task.id, { method: 'trusted-host', verifiedAt: schedulerVerifiedAt });
     context.db.close();
 
     const callerBatch = path.join(home, 'caller-imap-batch.json');
     await writeFile(callerBatch, JSON.stringify({
       accountId: 'imap:student@school.edu', connector: 'imap', readOnly: true,
       beforeCursor: null, afterCursor: 'imap-uid:77:0', runId: 'caller-authored',
-      fetchedAt: '2026-09-19T12:00:00.000Z', externalTaskId: 'imap-cli-job', messages: [],
+      fetchedAt: syncAt, coverage: rollingCoverage(syncAt),
+      externalTaskId: 'imap-cli-job', messages: [],
     }));
     for (const dryRun of [false, true]) {
       await assert.rejects(() => emailCommand({ subcommand: 'sync-host', options: {
@@ -360,7 +376,7 @@ test('email sync-imap CLI completes the live mailbox path and persists verified 
     await emailCommand({ subcommand: 'sync-imap', options: {
       home, account: 'imap:student@school.edu', 'external-task-id': 'imap-cli-job',
     } }, io, { emailCapabilities: {
-      env: { IMAP_PASSWORD: 'app-password' }, openTransport: async () => new FakeImapSocket(), now: '2026-09-19T12:00:00.000Z',
+      env: { IMAP_PASSWORD: 'app-password' }, openTransport: async () => new FakeImapSocket(), now: syncAt,
     } });
     assert.equal(JSON.parse(io.stdout).examined, 0);
     assert.equal((await loadConfig(home)).email.setupState, 'verified');

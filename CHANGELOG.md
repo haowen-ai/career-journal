@@ -22,6 +22,27 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [1.0.1] - 2026-09-20
+
+### Added
+
+- Added a validated host-batch coverage envelope for the complete rolling previous 24 hours, including explicit all-message and pagination-complete attestations
+- Added per-batch decision summaries that show how many new messages were sent to Jev and which fallback engines handled any unusable Jev results
+
+### Changed
+
+- Daily Agent mail review now reads every message received in each selected mailbox during the previous 24 hours before deciding whether it is job-search related
+- Jev now receives every new message in that full window before any fallback decision path; stable message IDs prevent duplicate Jev charges across overlapping daily windows
+
+### Fixed
+
+- Removed company, role, sender, subject, and recruiting-keyword prefilters that could hide an unfamiliar recruiting message before Jev saw it
+- Host sync now rejects incomplete, keyword-filtered, or partially paginated coverage claims instead of advancing the mailbox cursor
+
+### Security
+
+- Full-window mail remains read-only and uses the existing private batch path; credentials and authentication links remain outside Git, prompts, logs, exports, and backups
+
 ## [1.0.0] - 2026-09-20
 
 ### Added

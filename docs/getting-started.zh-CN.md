@@ -18,9 +18,9 @@
 请从 https://github.com/haowen-ai/career-journal 获取最新版本并自动安装配置 CAREER JOURNAL；如果本机已有旧副本，请安全快进，无法安全快进时使用新的隔离副本，然后读取最新 AGENTS.md 并完成首次配置。
 ```
 
-Agent 会先取得最新仓库副本，再读取 [`AGENTS.md`](../AGENTS.md) 和仓库 Skill，检测电脑的 IANA 时区，配置用户选择的只读邮箱，创建并验证两个每日任务，各运行一次，最后执行 `doctor`。在 Codex 中，这两个时间点由一个共享的 Codex heartbeat 承载。Agent 会直接使用当前环境已有的邮箱能力，只读获取所选邮箱中的招聘邮件，整理成有大小限制的同步批次，再通过 `email sync-host` 导入，不需要等待单独的 Apple Mail 适配器。技术配置通过后，Agent 会询问用户是否需要导入历史投递。用户只需处理无法代办的登录、授权、账号选择，以及确认待导入的历史记录。
+Agent 会先取得最新仓库副本，再读取 [`AGENTS.md`](../AGENTS.md) 和仓库 Skill，检测电脑的 IANA 时区，配置用户选择的只读邮箱，创建并验证两个每日任务，各运行一次，最后执行 `doctor`。在 Codex 中，这两个时间点由一个共享的 Codex heartbeat 承载。Agent 会直接使用当前环境已有的邮箱能力，只读获取所选邮箱过去 24 小时内收到的全部邮件，不先用关键词筛选，整理成有大小限制的同步批次，再通过 `email sync-host` 导入，不需要等待单独的 Apple Mail 适配器。技术配置通过后，Agent 会询问用户是否需要导入历史投递。用户只需处理无法代办的登录、授权、账号选择，以及确认待导入的历史记录。
 
-在 macOS 上，Agent 必须先识别 Apple Mail 中已经登录的邮箱账号，再提出配置问题。它会打开 Mail 主窗口、显示侧边栏、展开 `All Inboxes`，列出全部顶层账号；当前选中邮件不能代表完整账号清单。如果界面只显示账号名称，Agent 会只读查看 Mail 设置 > 账户，不修改任何设置。两个位置显示的账号数量不一致时，不得声称已经找全或完成配置。接下来，Agent 只询问哪些已识别邮箱用于求职。如果没有可访问的账号，用户先登录 Apple Mail 或其他受支持的邮件应用，Agent 再继续配置。可选的 Jev 配置不会阻塞基础配置：已经配置时直接复用，否则先用当前编程 Agent 完成邮箱和自动化设置。`doctor` 通过后，Agent 会询问一次是否启用 Jev；用户选择跳过、没有权限或暂时不启用时，继续使用 `host-agent`。用户选择启用时，Agent 协助使用官方控制台和 Skill；启用后，每封求职邮件都先交给 Jev 判断。Agent 模式不得询问 Base URL，也不得要求用户在聊天或 Agent prompt 中粘贴、发送或提供 API Key 或 secret。在 macOS 上，Agent 会把新建 Key 保存到系统钥匙串，CAREER JOURNAL 只接收 `keychain:career-journal-typesafe:<本地账户>` 引用。IMAPS 和外部模型凭据只用于后面的独立 CLI/API 配置。
+在 macOS 上，Agent 必须先识别 Apple Mail 中已经登录的邮箱账号，再提出配置问题。它会打开 Mail 主窗口、显示侧边栏、展开 `All Inboxes`，列出全部顶层账号；当前选中邮件不能代表完整账号清单。如果界面只显示账号名称，Agent 会只读查看 Mail 设置 > 账户，不修改任何设置。两个位置显示的账号数量不一致时，不得声称已经找全或完成配置。接下来，Agent 只询问哪些已识别邮箱用于求职。如果没有可访问的账号，用户先登录 Apple Mail 或其他受支持的邮件应用，Agent 再继续配置。可选的 Jev 配置不会阻塞基础配置：已经配置时直接复用，否则先用当前编程 Agent 完成邮箱和自动化设置。`doctor` 通过后，Agent 会询问一次是否启用 Jev；用户选择跳过、没有权限或暂时不启用时，继续使用 `host-agent`。用户选择启用时，Agent 协助使用官方控制台和 Skill；启用后，过去 24 小时完整批次中的每一封新邮件都会先交给 Jev 判断。Agent 模式不得询问 Base URL，也不得要求用户在聊天或 Agent prompt 中粘贴、发送或提供 API Key 或 secret。在 macOS 上，Agent 会把新建 Key 保存到系统钥匙串，CAREER JOURNAL 只接收 `keychain:career-journal-typesafe:<本地账户>` 引用。IMAPS 和外部模型凭据只用于后面的独立 CLI/API 配置。
 
 ### 可选的历史投递导入
 
@@ -77,7 +77,7 @@ node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURN
 node ./bin/career-journal.mjs automation register-external --home "$CAREER_JOURNAL_HOME" --task deadline-review --driver codex --external-id "$DAILY_AUTOMATION_ID"
 ```
 
-每次登记都会输出一条 `codexCommandLine`。把两条字符串完整地分行写入同一个 heartbeat prompt，并写明检测到的 IANA 时区。Agent 自己充当宿主邮箱连接器：运行邮件命令前，它必须读取每个选中账号中限定范围的招聘邮件，在私有数据目录中写入每个账号的只读同步批次，再调用 `email sync-host`。随后使用两个任务分别核对同一份 heartbeat 定义，并各运行一次：
+每次登记都会输出一条 `codexCommandLine`。把两条字符串完整地分行写入同一个 heartbeat prompt，并写明检测到的 IANA 时区。Agent 自己充当宿主邮箱连接器：运行邮件命令前，它必须读取每个选中账号过去完整 24 小时内收到的全部邮件，不做关键词预筛，在私有数据目录中写入每个账号的只读同步批次，再调用 `email sync-host`。随后使用两个任务分别核对同一份 heartbeat 定义，并各运行一次：
 
 ```sh
 node ./bin/career-journal.mjs automation verify --home "$CAREER_JOURNAL_HOME" --task mail-sync
@@ -108,7 +108,7 @@ IMAPS 邮件处理器会先完成账号认证，再用 `EXAMINE` 以只读方式
 
 运行 `career-journal start --home <data-directory>` 可以启动本地看板和 JSON API。通用方案使用内置 IMAPS 客户端，并要求调度器能把指定的 IMAP 和决策服务环境变量安全提供给 `mail-sync`。
 
-在 macOS、Linux 或 Windows 上，`automation install` 目前可以安装并检查 `deadline-review`。独立模式会拒绝直接安装需要凭据的 `mail-sync`，因为自动生成的系统任务还没有安全、跨平台的凭据注入方式。启用 Jev 后，每封求职邮件都先由 Jev 判断。Jev 不可用、报错、置信度不足或输出无效时，再交给已配置的大语言模型；没有可用模型时由本地规则兜底，仍无法确定才进入人工复核。所有结果只生成待审核记录，不会直接改变申请状态。
+在 macOS、Linux 或 Windows 上，`automation install` 目前可以安装并检查 `deadline-review`。独立模式会拒绝直接安装需要凭据的 `mail-sync`，因为自动生成的系统任务还没有安全、跨平台的凭据注入方式。启用 Jev 后，过去 24 小时完整批次中的每一封新邮件都先由 Jev 判断。Jev 不可用、报错、置信度不足或输出无效时，再交给已配置的大语言模型；没有可用模型时由本地规则兜底，仍无法确定才进入人工复核。所有结果只生成待审核记录，不会直接改变申请状态。
 
 ## 邮箱集成
 
@@ -140,6 +140,13 @@ career-journal email verify-host --home ~/job-search --account host:candidate@ex
   "afterCursor": "provider-cursor-after-this-page",
   "runId": "unique-provider-run-id",
   "fetchedAt": "2026-09-19T01:05:00Z",
+  "coverage": {
+    "mode": "rolling-24h-all-messages",
+    "windowStart": "2026-09-18T01:05:00Z",
+    "windowEnd": "2026-09-19T01:05:00Z",
+    "allMessages": true,
+    "paginationComplete": true
+  },
   "externalTaskId": "the-registered-mail-sync-id",
   "messages": [
     {
@@ -159,7 +166,7 @@ career-journal email verify-host --home ~/job-search --account host:candidate@ex
 career-journal email sync-host --home ~/job-search --account host:candidate@example.com --file /private/path/mail-batch.json
 ```
 
-`accountId`、`connector` 和 `externalTaskId` 必须分别与已配置邮箱和当前 `mail-sync` 任务的登记信息一致。生成批次前应立即通过 `email list` 读取当前游标，`beforeCursor` 必须原样复制这个已保存的值。`afterCursor` 表示本次获取完成后的新位置，`runId` 必须在每次获取时保持唯一。运行方必须使用略有重叠的时间窗口，分页读完全部结果，在推进游标前检查每一封匹配邮件，并按邮件服务返回的稳定邮件 ID 去重。只有批次成功导入后，才能运行邮件自动任务命令。
+`accountId`、`connector` 和 `externalTaskId` 必须分别与已配置邮箱和当前 `mail-sync` 任务的登记信息一致。生成批次前应立即通过 `email list` 读取当前游标，`beforeCursor` 必须原样复制这个已保存的值。`afterCursor` 表示本次获取完成后的新位置，`runId` 必须在每次获取时保持唯一。运行方只能按收件时间读取过去完整 24 小时内的全部邮件，不得先用发件人、公司、岗位、标题、求职关键词或已有申请进行筛选。必须翻完全部结果页、纳入每一封邮件，并按邮件服务返回的稳定邮件 ID 去重。宿主批次必须写明 `rolling-24h-all-messages`、实际起止时间、`allMessages: true` 和 `paginationComplete: true`，否则导入器会拒绝推进游标。启用 Jev 后，批次里的每一封邮件都会先交给 Jev，再由 CAREER JOURNAL 判断是否与求职有关。只有完整批次成功导入后，才能运行邮件自动任务命令。
 
 CAREER JOURNAL 会拒绝过期或顺序错误的批次，并在同一个数据库事务中写入全部邮件证据和两个同步位置；如果发生并发冲突或处理中途失败，不会留下只写入一部分的数据。`docs/examples/initial-mail-sync.json` 只是合成测试数据，不能证明某个真实连接器或邮箱已经可用。手动导入 EML 仅用于临时补充单封邮件，不能代替每日邮箱同步，也不能让 `doctor` 通过：
 
@@ -204,7 +211,7 @@ career-journal setup --home ~/job-search --material-rules /path/to/personal-resu
 
 ## 招聘邮件如何做判断
 
-- **Jev 优先：** TypeSafe AI 于 2026 年 9 月 15 日开放了新发布的 Jev early access。用户启用后，每封求职邮件都先交给 Jev。使用 `--jev-secret-ref env:TYPESAFE_API_KEY` 配置；v1 适配器会发送 `state` 和一个选项固定的 Choice 问题，并检查返回选项与置信度
+- **Jev 优先：** TypeSafe AI 于 2026 年 9 月 15 日开放了新发布的 Jev early access。用户启用后，过去 24 小时完整批次中的每一封邮件都先交给 Jev，再由 CAREER JOURNAL 判断是否与求职有关。使用 `--jev-secret-ref env:TYPESAFE_API_KEY` 配置；v1 适配器会发送 `state` 和一个选项固定的 Choice 问题，并检查返回选项与置信度
 - **大语言模型兜底：** Jev 不可用、报错、置信度不足或输出无效时，再交给已配置的大语言模型。独立 CLI/API 模式可使用 `--model-provider openai-compatible --model-base-url <url> --model-name <model> --model-secret-ref env:MODEL_API_KEY`
 - **本地规则兜底：** 没有可用的大语言模型，或模型也没有给出可用结果时，再处理含义明确、能够直接核对的场景
 - **人工复核：** 以上方式都无法可靠判断时，由用户确认

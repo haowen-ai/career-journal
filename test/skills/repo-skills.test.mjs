@@ -43,11 +43,15 @@ test('career-journal skill has paired English and Simplified Chinese contracts',
   assert.match(english, /\[简体中文\]\(SKILL\.zh-CN\.md\)/);
   assert.match(chinese, /\[English\]\(SKILL\.md\)/);
   assert.match(english, /read the saved cursor[^\n]*beforeCursor/i);
-  assert.match(english, /every matching message[^\n]*overlap window/i);
-  assert.match(english, /paginate[^\n]*all results/i);
+  assert.match(english, /every message received[^\n]*previous 24 hours/i);
+  assert.match(english, /Do not prefilter[^\n]*(?:sender|company|recruiting)/i);
+  assert.match(english, /paginate[^\n]*all result pages/i);
+  assert.match(english, /rolling-24h-all-messages/i);
   assert.match(chinese, /读取[^\n]*已保存[^\n]*游标[^\n]*beforeCursor/i);
-  assert.match(chinese, /重叠窗口[^\n]*每一封[^\n]*匹配/i);
-  assert.match(chinese, /分页[^\n]*全部结果/i);
+  assert.match(chinese, /过去完整 24 小时[^\n]*全部邮件/i);
+  assert.match(chinese, /不得先用[^\n]*(?:发件人|公司|求职关键词)[^\n]*筛选/i);
+  assert.match(chinese, /翻完全部结果页[^\n]*每一封邮件/i);
+  assert.match(chinese, /rolling-24h-all-messages/i);
 
   for (const text of [english, chinese]) {
     assert.match(text, /IMAPS/i);

@@ -65,7 +65,16 @@ export async function prepareMessageImport(db, message, options, adapters = {}) 
   if (existing) return { state: 'existing', result: existing };
   const routed = await decide({ kind: 'email-classification', text: `${message.subject}\n${message.body}` }, adapters);
   const classification = routed.decision.classification;
-  const decision = { ...routed.decision, fingerprint, contentHash, subject: message.subject, from: message.from, ...(routed.shadow ? { shadow: routed.shadow } : {}) };
+  const decision = {
+    ...routed.decision,
+    fingerprint,
+    contentHash,
+    subject: message.subject,
+    from: message.from,
+    jevAttempted: routed.jevAttempted,
+    jevOutcome: routed.jevOutcome,
+    ...(routed.shadow ? { shadow: routed.shadow } : {}),
+  };
   const recordedAt = options.recordedAt ?? new Date().toISOString();
   return {
     state: 'prepared',

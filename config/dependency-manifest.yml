@@ -32,6 +32,9 @@ dependencies:
     account_verification: live-required
     initial_sync: required
     execution_envelope: required
+    daily_window: rolling-24h
+    prefilter: none
+    pagination: complete
     freshness_hours: 36
     credential_storage: environment-reference-only
   automation:

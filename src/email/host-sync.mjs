@@ -8,6 +8,8 @@ import { isCurrentTaskRegistration, taskEmailAccountIds } from '../automation/re
 const MAX_BATCH_BYTES = 5 * 1024 * 1024;
 const MAX_MESSAGES = 200;
 const MAX_MESSAGE_TEXT = 2 * 1024 * 1024;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_COVERAGE_OVERLAP_MS = 60 * 60 * 1000;
 
 function requiredString(value, name, max = MAX_MESSAGE_TEXT) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required`);
@@ -25,6 +27,34 @@ function isoDate(value, name) {
   const timestamp = Date.parse(raw);
   if (Number.isNaN(timestamp)) throw new Error(`${name} must be an ISO date-time`);
   return new Date(timestamp).toISOString();
+}
+
+function rollingCoverage(input, fetchedAt) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('batch.coverage is required');
+  }
+  if (input.mode !== 'rolling-24h-all-messages') {
+    throw new Error('batch.coverage.mode must be rolling-24h-all-messages');
+  }
+  if (input.allMessages !== true) throw new Error('batch.coverage.allMessages must be true');
+  if (input.paginationComplete !== true) throw new Error('batch.coverage.paginationComplete must be true');
+  const windowStart = isoDate(input.windowStart, 'batch.coverage.windowStart');
+  const windowEnd = isoDate(input.windowEnd, 'batch.coverage.windowEnd');
+  const duration = Date.parse(windowEnd) - Date.parse(windowStart);
+  if (duration < DAY_MS || duration > DAY_MS + MAX_COVERAGE_OVERLAP_MS) {
+    throw new Error('batch.coverage must span the complete previous 24 hours with at most one hour of overlap');
+  }
+  const fetchLag = Date.parse(fetchedAt) - Date.parse(windowEnd);
+  if (fetchLag < 0 || fetchLag > 5 * 60 * 1000) {
+    throw new Error('batch.coverage.windowEnd must be no later than five minutes before fetchedAt');
+  }
+  return {
+    mode: input.mode,
+    windowStart,
+    windowEnd,
+    allMessages: true,
+    paginationComplete: true,
+  };
 }
 
 function normalizeMessage(input) {
@@ -90,7 +120,7 @@ function registeredMailTask(db, accountId, externalTaskId) {
   return task;
 }
 
-export function validateHostBatch(input) {
+function validateMailboxBatch(input, { requireCoverage = true } = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Host sync batch must be an object');
   const accountId = requiredString(input.accountId, 'batch.accountId', 512);
   const connector = requiredString(input.connector, 'batch.connector', 128);
@@ -100,6 +130,9 @@ export function validateHostBatch(input) {
   const afterCursor = requiredString(input.afterCursor, 'batch.afterCursor', 4096);
   const runId = requiredString(input.runId, 'batch.runId', 512);
   const fetchedAt = isoDate(input.fetchedAt, 'batch.fetchedAt');
+  const coverage = requireCoverage
+    ? rollingCoverage(input.coverage, fetchedAt)
+    : input.coverage ? rollingCoverage(input.coverage, fetchedAt) : null;
   const externalTaskId = requiredString(input.externalTaskId, 'batch.externalTaskId', 512);
   if (!Array.isArray(input.messages) || input.messages.length > MAX_MESSAGES) {
     throw new Error(`batch.messages must contain at most ${MAX_MESSAGES} items`);
@@ -113,9 +146,14 @@ export function validateHostBatch(input) {
     cursor: afterCursor,
     runId,
     fetchedAt,
+    ...(coverage ? { coverage } : {}),
     externalTaskId,
     messages: input.messages.map(normalizeMessage),
   };
+}
+
+export function validateHostBatch(input) {
+  return validateMailboxBatch(input, { requireCoverage: true });
 }
 
 export async function loadHostBatch(file) {
@@ -125,7 +163,7 @@ export async function loadHostBatch(file) {
 }
 
 async function syncMailboxBatch(db, accountId, rawBatch, adapters, now, expectedProvider) {
-  const batch = validateHostBatch(rawBatch);
+  const batch = validateMailboxBatch(rawBatch, { requireCoverage: expectedProvider === 'host' });
   if (batch.accountId !== accountId) throw new Error('Batch accountId must match the requested account');
   const account = db.prepare(`SELECT id, provider, address, read_only readOnly, cursor, revision,
     last_run_id lastRunId, last_batch_hash lastBatchHash, last_fetched_at lastFetchedAt,
@@ -192,6 +230,15 @@ async function syncMailboxBatch(db, accountId, rawBatch, adapters, now, expected
         recordedAt: now,
       }, adapters));
     }
+    const newMessages = preparedMessages.filter((item) => item.state === 'prepared');
+    const decisionEngines = Object.fromEntries([...new Set(newMessages.map((item) => item.routed.engine))]
+      .sort().map((engine) => [engine, newMessages.filter((item) => item.routed.engine === engine).length]));
+    const decisionSummary = {
+      newMessages: newMessages.length,
+      deduplicated: preparedMessages.length - newMessages.length,
+      jevAttempted: newMessages.filter((item) => item.routed.jevAttempted).length,
+      engines: decisionEngines,
+    };
     db.exec('BEGIN IMMEDIATE');
     try {
       const locked = db.prepare('SELECT revision, cursor FROM email_accounts WHERE id = ?').get(accountId);
@@ -229,6 +276,7 @@ async function syncMailboxBatch(db, accountId, rawBatch, adapters, now, expected
       fetchedAt: batch.fetchedAt,
       examined: batch.messages.length,
       created,
+      decisions: decisionSummary,
       replayed: false,
     };
   } catch (error) {

@@ -4,7 +4,7 @@
 
 CAREER JOURNAL 是一款在本地运行的求职管理工具。你可以自己用，也可以交给 AI Agent 操作。它把投递记录、招聘邮件证据、实际提交的材料和下一步行动放在一起，数据库始终保存在你自己的电脑上。
 
-> **Jev 优先判断。** CAREER JOURNAL 已支持 TypeSafe AI 最新发布、目前处于早期体验阶段的 [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev)。Jev 会把招聘邮件转换成带置信度的结构化判断，供工作流直接使用。启用后，每封求职邮件都会先交给 Jev 判断；没有 Jev 时，系统会自动改用当前 Agent 的大模型能力，基础流程照常运行。
+> **Jev 优先判断。** CAREER JOURNAL 已支持 TypeSafe AI 最新发布、目前处于早期体验阶段的 [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev)。每天检查时，系统会读取用户选中邮箱过去 24 小时内收到的全部邮件，不先用关键词筛选，再把每一封邮件交给 Jev 判断是否与求职有关。没有 Jev 时，系统会改用当前 Agent 的大模型能力，基础流程照常运行。
 
 ## 一句话安装
 

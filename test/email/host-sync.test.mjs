@@ -18,6 +18,9 @@ const ACCOUNT_ID = 'host:candidate@example.test';
 const EXTERNAL_TASK_ID = 'smoke-mail-sync';
 
 function batch(overrides = {}) {
+  const fetchedAt = overrides.fetchedAt ?? '2026-09-19T01:30:00Z';
+  const windowEnd = new Date(fetchedAt);
+  const windowStart = new Date(windowEnd.getTime() - 24 * 60 * 60 * 1000);
   return {
     accountId: ACCOUNT_ID,
     connector: 'gmail',
@@ -25,7 +28,14 @@ function batch(overrides = {}) {
     beforeCursor: null,
     afterCursor: 'gmail-history-101',
     runId: 'gmail-run-101',
-    fetchedAt: '2026-09-19T01:30:00Z',
+    fetchedAt,
+    coverage: overrides.coverage ?? {
+      mode: 'rolling-24h-all-messages',
+      windowStart: windowStart.toISOString(),
+      windowEnd: windowEnd.toISOString(),
+      allMessages: true,
+      paginationComplete: true,
+    },
     externalTaskId: EXTERNAL_TASK_ID,
     messages: [{
       sourceId: 'gmail-message-1',
@@ -36,6 +46,14 @@ function batch(overrides = {}) {
       body: 'Please choose an interview time',
     }],
     ...overrides,
+    fetchedAt,
+    coverage: overrides.coverage ?? {
+      mode: 'rolling-24h-all-messages',
+      windowStart: windowStart.toISOString(),
+      windowEnd: windowEnd.toISOString(),
+      allMessages: true,
+      paginationComplete: true,
+    },
   };
 }
 
@@ -56,16 +74,22 @@ async function createHostHome() {
   return { home, context };
 }
 
-test('host batches require a complete read-only execution envelope', () => {
+test('host batches require a complete rolling-24-hour all-message execution envelope', () => {
   const valid = batch({ messages: [] });
   assert.equal(validateHostBatch(valid).beforeCursor, null);
-  for (const field of ['accountId', 'connector', 'beforeCursor', 'afterCursor', 'runId', 'fetchedAt', 'externalTaskId']) {
+  for (const field of ['accountId', 'connector', 'beforeCursor', 'afterCursor', 'runId', 'fetchedAt', 'coverage', 'externalTaskId']) {
     const invalid = { ...valid };
     delete invalid[field];
     assert.throws(() => validateHostBatch(invalid), new RegExp(field, 'i'));
   }
   assert.throws(() => validateHostBatch({ ...valid, readOnly: false }), /readOnly.*true/i);
   assert.throws(() => validateHostBatch({ ...valid, fetchedAt: 'not-a-date' }), /fetchedAt/i);
+  assert.throws(() => validateHostBatch({ ...valid, coverage: { ...valid.coverage, allMessages: false } }), /allMessages.*true/i);
+  assert.throws(() => validateHostBatch({ ...valid, coverage: { ...valid.coverage, paginationComplete: false } }), /paginationComplete.*true/i);
+  assert.throws(() => validateHostBatch({
+    ...valid,
+    coverage: { ...valid.coverage, windowStart: '2026-09-19T00:30:00Z' },
+  }), /complete previous 24 hours/i);
 });
 
 test('host mailbox sync validates its envelope, imports once, and records replay metadata', async () => {
@@ -241,13 +265,21 @@ test('a Jev outage sends every host-sync message to the structured LLM and commi
       ],
     }));
 
+    let jevCalls = 0;
     let llmCalls = 0;
     const result = await syncHostBatch(context.db, ACCOUNT_ID, retryBatch, {
-      jev: { accessState: 'enabled', mode: 'active', threshold: 0.8, decide: async () => { throw new Error('temporary Jev outage'); } },
+      jev: { accessState: 'enabled', mode: 'active', threshold: 0.8, decide: async () => { jevCalls += 1; throw new Error('temporary Jev outage'); } },
       structuredLlm: async () => { llmCalls += 1; return { classification: 'assessment', confidence: 0.91 }; },
     }, '2026-09-19T02:01:00Z');
     assert.equal(result.created, 2);
+    assert.equal(jevCalls, 2);
     assert.equal(llmCalls, 2);
+    assert.deepEqual(result.decisions, {
+      newMessages: 2,
+      deduplicated: 0,
+      jevAttempted: 2,
+      engines: { 'structured-llm': 2 },
+    });
     assert.deepEqual(context.db.prepare('SELECT engine FROM decision_traces ORDER BY id').all().map((row) => row.engine), ['structured-llm', 'structured-llm']);
     assert.equal(context.db.prepare('SELECT COUNT(*) count FROM application_events').get().count, 2);
     const committed = context.db.prepare(`SELECT cursor, revision, last_run_id lastRunId, last_batch_hash lastBatchHash,

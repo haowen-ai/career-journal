@@ -6,6 +6,13 @@
   "afterCursor": "documentation-smoke-initial-sync",
   "runId": "documentation-smoke-run-1",
   "fetchedAt": "2026-09-19T12:00:00Z",
+  "coverage": {
+    "mode": "rolling-24h-all-messages",
+    "windowStart": "2026-09-18T12:00:00Z",
+    "windowEnd": "2026-09-19T12:00:00Z",
+    "allMessages": true,
+    "paginationComplete": true
+  },
   "externalTaskId": "smoke-mail-sync",
   "messages": []
 }

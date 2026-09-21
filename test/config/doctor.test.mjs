@@ -14,6 +14,17 @@ import { syncImapEmailAccount } from '../../src/email/imap-sync.mjs';
 import { openDatabase, migrate, schemaMigrations } from '../../src/storage/database.mjs';
 import { recordTrustedHostVerification, verifyImapEmailAccount } from '../../src/email/accounts.mjs';
 
+function rollingCoverage(fetchedAt) {
+  const windowEnd = new Date(fetchedAt);
+  return {
+    mode: 'rolling-24h-all-messages',
+    windowStart: new Date(windowEnd.getTime() - 24 * 60 * 60 * 1000).toISOString(),
+    windowEnd: windowEnd.toISOString(),
+    allMessages: true,
+    paginationComplete: true,
+  };
+}
+
 class DoctorImapSocket extends Duplex {
   constructor() {
     super();
@@ -169,6 +180,7 @@ test('host connector JSON remains self-attested and cannot make onboarding healt
       afterCursor: 'initial-probe',
       runId: 'initial-probe-run',
       fetchedAt,
+      coverage: rollingCoverage(fetchedAt),
       externalTaskId: 'external-mail-sync',
       messages: [],
     }, {}, fetchedAt);
@@ -226,7 +238,7 @@ test('doctor requires fresh trusted-host evidence for every selected mailbox', a
       await syncHostBatch(context.db, accountId, {
         accountId, connector: 'apple-mail', readOnly: true,
         beforeCursor: null, afterCursor: `${suffix}-cursor`, runId: `${suffix}-run`,
-        fetchedAt, externalTaskId: 'external-mail-sync', messages: [],
+        fetchedAt, coverage: rollingCoverage(fetchedAt), externalTaskId: 'external-mail-sync', messages: [],
       }, {}, syncedAt);
     }
     for (const task of listTasks(context.db)) {
@@ -273,6 +285,7 @@ test('doctor passes mailbox health only after fresh live IMAPS verification and 
     await assert.rejects(() => syncHostBatch(context.db, 'imap:candidate@school.edu', {
       accountId: 'imap:candidate@school.edu', connector: 'imap', readOnly: true,
       beforeCursor: null, afterCursor: 'imap-uid:9:0', runId: 'imap-live-run', fetchedAt,
+      coverage: rollingCoverage(fetchedAt),
       externalTaskId: 'external-mail-sync', messages: [],
     }, {}, fetchedAt), /host-managed.*account/i);
 
