@@ -239,6 +239,17 @@ async function syncMailboxBatch(db, accountId, rawBatch, adapters, now, expected
       jevAttempted: newMessages.filter((item) => item.routed.jevAttempted).length,
       engines: decisionEngines,
     };
+    const nextSettings = expectedProvider === 'host'
+      ? {
+        ...settings,
+        lastSyncCoverage: {
+          ...batch.coverage,
+          fetchedAt: batch.fetchedAt,
+          newMessages: decisionSummary.newMessages,
+          jevAttempted: decisionSummary.jevAttempted,
+        },
+      }
+      : settings;
     db.exec('BEGIN IMMEDIATE');
     try {
       const locked = db.prepare('SELECT revision, cursor FROM email_accounts WHERE id = ?').get(accountId);
@@ -250,9 +261,10 @@ async function syncMailboxBatch(db, accountId, rawBatch, adapters, now, expected
         if (result.created) created += 1;
       }
       const accountUpdate = db.prepare(`UPDATE email_accounts SET cursor = ?, revision = revision + 1,
-        last_run_id = ?, last_batch_hash = ?, last_fetched_at = ?, last_success_at = ?, error = NULL
+        last_run_id = ?, last_batch_hash = ?, last_fetched_at = ?, last_success_at = ?, config_json = ?, error = NULL
         WHERE id = ? AND revision = ? AND cursor IS ?`)
-        .run(batch.afterCursor, batch.runId, batchHash, batch.fetchedAt, now, accountId, account.revision, currentCursor);
+        .run(batch.afterCursor, batch.runId, batchHash, batch.fetchedAt, now, JSON.stringify(nextSettings),
+          accountId, account.revision, currentCursor);
       if (accountUpdate.changes !== 1) throw new Error('Stale host sync cursor: account changed during processing');
       const taskUpdate = singleAccount
         ? db.prepare(`UPDATE automations SET cursor = ?, last_attempt_at = ?,

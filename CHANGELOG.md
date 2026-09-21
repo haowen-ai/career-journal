@@ -22,6 +22,24 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [1.0.2] - 2026-09-20
+
+### Added
+
+- Persisted the validated rolling-24-hour coverage envelope and Jev-attempt count with each successful host mailbox sync
+
+### Changed
+
+- Doctor now requires current full-window coverage evidence for every selected host mailbox before reporting email or automation health
+
+### Fixed
+
+- Invalidated legacy host-sync timestamps that were created before complete 24-hour, all-message, fully paginated coverage could be proven
+
+### Security
+
+- Coverage evidence contains only window and decision-count metadata; mailbox credentials and message contents remain outside configuration
+
 ## [1.0.1] - 2026-09-20
 
 ### Added

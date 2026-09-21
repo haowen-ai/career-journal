@@ -4,6 +4,7 @@ import { openDatabase, migrate } from '../../src/storage/database.mjs';
 import {
   configureEmailAccount,
   disconnectEmailAccount,
+  hasCompleteHostSyncCoverage,
   isLiveVerifiedEmailAccount,
   listEmailAccounts,
   recordTrustedHostVerification,
@@ -49,6 +50,7 @@ test('trusted host verification proves the selected account without storing mail
     externalId: 'mac-mail-account-1', verifiedAt: '2026-09-19T11:55:00.000Z',
   });
   assert.equal(isLiveVerifiedEmailAccount(verified, '2026-09-19T12:00:00.000Z'), true);
+  assert.equal(hasCompleteHostSyncCoverage(verified), false);
   assert.equal(JSON.stringify(verified).includes('password'), false);
   assert.throws(() => recordTrustedHostVerification(db, account.id, {
     method: 'trusted-host', connector: 'gmail', address: 'candidate@school.edu',

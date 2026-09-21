@@ -259,6 +259,33 @@ test('doctor requires fresh trusted-host evidence for every selected mailbox', a
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
+test('doctor rejects legacy host success timestamps without full 24-hour coverage evidence', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-doctor-legacy-host-'));
+  const now = new Date().toISOString();
+  try {
+    await setup(home, {
+      timezone: 'UTC',
+      email: { mode: 'configure', provider: 'host', address: 'candidate@example.test', settings: { connector: 'apple-mail' } },
+      provisionAutomations: true,
+    });
+    const context = await openHomeDatabase(home);
+    recordTrustedHostVerification(context.db, 'host:candidate@example.test', {
+      method: 'trusted-host', connector: 'apple-mail', address: 'candidate@example.test',
+      externalId: 'legacy-account', verifiedAt: now,
+    });
+    context.db.prepare(`UPDATE email_accounts SET cursor = 'legacy-cursor', last_fetched_at = ?,
+      last_success_at = ?, error = NULL WHERE id = 'host:candidate@example.test'`).run(now, now);
+    context.db.close();
+    const report = await doctor(home, {
+      now, nodeVersion: '24.19.0', storage: async () => ({ ok: true }),
+      careerOps: async () => ({ ok: false, detail: 'optional' }),
+      schedulerProbe: async () => ({ ok: false, detail: 'not relevant' }),
+    });
+    assert.equal(report.checks.find((item) => item.id === 'email').severity, 'fail');
+    assert.match(report.checks.find((item) => item.id === 'email').detail, /no complete rolling-24-hour.*coverage proof/i);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
 test('doctor passes mailbox health only after fresh live IMAPS verification and sync', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-doctor-imap-'));
   try {

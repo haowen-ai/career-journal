@@ -5,7 +5,7 @@ import path from 'node:path';
 import { loadConfig, workspaceDirectory } from '../config/store.mjs';
 import { detectCareerOps } from '../integrations/careerops.mjs';
 import { openReadOnlyDatabase, migrate } from '../storage/database.mjs';
-import { isLiveVerifiedEmailAccount, listEmailAccounts } from '../email/accounts.mjs';
+import { hasCompleteHostSyncCoverage, isLiveVerifiedEmailAccount, listEmailAccounts } from '../email/accounts.mjs';
 import { isCurrentTaskRegistration, listTasks, REQUIRED_TASK_TYPES, taskEmailAccountIds } from '../automation/registry.mjs';
 import { probeTaskRegistration } from '../automation/probe.mjs';
 import { secretReferenceState } from '../secrets/reference.mjs';
@@ -106,20 +106,25 @@ export async function doctor(home, capabilities = {}) {
       && item.lastSuccessAt
       && item.lastFetchedAt
       && !item.error
+      && hasCompleteHostSyncCoverage(item)
       && recent(item.lastSuccessAt, now)
       && recent(item.lastFetchedAt, now));
     const emailUsable = selectedIds.length > 0 && healthyAccounts.length === selectedIds.length;
     const freshHostBatch = hostAccounts.some((item) => item.lastSuccessAt
       && item.lastFetchedAt
       && !item.error
+      && hasCompleteHostSyncCoverage(item)
       && recent(item.lastSuccessAt, now)
       && recent(item.lastFetchedAt, now));
+    const incompleteHostCoverage = hostAccounts.some((item) => item.lastSuccessAt && !hasCompleteHostSyncCoverage(item));
     checks.push({
       id: 'email',
       severity: emailUsable ? 'pass' : 'fail',
       detail: emailUsable
         ? `${healthyAccounts.length} selected read-only mailbox${healthyAccounts.length === 1 ? '' : 'es'} live-verified and synced in the last 36 hours (${[...new Set(healthyAccounts.map((account) => account.provider === 'imap' ? 'IMAPS' : 'trusted host'))].join(', ')})`
-        : freshHostBatch
+        : incompleteHostCoverage
+          ? 'host mailbox has prior sync timestamps but no complete rolling-24-hour all-message coverage proof; run a full paginated sync before advancing health'
+          : freshHostBatch
           ? 'host connector batch is self-attested; caller JSON cannot prove mailbox identity. Pair the connector with a live verifier adapter or configure IMAPS'
           : hostAccounts.length
             ? 'host mailbox is configured but remains self-attested; connect a live verifier adapter or configure IMAPS'
@@ -152,6 +157,7 @@ export async function doctor(home, capabilities = {}) {
   const healthyAccountIds = new Set(accounts
     .filter((account) => isLiveVerifiedEmailAccount(account, new Date(now).toISOString())
       && !account.error
+      && hasCompleteHostSyncCoverage(account)
       && recent(account.lastSuccessAt, now)
       && recent(account.lastFetchedAt, now))
     .map((account) => account.id));

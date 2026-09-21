@@ -120,6 +120,13 @@ test('host mailbox sync validates its envelope, imports once, and records replay
       assert.equal(account.lastRunId, 'gmail-run-101');
       assert.match(account.lastBatchHash, /^[a-f0-9]{64}$/);
       assert.equal(account.lastFetchedAt, '2026-09-19T01:30:00.000Z');
+      const storedSettings = JSON.parse(inspect.db.prepare('SELECT config_json settings FROM email_accounts WHERE id = ?').get(ACCOUNT_ID).settings);
+      assert.deepEqual(storedSettings.lastSyncCoverage, {
+        ...batch().coverage,
+        fetchedAt: '2026-09-19T01:30:00.000Z',
+        newMessages: 1,
+        jevAttempted: 0,
+      });
       const task = inspect.db.prepare('SELECT cursor, config_json configJson FROM automations WHERE task_type = ?').get('mail-sync');
       assert.equal(task.cursor, 'gmail-history-101');
       assert.equal(JSON.parse(task.configJson).registration.lastExternalRunAt, null);

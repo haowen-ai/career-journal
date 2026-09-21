@@ -20,8 +20,21 @@ export function assertPublicEmailAddress(value) {
 }
 
 function baseSettings(settings) {
-  const { verification: _verification, ...base } = settings ?? {};
+  const { verification: _verification, lastSyncCoverage: _lastSyncCoverage, ...base } = settings ?? {};
   return base;
+}
+
+export function hasCompleteHostSyncCoverage(account) {
+  if (account?.provider !== 'host') return true;
+  const coverage = account.settings?.lastSyncCoverage;
+  if (coverage?.mode !== 'rolling-24h-all-messages'
+    || coverage.allMessages !== true
+    || coverage.paginationComplete !== true
+    || !account.lastFetchedAt
+    || coverage.fetchedAt !== account.lastFetchedAt) return false;
+  const start = Date.parse(coverage.windowStart ?? '');
+  const end = Date.parse(coverage.windowEnd ?? '');
+  return !Number.isNaN(start) && !Number.isNaN(end) && end - start >= 24 * 60 * 60 * 1000;
 }
 
 function normalizeSettings(provider, input) {
@@ -110,7 +123,7 @@ export function emailSetupState(accounts, boundAccountIds = null) {
   const liveAccounts = selectedAccounts.filter((account) => isLiveVerifiedEmailAccount(account));
   if (selectedAccounts.length > 0
     && liveAccounts.length === selectedAccounts.length
-    && liveAccounts.every((account) => account.lastSuccessAt && !account.error)) return 'verified';
+    && liveAccounts.every((account) => account.lastSuccessAt && !account.error && hasCompleteHostSyncCoverage(account))) return 'verified';
   if (selectedAccounts.length > 0 && liveAccounts.length === selectedAccounts.length) return 'connected-pending-sync';
   const hostAccounts = selectedAccounts.filter((account) => account.provider === 'host' && account.readOnly && account.settings?.connector);
   if (hostAccounts.some((account) => account.lastSuccessAt && !account.error)) return 'host-attested';
@@ -157,7 +170,11 @@ export function recordTrustedHostVerification(db, id, proof) {
     method: 'trusted-host', connector: settings.connector, address: row.address, externalId, verifiedAt,
   };
   db.prepare('UPDATE email_accounts SET config_json = ?, error = NULL WHERE id = ?')
-    .run(JSON.stringify({ ...baseSettings(settings), verification }), id);
+    .run(JSON.stringify({
+      ...baseSettings(settings),
+      ...(settings.lastSyncCoverage ? { lastSyncCoverage: settings.lastSyncCoverage } : {}),
+      verification,
+    }), id);
   return listEmailAccounts(db).find((account) => account.id === id);
 }
 
