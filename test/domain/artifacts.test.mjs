@@ -17,6 +17,7 @@ test('keeps drafts separate and requires explicit submitted confirmation', async
   try {
     const draft = await archiveArtifact(db, { applicationId: 'acme-role', kind: 'resume', lifecycle: 'draft', filePath: source, storageRoot: path.join(home, 'artifacts') });
     assert.equal(draft.lifecycle, 'draft');
+    assert.equal(path.basename(draft.storagePath), 'resume.pdf');
     await assert.rejects(() => archiveArtifact(db, { applicationId: 'acme-role', kind: 'resume', lifecycle: 'submitted', filePath: source, storageRoot: path.join(home, 'artifacts') }), /explicit confirmation/);
     const submitted = await archiveArtifact(db, { applicationId: 'acme-role', kind: 'resume', lifecycle: 'submitted', submittedConfirmed: true, filePath: source, storageRoot: path.join(home, 'artifacts') });
     assert.equal(submitted.lifecycle, 'submitted');
@@ -24,7 +25,9 @@ test('keeps drafts separate and requires explicit submitted confirmation', async
     assert.equal(await readFile(submitted.storagePath, 'utf8'), '%PDF-1.4\nfixture');
     const replay = await archiveArtifact(db, { applicationId: 'acme-role', kind: 'resume', lifecycle: 'submitted', submittedConfirmed: true, filePath: source, storageRoot: path.join(home, 'artifacts') });
     assert.equal(replay.id, submitted.id);
-    assert.equal(db.prepare('SELECT COUNT(*) count FROM artifacts').get().count, 2);
+    await writeFile(source, '%PDF-1.4\nsecond version');
+    const secondDraft = await archiveArtifact(db, { applicationId: 'acme-role', kind: 'resume', lifecycle: 'draft', filePath: source, storageRoot: path.join(home, 'artifacts') });
+    assert.equal(path.basename(secondDraft.storagePath), 'resume (2).pdf');
+    assert.equal(db.prepare('SELECT COUNT(*) count FROM artifacts').get().count, 3);
   } finally { db.close(); await rm(home, { recursive: true, force: true }); }
 });
-

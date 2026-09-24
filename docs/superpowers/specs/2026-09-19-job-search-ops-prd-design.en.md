@@ -328,7 +328,7 @@ SQLite is the default fact store, with structured CLI/API access and optional JS
 - `Automation`: schedule, time zone, external identity, probe, last matching success, and failure state
 - `DecisionTrace`: rule, Jev, or structured-LLM result, confidence, manual-review state, and final handling
 
-Attachments use SHA-256 content-addressed references. Secrets remain outside the business database. Backups include an artifact metadata index by default rather than copying artifact payloads.
+Attachments keep readable source filenames and add a numeric suffix only when another version would collide. SHA-256 remains an internal integrity reference. Secrets remain outside the business database. Backups include an artifact metadata index by default rather than copying artifact payloads.
 
 ## 13. Jev integration
 

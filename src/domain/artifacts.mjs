@@ -1,8 +1,24 @@
 import { createHash } from 'node:crypto';
+import { constants } from 'node:fs';
 import { copyFile, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const safeName = (name) => name.normalize('NFKC').replace(/[^\p{L}\p{N}._ -]/gu, '_').slice(0, 120) || 'artifact';
+
+async function copyWithFriendlyName(source, directory, fileName) {
+  const extension = path.extname(fileName);
+  const stem = path.basename(fileName, extension);
+  for (let version = 1; ; version += 1) {
+    const candidateName = version === 1 ? fileName : `${stem} (${version})${extension}`;
+    const destination = path.join(directory, candidateName);
+    try {
+      await copyFile(source, destination, constants.COPYFILE_EXCL);
+      return destination;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
+  }
+}
 
 export async function archiveArtifact(db, input) {
   if (!['draft', 'submitted'].includes(input.lifecycle)) throw new Error('Artifact lifecycle must be draft or submitted');
@@ -19,8 +35,7 @@ export async function archiveArtifact(db, input) {
   const fileName = safeName(path.basename(input.filePath));
   const directory = path.join(path.resolve(input.storageRoot), input.applicationId, input.kind, input.lifecycle);
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  const storagePath = path.join(directory, `${sha256}-${fileName}`);
-  await copyFile(input.filePath, storagePath);
+  const storagePath = await copyWithFriendlyName(input.filePath, directory, fileName);
   const recordedAt = input.recordedAt ?? new Date().toISOString();
   const submittedAt = input.lifecycle === 'submitted' ? (input.submittedAt ?? null) : null;
   const id = createHash('sha256').update(`${input.applicationId}\0${input.kind}\0${input.lifecycle}\0${sha256}`).digest('hex').slice(0, 32);
@@ -30,4 +45,3 @@ export async function archiveArtifact(db, input) {
     .run(id, input.applicationId, input.kind, input.lifecycle, fileName, storagePath, sha256, submittedAt, recordedAt, input.verification ?? 'pending', JSON.stringify(input.metadata ?? {}));
   return { id, applicationId: input.applicationId, kind: input.kind, lifecycle: input.lifecycle, fileName, storagePath, sha256, submittedAt, recordedAt, verification: input.verification ?? 'pending' };
 }
-

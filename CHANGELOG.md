@@ -22,6 +22,24 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [1.0.5] - 2026-09-23
+
+### Added
+
+- Added readable numeric suffixes such as `(2)` when a new artifact version would otherwise overwrite an existing file
+
+### Changed
+
+- New archived materials now keep their readable source filenames instead of adding a SHA-256 prefix
+
+### Fixed
+
+- Removed long technical hash prefixes from filenames shown in Finder and other local file managers
+
+### Security
+
+- SHA-256 remains stored internally for integrity verification and idempotent artifact records without appearing in the local filename
+
 ## [1.0.4] - 2026-09-23
 
 ### Added
