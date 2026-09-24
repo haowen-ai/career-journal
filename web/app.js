@@ -28,7 +28,7 @@ const copy = {
     materials: 'Application materials', materialsNote: 'Draft and submitted files remain distinct.', noHistory: 'No events recorded yet',
     noMaterials: 'No materials recorded yet', noStage: 'No stage recorded', noDate: 'Not provided', noUpdate: 'No update recorded',
     recorded: 'Recorded', source: 'Source', updated: 'Updated', record: 'Record', openJob: 'Open job posting',
-    submitted: 'Submitted', draft: 'Draft', verified: 'Verification', checksum: 'SHA-256', openMaterial: 'Open file', results: (visible, total) => `${visible} of ${total}`,
+    submitted: 'Submitted', draft: 'Draft', verified: 'Verification', checksum: 'SHA-256', openMaterial: 'Open file', openFolder: 'Show in folder', folderOpened: 'Shown in folder', folderError: 'Could not open folder', results: (visible, total) => `${visible} of ${total}`,
     generated: (value) => `Dashboard updated ${value}`, languageLabel: 'Switch dashboard language to Chinese',
   },
   'zh-CN': {
@@ -46,7 +46,7 @@ const copy = {
     historyNote: '按记录时间从新到旧展示有证据的进展。', materials: '申请材料', materialsNote: '草稿与实际提交文件分别记录。',
     noHistory: '还没有事件记录', noMaterials: '还没有材料记录', noStage: '未记录阶段', noDate: '未提供', noUpdate: '暂无进展记录',
     recorded: '记录时间', source: '来源', updated: '更新', record: '记录', openJob: '打开职位页面', submitted: '已提交', draft: '草稿',
-    verified: '验证状态', checksum: 'SHA-256', openMaterial: '打开文件', results: (visible, total) => `显示 ${visible} / ${total} 条`,
+    verified: '验证状态', checksum: 'SHA-256', openMaterial: '打开文件', openFolder: '打开所在文件夹', folderOpened: '已在文件夹中显示', folderError: '无法打开文件夹', results: (visible, total) => `显示 ${visible} / ${total} 条`,
     generated: (value) => `看板更新于 ${value}`, languageLabel: '将看板语言切换为英文',
   },
 };
@@ -144,7 +144,27 @@ function renderMaterials(container, application) {
     openLink.rel = 'noreferrer';
     openLink.textContent = t('openMaterial');
     openLink.setAttribute('aria-label', `${t('openMaterial')}: ${artifact.fileName}`);
-    card.append(openLink);
+    const revealButton = document.createElement('button');
+    revealButton.className = 'material-reveal';
+    revealButton.type = 'button';
+    revealButton.textContent = t('openFolder');
+    revealButton.setAttribute('aria-label', `${t('openFolder')}: ${artifact.fileName}`);
+    revealButton.addEventListener('click', async () => {
+      revealButton.disabled = true;
+      try {
+        const response = await fetch(`/api/artifacts/${encodeURIComponent(artifact.id)}/reveal`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+        });
+        if (!response.ok) throw new Error('Reveal failed');
+        revealButton.textContent = t('folderOpened');
+      } catch {
+        revealButton.textContent = t('folderError');
+      } finally {
+        window.setTimeout(() => { revealButton.textContent = t('openFolder'); revealButton.disabled = false; }, 1800);
+      }
+    });
+    const actions = document.createElement('div'); actions.className = 'material-actions'; actions.append(openLink, revealButton);
+    card.append(actions);
     container.append(card);
   }
 }

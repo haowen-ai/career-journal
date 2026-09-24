@@ -127,8 +127,10 @@ img { display: block; }
 .material-card.submitted .eyebrow { color: #598971; }
 .file-name { margin-top: 8px; font-size: 10.5px; font-weight: 650; line-height: 1.65; overflow-wrap: anywhere; }
 .material-meta { margin: 6px 0 0; color: #819287; font-size: 9.5px; line-height: 1.7; }
-.material-open { display: inline-block; margin-top: 12px; padding: 7px 11px; border: 1px solid #b9d8cc; border-radius: 7px; color: var(--teal); font-size: 9.5px; font-weight: 650; text-decoration: none; }
-.material-open:hover, .material-open:focus-visible { border-color: var(--teal); background: #eef7f3; }
+.material-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.material-open, .material-reveal { display: inline-block; margin: 0; padding: 7px 11px; border: 1px solid #b9d8cc; border-radius: 7px; background: transparent; color: var(--teal); font-family: inherit; font-size: 9.5px; font-weight: 650; line-height: 1.4; text-decoration: none; cursor: pointer; }
+.material-open:hover, .material-open:focus-visible, .material-reveal:hover, .material-reveal:focus-visible { border-color: var(--teal); background: #eef7f3; }
+.material-reveal:disabled { cursor: default; opacity: .7; }
 .material-checksum { margin-top: 7px; color: #83948b; font: 8.5px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
 .missing { display: block; margin-top: 9px; color: #819287; font-size: 11.5px; font-weight: 500; }
 .job-link { display: inline-block; margin-top: 16px; color: var(--teal); font-size: 10px; text-underline-offset: 3px; }

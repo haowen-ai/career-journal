@@ -22,6 +22,24 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [1.0.4] - 2026-09-23
+
+### Added
+
+- Added a Show in folder action for every archived application material
+
+### Changed
+
+- The local server now asks the operating system to reveal and select the archived file in Finder, Explorer, or the default Linux file manager
+
+### Fixed
+
+- None
+
+### Security
+
+- The browser sends only an artifact ID, while the server validates that the resolved file remains inside the configured artifact directory before revealing it
+
 ## [1.0.3] - 2026-09-23
 
 ### Added

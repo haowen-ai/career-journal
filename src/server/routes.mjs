@@ -2,9 +2,12 @@ import { createApplication, listApplications } from '../commands/application.mjs
 import { recordEvent } from '../domain/events.mjs';
 import { createReadStream } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import path from 'node:path';
 
 const MAX_BODY = 1_000_000;
+const execFileAsync = promisify(execFile);
 
 const artifactContentTypes = new Map([
   ['.pdf', 'application/pdf'],
@@ -80,23 +83,39 @@ function latestApplicationTime(application) {
   return Math.max(eventTime, artifactTime, Date.parse(application.updatedAt ?? 0) || 0);
 }
 
-async function sendArtifact(response, artifact, artifactRoot) {
+async function resolveArtifactFile(artifact, artifactRoot) {
   if (!artifactRoot) {
-    sendJson(response, 404, { error: 'Artifact file is unavailable' });
-    return;
+    const error = new Error('Artifact file is unavailable');
+    error.status = 404;
+    throw error;
   }
+  const [resolvedRoot, resolvedFile] = await Promise.all([
+    realpath(path.resolve(artifactRoot)),
+    realpath(path.resolve(artifact.storagePath)),
+  ]);
+  if (resolvedFile !== resolvedRoot && !resolvedFile.startsWith(`${resolvedRoot}${path.sep}`)) {
+    const error = new Error('Artifact file is unavailable');
+    error.status = 404;
+    throw error;
+  }
+  const fileStat = await stat(resolvedFile);
+  if (!fileStat.isFile()) {
+    const error = new Error('Artifact file is unavailable');
+    error.status = 404;
+    throw error;
+  }
+  return { resolvedFile, fileStat, fileName: String(artifact.fileName ?? 'artifact').replace(/[\r\n"]/g, '_') };
+}
+
+export async function revealInFileManager(filePath, { platform = process.platform, run = execFileAsync } = {}) {
+  if (platform === 'darwin') await run('open', ['-R', filePath]);
+  else if (platform === 'win32') await run('explorer.exe', ['/select,', filePath]);
+  else await run('xdg-open', [path.dirname(filePath)]);
+}
+
+async function sendArtifact(response, artifact, artifactRoot) {
   try {
-    const [resolvedRoot, resolvedFile] = await Promise.all([
-      realpath(path.resolve(artifactRoot)),
-      realpath(path.resolve(artifact.storagePath)),
-    ]);
-    if (resolvedFile !== resolvedRoot && !resolvedFile.startsWith(`${resolvedRoot}${path.sep}`)) {
-      sendJson(response, 404, { error: 'Artifact file is unavailable' });
-      return;
-    }
-    const fileStat = await stat(resolvedFile);
-    if (!fileStat.isFile()) throw new Error('Artifact is not a file');
-    const fileName = String(artifact.fileName ?? 'artifact').replace(/[\r\n"]/g, '_');
+    const { resolvedFile, fileStat, fileName } = await resolveArtifactFile(artifact, artifactRoot);
     response.writeHead(200, {
       'content-type': artifactContentTypes.get(path.extname(fileName).toLowerCase()) ?? 'application/octet-stream',
       'content-length': fileStat.size,
@@ -110,7 +129,7 @@ async function sendArtifact(response, artifact, artifactRoot) {
   }
 }
 
-export async function handleApi(request, response, url, { db, config, artifactRoot }) {
+export async function handleApi(request, response, url, { db, config, artifactRoot, revealFile = revealInFileManager }) {
   if (request.method === 'GET' && url.pathname === '/api/health') {
     sendJson(response, 200, { ok: true, schemaVersion: config.schemaVersion });
     return true;
@@ -138,6 +157,18 @@ export async function handleApi(request, response, url, { db, config, artifactRo
       .get(decodeURIComponent(artifactMatch[1]));
     if (!artifact) sendJson(response, 404, { error: 'Artifact not found' });
     else await sendArtifact(response, artifact, artifactRoot);
+    return true;
+  }
+  const revealMatch = url.pathname.match(/^\/api\/artifacts\/([^/]+)\/reveal$/);
+  if (revealMatch && request.method === 'POST') {
+    const artifact = db.prepare('SELECT file_name fileName, storage_path storagePath FROM artifacts WHERE id = ?')
+      .get(decodeURIComponent(revealMatch[1]));
+    if (!artifact) sendJson(response, 404, { error: 'Artifact not found' });
+    else {
+      const { resolvedFile } = await resolveArtifactFile(artifact, artifactRoot);
+      await revealFile(resolvedFile);
+      sendJson(response, 200, { ok: true });
+    }
     return true;
   }
   if (url.pathname === '/api/applications' && request.method === 'POST') {
