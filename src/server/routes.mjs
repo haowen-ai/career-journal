@@ -1,7 +1,17 @@
 import { createApplication, listApplications } from '../commands/application.mjs';
 import { recordEvent } from '../domain/events.mjs';
+import { createReadStream } from 'node:fs';
+import { realpath, stat } from 'node:fs/promises';
+import path from 'node:path';
 
 const MAX_BODY = 1_000_000;
+
+const artifactContentTypes = new Map([
+  ['.pdf', 'application/pdf'],
+  ['.doc', 'application/msword'],
+  ['.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  ['.txt', 'text/plain; charset=utf-8'],
+]);
 
 export function sendJson(response, status, value) {
   const body = `${JSON.stringify(value)}\n`;
@@ -70,7 +80,37 @@ function latestApplicationTime(application) {
   return Math.max(eventTime, artifactTime, Date.parse(application.updatedAt ?? 0) || 0);
 }
 
-export async function handleApi(request, response, url, { db, config }) {
+async function sendArtifact(response, artifact, artifactRoot) {
+  if (!artifactRoot) {
+    sendJson(response, 404, { error: 'Artifact file is unavailable' });
+    return;
+  }
+  try {
+    const [resolvedRoot, resolvedFile] = await Promise.all([
+      realpath(path.resolve(artifactRoot)),
+      realpath(path.resolve(artifact.storagePath)),
+    ]);
+    if (resolvedFile !== resolvedRoot && !resolvedFile.startsWith(`${resolvedRoot}${path.sep}`)) {
+      sendJson(response, 404, { error: 'Artifact file is unavailable' });
+      return;
+    }
+    const fileStat = await stat(resolvedFile);
+    if (!fileStat.isFile()) throw new Error('Artifact is not a file');
+    const fileName = String(artifact.fileName ?? 'artifact').replace(/[\r\n"]/g, '_');
+    response.writeHead(200, {
+      'content-type': artifactContentTypes.get(path.extname(fileName).toLowerCase()) ?? 'application/octet-stream',
+      'content-length': fileStat.size,
+      'content-disposition': `inline; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      'cache-control': 'private, no-store',
+      'x-content-type-options': 'nosniff',
+    });
+    createReadStream(resolvedFile).pipe(response);
+  } catch {
+    sendJson(response, 404, { error: 'Artifact file is unavailable' });
+  }
+}
+
+export async function handleApi(request, response, url, { db, config, artifactRoot }) {
   if (request.method === 'GET' && url.pathname === '/api/health') {
     sendJson(response, 200, { ok: true, schemaVersion: config.schemaVersion });
     return true;
@@ -90,6 +130,14 @@ export async function handleApi(request, response, url, { db, config }) {
       timezone: config.timezone,
       applications,
     });
+    return true;
+  }
+  const artifactMatch = url.pathname.match(/^\/api\/artifacts\/([^/]+)\/file$/);
+  if (artifactMatch && request.method === 'GET') {
+    const artifact = db.prepare('SELECT file_name fileName, storage_path storagePath FROM artifacts WHERE id = ?')
+      .get(decodeURIComponent(artifactMatch[1]));
+    if (!artifact) sendJson(response, 404, { error: 'Artifact not found' });
+    else await sendArtifact(response, artifact, artifactRoot);
     return true;
   }
   if (url.pathname === '/api/applications' && request.method === 'POST') {

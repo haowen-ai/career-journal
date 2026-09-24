@@ -30,7 +30,7 @@ function allowedOrigin(value) {
   try { return LOOPBACK_HOSTS.has(new URL(value).hostname); } catch { return false; }
 }
 
-export function createServer({ db, config, webRoot }) {
+export function createServer({ db, config, webRoot, artifactRoot }) {
   const resolvedWebRoot = path.resolve(webRoot);
   return http.createServer(async (request, response) => {
     try {
@@ -45,7 +45,7 @@ export function createServer({ db, config, webRoot }) {
           sendJson(response, 415, { error: 'Mutating API requests require application/json' });
           return;
         }
-        if (!await handleApi(request, response, url, { db, config })) sendJson(response, 404, { error: 'Not found' });
+        if (!await handleApi(request, response, url, { db, config, artifactRoot })) sendJson(response, 404, { error: 'Not found' });
         return;
       }
       const asset = assets.get(url.pathname);

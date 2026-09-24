@@ -11,7 +11,7 @@ test('serves the bilingual career-journal dashboard shell and rejects path trave
   const home = await mkdtemp(path.join(os.tmpdir(), 'jobops-dashboard-'));
   await setup(home, { timezone: 'UTC', email: { mode: 'skip' } });
   const context = await openHomeDatabase(home);
-  const server = createServer({ db: context.db, config: context.config, webRoot: path.resolve('web') });
+  const server = createServer({ db: context.db, config: context.config, artifactRoot: context.artifactRoot, webRoot: path.resolve('web') });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   try {

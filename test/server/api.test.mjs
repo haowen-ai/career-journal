@@ -1,21 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { setup } from '../../src/commands/setup.mjs';
 import { openHomeDatabase } from '../../src/runtime/home.mjs';
 import { createServer } from '../../src/server/app.mjs';
+import { archiveArtifact } from '../../src/domain/artifacts.mjs';
 
 async function withServer(run) {
   const home = await mkdtemp(path.join(os.tmpdir(), 'jobops-server-'));
   await setup(home, { timezone: 'UTC', email: { mode: 'skip' } });
   const context = await openHomeDatabase(home);
-  const server = createServer({ db: context.db, config: context.config, webRoot: path.resolve('web') });
+  const server = createServer({ db: context.db, config: context.config, artifactRoot: context.artifactRoot, webRoot: path.resolve('web') });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
-  try { await run(baseUrl, context.db); }
+  try { await run(baseUrl, context.db, context); }
   finally { await new Promise((resolve) => server.close(resolve)); context.db.close(); await rm(home, { recursive: true, force: true }); }
 }
 
@@ -41,6 +42,29 @@ test('health, create, list, detail, and idempotent event routes work', async () 
   assert.equal(dashboard.applications[0].events[0].sourceKind, 'api');
   assert.equal('source' in dashboard.applications[0].events[0], false);
   assert.deepEqual(dashboard.applications[0].artifacts, []);
+}));
+
+test('serves an archived material by id without exposing its storage path', async () => withServer(async (baseUrl, db, context) => {
+  const application = await (await fetch(`${baseUrl}/api/applications`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ company: 'Acme', role: 'Engineer' }),
+  })).json();
+  const source = path.join(context.root, 'resume.pdf');
+  await writeFile(source, '%PDF-1.4\nlocal artifact\n');
+  const artifact = await archiveArtifact(db, {
+    applicationId: application.id,
+    kind: 'resume',
+    lifecycle: 'draft',
+    filePath: source,
+    storageRoot: context.artifactRoot,
+  });
+  const response = await fetch(`${baseUrl}/api/artifacts/${artifact.id}/file`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'application/pdf');
+  assert.match(response.headers.get('content-disposition'), /inline/);
+  assert.equal(await response.text(), '%PDF-1.4\nlocal artifact\n');
+  const dashboard = await (await fetch(`${baseUrl}/api/dashboard`)).json();
+  assert.equal('storagePath' in dashboard.applications[0].artifacts[0], false);
+  assert.equal((await fetch(`${baseUrl}/api/artifacts/missing/file`)).status, 404);
 }));
 
 test('dashboard sorts material activity and normalizes CLI user sources', async () => withServer(async (baseUrl, db) => {

@@ -22,6 +22,24 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [1.0.3] - 2026-09-23
+
+### Added
+
+- Added an Open file action for every archived application material in the local dashboard
+
+### Changed
+
+- Archived PDFs and other supported documents now open in a separate browser tab through a local-only artifact endpoint
+
+### Fixed
+
+- Fixed material cards that displayed file metadata and checksums but provided no way to access the archived file
+
+### Security
+
+- Artifact storage paths remain private, and the server only reads files whose resolved paths stay inside the configured artifact directory
+
 ## [1.0.2] - 2026-09-20
 
 ### Added
