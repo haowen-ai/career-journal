@@ -8,7 +8,7 @@
 
 ### 新增
 
-- 无
+- 新增 `claude-code` 调度驱动：一个 Claude Code 桌面版共享定时任务即可承载两个必需的每日任务；`register-external` 输出 `claudeCodeCommandLine`，`automation verify` 和 `doctor` 会核对任务文件、启用状态、每日 cron、时区和两条命令
 
 ### 变更
 
@@ -16,7 +16,7 @@
 
 ### 修复
 
-- 无
+- 在 Claude Code 中完成 Agent 模式配置后现在可以通过 `doctor`；此前文档写明支持 Claude Code，但所有非 Codex 的 Agent 定时任务都会因“没有可信校验器”而失败
 
 ### 安全
 

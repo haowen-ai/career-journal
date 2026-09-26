@@ -18,7 +18,7 @@
 请从 https://github.com/haowen-ai/career-journal 获取最新版本并自动安装配置 CAREER JOURNAL；如果本机已有旧副本，请安全快进，无法安全快进时使用新的隔离副本，然后读取最新 AGENTS.md 并完成首次配置。
 ```
 
-Agent 会先取得最新仓库副本，再读取 [`AGENTS.md`](../AGENTS.md) 和仓库 Skill，检测电脑的 IANA 时区，配置用户选择的只读邮箱，创建并验证两个每日任务，各运行一次，最后执行 `doctor`。在 Codex 中，这两个时间点由一个共享的 Codex heartbeat 承载。Agent 会直接使用当前环境已有的邮箱能力，只读获取所选邮箱过去 24 小时内收到的全部邮件，不先用关键词筛选，整理成有大小限制的同步批次，再通过 `email sync-host` 导入，不需要等待单独的 Apple Mail 适配器。技术配置通过后，Agent 会询问用户是否需要导入历史投递。用户只需处理无法代办的登录、授权、账号选择，以及确认待导入的历史记录。
+Agent 会先取得最新仓库副本，再读取 [`AGENTS.md`](../AGENTS.md) 和仓库 Skill，检测电脑的 IANA 时区，配置用户选择的只读邮箱，创建并验证两个每日任务，各运行一次，最后执行 `doctor`。在 Codex 中，这两个时间点由一个共享的 Codex heartbeat 承载；在 Claude Code 桌面版中，由一个共享的定时任务承载。Agent 会直接使用当前环境已有的邮箱能力，只读获取所选邮箱过去 24 小时内收到的全部邮件，不先用关键词筛选，整理成有大小限制的同步批次，再通过 `email sync-host` 导入，不需要等待单独的 Apple Mail 适配器。技术配置通过后，Agent 会询问用户是否需要导入历史投递。用户只需处理无法代办的登录、授权、账号选择，以及确认待导入的历史记录。
 
 在 macOS 上，Agent 必须先识别 Apple Mail 中已经登录的邮箱账号，再提出配置问题。它会打开 Mail 主窗口、显示侧边栏、展开 `All Inboxes`，列出全部顶层账号；当前选中邮件不能代表完整账号清单。如果界面只显示账号名称，Agent 会只读查看 Mail 设置 > 账户，不修改任何设置。两个位置显示的账号数量不一致时，不得声称已经找全或完成配置。接下来，Agent 只询问哪些已识别邮箱用于求职。如果没有可访问的账号，用户先登录 Apple Mail 或其他受支持的邮件应用，Agent 再继续配置。可选的 Jev 配置不会阻塞基础配置：已经配置时直接复用，否则先用当前编程 Agent 完成邮箱和自动化设置。`doctor` 通过后，Agent 会询问一次是否启用 Jev；用户选择跳过、没有权限或暂时不启用时，继续使用 `host-agent`。用户选择启用时，Agent 协助使用官方控制台和 Skill；启用后，过去 24 小时完整批次中的每一封新邮件都会先交给 Jev 判断。Agent 模式不得询问 Base URL，也不得要求用户在聊天或 Agent prompt 中粘贴、发送或提供 API Key 或 secret。在 macOS 上，Agent 会把新建 Key 保存到系统钥匙串，CAREER JOURNAL 只接收 `keychain:career-journal-typesafe:<本地账户>` 引用。IMAPS 和外部模型凭据只用于后面的独立 CLI/API 配置。
 
@@ -100,7 +100,7 @@ IMAPS 邮件处理器会先完成账号认证，再用 `EXAMINE` 以只读方式
 
 ### Agent 自动配置
 
-把仓库地址和一句话安装要求交给 Codex、Claude Code、Cursor 或其他能够读取仓库的编程 Agent。Agent 会先识别已经登录的邮箱账号，只询问哪一个或多个用于求职，不会要求用户填写 IMAP 技术参数。随后按照电脑检测到的时区创建单个共享的 Codex heartbeat，用两个每日时间点分别运行邮件同步和截止事项检查，并把同一个 automation ID 与两条完整命令绑定。Agent 自身就是宿主邮箱连接器，会为所选邮箱生成 `email sync-host` 所需的只读批次。
+把仓库地址和一句话安装要求交给 Codex、Claude Code、Cursor 或其他能够读取仓库的编程 Agent。Agent 会先识别已经登录的邮箱账号，只询问哪一个或多个用于求职，不会要求用户填写 IMAP 技术参数。随后按照电脑检测到的时区创建单个共享的 Codex heartbeat，用两个每日时间点分别运行邮件同步和截止事项检查，并把同一个 automation ID 与两条完整命令绑定。在 Claude Code 桌面版中，改用一个共享定时任务和 `claude-code` driver 完成同样的绑定。Agent 自身就是宿主邮箱连接器，会为所选邮箱生成 `email sync-host` 所需的只读批次。
 
 完成后，Agent 会重新读取实际保存的自动化定义，检查时间、时区和命令，再分别运行一次。只有每个选中邮箱和两个任务都通过 `doctor`，技术配置才会结束；随后 Agent 会提供先确认再写入的可选历史投递导入。宿主邮箱批次本身不能证明账号身份，Agent 必须在实际看到已登录账号后记录可信宿主验证。简历和求职信任务由独立的 `careerops-materials` Skill 处理。
 
@@ -236,6 +236,12 @@ CAREER JOURNAL 自己不会在后台等待时间并启动任务。Codex 自动�
 接着编辑这个共享 heartbeat，把两条字符串**完整地分别单独放在 prompt 的一行中**，并写明检测到的 IANA 时区和本地时间分支；不要自行改写或缩短命令。Agent 自身就是宿主邮箱连接器，必须先生成并通过 `email sync-host` 导入每个邮箱的只读同步批次，再运行邮件命令。然后分别运行两次 `automation verify`，再让 heartbeat 各执行一次准确命令。
 
 验证过程会读取 `~/.codex/automations/<id>/automation.toml`，确认处于 `ACTIVE` 状态的每日 heartbeat 在两个时间点、时区、两条命令、数据目录和共享外部 ID 上完全一致。仅登记待验证 ID、提供截图、使用相似命令，或在验证之前直接运行任务，都不能通过检查。
+
+### Claude Code 定时任务登记
+
+在 Claude Code 桌面版中，用宿主的定时任务能力创建一个共享任务，不要手写文件。任务 ID 使用稳定名称，例如 `career-journal-daily`，cron 按本地时间写成 `0,15 20 * * *`。再使用 `claude-code` driver，把这个任务 ID 分别登记到 `mail-sync` 和 `deadline-review`，两次登记各返回一条 `claudeCodeCommandLine`。更新任务 prompt，把两条字符串**完整地分别单独放在一行中**，写明检测到的 IANA 时区，并按时间段分支：20:15 之前先完成只读邮箱同步再运行邮件命令；20:15 起运行截止日期命令，当天邮件同步未成功时先重试邮件。Claude Code 周期任务可能晚几分钟启动，所以按时间段而不是精确分钟判断。然后分别运行两次 `automation verify`，再各执行一次准确命令。
+
+验证过程会读取 `~/.claude/scheduled-tasks/<任务 ID>/SKILL.md`（或 `$CLAUDE_CONFIG_DIR` 下的同名路径）和桌面 App 的定时记录，要求任务名称一致、prompt 含两条命令和时区、每日 cron 已启用且覆盖两个时间点、电脑时区与任务时区一致。多个登录账号都留下定时记录时，以最近写入的那份为准。Claude Code 定时任务只在桌面 App 打开时运行，错过的会在下次启动时补跑；`doctor` 仍要求 36 小时内观察到一次成功运行。
 
 ### 本机调度器
 

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile as execFileCallback } from 'node:child_process';
-import { readFile, stat, lstat } from 'node:fs/promises';
+import { readFile, readdir, stat, lstat } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
@@ -24,12 +24,14 @@ function expectedExecutionArgv(task) {
   ];
 }
 
-export function codexCommandLineForTask(task) {
+export function hostCommandLineForTask(task) {
   const args = expectedExecutionArgv(task);
   const platform = task.config.registration.execution?.platform;
   if (!args || !platform) return null;
   return args.map(platform === 'win32' ? quoteWindowsArgument : shellQuote).join(' ');
 }
+
+export const codexCommandLineForTask = hostCommandLineForTask;
 
 function xmlDecode(value) {
   return String(value ?? '')
@@ -378,22 +380,48 @@ function rruleMatchesSchedules(rrule, schedules) {
     if (!match || !allowed.has(match[1]) || fields.has(match[1])) return false;
     fields.set(match[1], match[2]);
   }
-  const integerList = (value, max) => {
-    if (!/^\d{1,2}(?:,\d{1,2})*$/.test(value ?? '')) return null;
-    const values = value.split(',').map(Number);
-    if (values.some((item) => item > max) || new Set(values).size !== values.length) return null;
-    return values;
-  };
-  const hours = integerList(fields.get('BYHOUR'), 23);
-  const minutes = integerList(fields.get('BYMINUTE'), 59);
+  return fields.get('FREQ') === 'DAILY'
+    && (!fields.has('INTERVAL') || fields.get('INTERVAL') === '1')
+    && dailyTimesMatch(fields.get('BYHOUR'), fields.get('BYMINUTE'), schedules)
+    && (!fields.has('BYSECOND') || fields.get('BYSECOND') === '0');
+}
+
+function integerList(value, max) {
+  if (!/^\d{1,2}(?:,\d{1,2})*$/.test(value ?? '')) return null;
+  const values = value.split(',').map(Number);
+  if (values.some((item) => item > max) || new Set(values).size !== values.length) return null;
+  return values;
+}
+
+function dailyTimesMatch(hourList, minuteList, schedules) {
+  const hours = integerList(hourList, 23);
+  const minutes = integerList(minuteList, 59);
   if (!hours || !minutes) return false;
   const actual = hours.flatMap((hour) => minutes.map((minute) => `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`)).sort();
   const expected = [...new Set(schedules)].sort();
-  return fields.get('FREQ') === 'DAILY'
-    && (!fields.has('INTERVAL') || fields.get('INTERVAL') === '1')
-    && actual.length === expected.length
-    && actual.every((value, index) => value === expected[index])
-    && (!fields.has('BYSECOND') || fields.get('BYSECOND') === '0');
+  return actual.length === expected.length && actual.every((value, index) => value === expected[index]);
+}
+
+// Claude Code desktop cron: five fields in the host's local time, daily only.
+function cronMatchesSchedules(cronExpression, schedules) {
+  const fields = String(cronExpression ?? '').trim().split(/\s+/);
+  if (fields.length !== 5 || fields.slice(2).some((field) => field !== '*')) return false;
+  return dailyTimesMatch(fields[1], fields[0], schedules);
+}
+
+function expectedSchedulesFor(task) {
+  const sharedSchedules = task.config.registration.sharedSchedules;
+  return Array.isArray(sharedSchedules) && sharedSchedules.length > 1
+    ? sharedSchedules.map((item) => item?.schedule)
+    : [task.schedule];
+}
+
+function promptBindsTask(prompt, task) {
+  const expectedCommand = hostCommandLineForTask(task);
+  return typeof prompt === 'string'
+    && Boolean(expectedCommand)
+    && prompt.split(/\r?\n/).some((line) => line === expectedCommand)
+    && prompt.includes(task.timezone);
 }
 
 async function probeCodex(task, options) {
@@ -428,17 +456,8 @@ async function probeCodex(task, options) {
     if (status !== 'ACTIVE') return { ok: false, detail: 'Codex automation must be ACTIVE' };
     const systemTimezone = options.systemTimezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
     if (systemTimezone !== task.timezone) return { ok: false, detail: 'Codex host timezone does not match the task timezone' };
-    const sharedSchedules = registration.sharedSchedules;
-    const expectedSchedules = Array.isArray(sharedSchedules) && sharedSchedules.length > 1
-      ? sharedSchedules.map((item) => item?.schedule)
-      : [task.schedule];
-    if (!rrule || !rruleMatchesSchedules(rrule, expectedSchedules)) return { ok: false, detail: 'Codex automation schedule does not match the task' };
-    const expectedCommand = codexCommandLineForTask(task);
-    const commandMatches = Boolean(expectedCommand)
-      && prompt.split(/\r?\n/).some((line) => line === expectedCommand);
-    if (!prompt
-      || !commandMatches
-      || !prompt.includes(task.timezone)) {
+    if (!rrule || !rruleMatchesSchedules(rrule, expectedSchedulesFor(task))) return { ok: false, detail: 'Codex automation schedule does not match the task' };
+    if (!promptBindsTask(prompt, task)) {
       return { ok: false, detail: 'Codex automation prompt must contain the exact registered CAREER JOURNAL command as a standalone line and the task timezone' };
     }
     return {
@@ -448,6 +467,92 @@ async function probeCodex(task, options) {
     };
   } catch (error) {
     return { ok: false, detail: `Codex automation probe failed: ${error.message}` };
+  }
+}
+
+function defaultClaudeAppSupport(platform) {
+  if (platform === 'darwin') return path.join(os.homedir(), 'Library', 'Application Support', 'Claude');
+  if (platform === 'win32') return path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), 'Claude');
+  return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'), 'Claude');
+}
+
+async function readBoundedFile(file, options, maxBytes = 1024 * 1024) {
+  const details = await (options.lstat ?? lstat)(file);
+  if (!details.isFile() || details.isSymbolicLink?.() || details.size > maxBytes) return null;
+  return { details, source: await (options.readFile ?? readFile)(file, 'utf8') };
+}
+
+function parseSkillFile(source) {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/.exec(String(source ?? ''));
+  if (!match) return null;
+  return { name: /^name:\s*(.+?)\s*$/m.exec(match[1])?.[1] ?? null, prompt: match[2] };
+}
+
+// The desktop app keeps one scheduled-tasks.json per signed-in account and organization.
+// Copies left by an earlier sign-in go stale, so the most recently written copy wins.
+async function findClaudeScheduleRecord(appSupport, taskId, options) {
+  const root = path.join(appSupport, 'claude-code-sessions');
+  const list = (directory) => (options.readdir ?? readdir)(directory).catch(() => []);
+  let newest = null;
+  for (const account of await list(root)) {
+    for (const organization of await list(path.join(root, account))) {
+      const file = path.join(root, account, organization, 'scheduled-tasks.json');
+      let entry;
+      let loaded;
+      try {
+        loaded = await readBoundedFile(file, options, 4 * 1024 * 1024);
+        if (!loaded) continue;
+        const tasks = JSON.parse(loaded.source)?.scheduledTasks;
+        entry = Array.isArray(tasks) ? tasks.find((item) => item?.id === taskId) : null;
+      } catch {
+        continue;
+      }
+      if (entry && (!newest || loaded.details.mtimeMs > newest.mtimeMs)) newest = { entry, mtimeMs: loaded.details.mtimeMs };
+    }
+  }
+  return newest?.entry ?? null;
+}
+
+async function probeClaudeCode(task, options) {
+  const registration = task.config.registration;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(registration.externalId)) {
+    return { ok: false, detail: 'Claude Code scheduled task id contains unsupported characters' };
+  }
+  const claudeHome = path.resolve(options.claudeHome ?? process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude'));
+  const taskRoot = path.join(claudeHome, 'scheduled-tasks');
+  const file = path.resolve(taskRoot, registration.externalId, 'SKILL.md');
+  if (!file.startsWith(`${taskRoot}${path.sep}`)) return { ok: false, detail: 'Claude Code scheduled task path is invalid' };
+  try {
+    const loaded = await readBoundedFile(file, options);
+    if (!loaded) return { ok: false, detail: 'Claude Code scheduled task definition is not a regular bounded file' };
+    const skill = parseSkillFile(loaded.source);
+    if (skill?.name !== registration.externalId) {
+      return { ok: false, detail: 'Claude Code scheduled task SKILL.md name does not match its directory' };
+    }
+    const systemTimezone = options.systemTimezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (systemTimezone !== task.timezone) return { ok: false, detail: 'Claude Code host timezone does not match the task timezone' };
+    if (!promptBindsTask(skill.prompt, task)) {
+      return { ok: false, detail: 'Claude Code scheduled task prompt must contain the exact registered CAREER JOURNAL command as a standalone line and the task timezone' };
+    }
+    const appSupport = path.resolve(options.claudeAppSupport ?? defaultClaudeAppSupport(options.platform ?? process.platform));
+    const record = await findClaudeScheduleRecord(appSupport, registration.externalId, options);
+    if (!record) return { ok: false, detail: `Claude Code desktop has no schedule record for ${registration.externalId}` };
+    if (record.filePath != null && path.resolve(String(record.filePath)) !== file) {
+      return { ok: false, detail: 'Claude Code schedule record points to a different SKILL.md' };
+    }
+    if (record.enabled !== true) return { ok: false, detail: 'Claude Code scheduled task must be enabled' };
+    if (record.fireAt || !cronMatchesSchedules(record.cronExpression, expectedSchedulesFor(task))) {
+      return { ok: false, detail: 'Claude Code scheduled task cron does not match the task' };
+    }
+    return {
+      ok: true,
+      detail: `Claude Code scheduled task ${registration.externalId} is enabled with the expected binding`,
+      evidenceDigest: evidenceDigest(`${loaded.source}\n${JSON.stringify({
+        id: record.id, cronExpression: record.cronExpression, enabled: record.enabled, filePath: record.filePath ?? null,
+      })}`),
+    };
+  } catch (error) {
+    return { ok: false, detail: `Claude Code scheduled task probe failed: ${error.message}` };
   }
 }
 
@@ -485,6 +590,8 @@ export async function probeTaskRegistration(task, options = {}) {
       result = await execFile('schtasks.exe', ['/Query', '/TN', registration.externalId, '/XML'], { encoding: 'utf8' });
     } else if (driver === 'codex') {
       return probeCodex(task, options);
+    } else if (driver === 'claude-code') {
+      return probeClaudeCode(task, { ...options, platform });
     } else {
       return { ok: false, detail: `scheduler driver ${driver} has no trusted verifier` };
     }

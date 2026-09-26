@@ -12,11 +12,12 @@ import {
   automationSetupState,
   verifyTaskRegistration,
   taskEmailAccountIds,
+  AGENT_HOST_DRIVERS,
 } from '../automation/registry.mjs';
 import { runDeadlineReview, runDailyConsolidation } from '../automation/tasks.mjs';
 import { nativeSchedulerRegistration } from '../automation/platform.mjs';
 import { installNativeScheduler } from '../automation/native-scheduler.mjs';
-import { codexCommandLineForTask, probeTaskRegistration } from '../automation/probe.mjs';
+import { hostCommandLineForTask, probeTaskRegistration } from '../automation/probe.mjs';
 import { createBackup } from './backup.mjs';
 import { randomUUID } from 'node:crypto';
 import { saveConfig, workspaceDirectory } from '../config/store.mjs';
@@ -74,7 +75,10 @@ export async function automationCommand(parsed, io, runtime) {
       io.out(JSON.stringify({
         ...task,
         ...(task.config.registration.driver === 'codex'
-          ? { codexCommandLine: codexCommandLineForTask(task) }
+          ? { codexCommandLine: hostCommandLineForTask(task) }
+          : {}),
+        ...(task.config.registration.driver === 'claude-code'
+          ? { claudeCodeCommandLine: hostCommandLineForTask(task) }
           : {}),
       }, null, 2));
       return 0;
@@ -93,11 +97,13 @@ export async function automationCommand(parsed, io, runtime) {
         : await probeTaskRegistration(task, {
           platform: runtime.platform ?? process.platform,
           codexHome: runtime.codexHome,
+          claudeHome: runtime.claudeHome,
+          claudeAppSupport: runtime.claudeAppSupport,
           systemTimezone: runtime.systemTimezone,
         });
       if (!probe?.ok) throw new Error(`Scheduler verification failed: ${probe?.detail ?? 'job not found'}`);
       const verified = verifyTaskRegistration(context.db, task.id, {
-        method: task.config.registration.driver === 'codex' ? 'trusted-host' : 'native-probe',
+        method: AGENT_HOST_DRIVERS.includes(task.config.registration.driver) ? 'trusted-host' : 'native-probe',
         evidenceDigest: probe.evidenceDigest,
       });
       await persistAutomationState(context);
