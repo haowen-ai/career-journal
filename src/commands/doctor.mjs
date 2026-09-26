@@ -136,6 +136,8 @@ export async function doctor(home, capabilities = {}) {
   const requiredTasks = REQUIRED_TASK_TYPES;
   const schedulerProbe = capabilities.schedulerProbe ?? ((task) => probeTaskRegistration(task, {
     codexHome: capabilities.codexHome,
+    claudeHome: capabilities.claudeHome,
+    claudeAppSupport: capabilities.claudeAppSupport,
   }));
   const schedulerProbes = new Map(await Promise.all(tasks
     .filter((task) => requiredTasks.includes(task.type) && task.enabled)

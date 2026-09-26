@@ -8,7 +8,7 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Added
 
-- None
+- Added the `claude-code` scheduler driver: one shared Claude Code desktop scheduled task can carry both required daily tasks, `register-external` prints `claudeCodeCommandLine`, and `automation verify` and `doctor` check the task file, enabled state, daily cron, time zone, and both commands
 
 ### Changed
 
@@ -16,7 +16,7 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Fixed
 
-- None
+- Agent-managed onboarding in Claude Code can now pass `doctor`; previously every non-Codex Agent schedule failed with "no trusted verifier" even though the documentation listed Claude Code as supported
 
 ### Security
 

@@ -18,7 +18,10 @@ export { BUILT_IN_TASKS };
 
 export const REQUIRED_TASK_TYPES = Object.freeze(['mail-sync', 'deadline-review']);
 
-function sharedCodexSchedules(tasks) {
+// Agent hosts whose one scheduled job may carry both required tasks.
+export const AGENT_HOST_DRIVERS = Object.freeze(['codex', 'claude-code']);
+
+function sharedHostSchedules(tasks) {
   const byType = new Map(tasks.map((task) => [task.type, task]));
   return REQUIRED_TASK_TYPES
     .filter((type) => byType.has(type))
@@ -164,6 +167,9 @@ export function markTaskRegistration(db, id, registration) {
   if (driver === 'codex' && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(externalId)) {
     throw new Error('Codex automation id contains unsupported characters');
   }
+  if (driver === 'claude-code' && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(externalId)) {
+    throw new Error('Claude Code scheduled task id contains unsupported characters');
+  }
   const requestedExecution = registration?.execution == null ? null : {
     node: String(registration.execution.node ?? ''),
     cli: String(registration.execution.cli ?? ''),
@@ -194,10 +200,10 @@ export function markTaskRegistration(db, id, registration) {
       && duplicateExecution.cli === requestedExecution.cli
       && duplicateExecution.home === requestedExecution.home
       && (duplicateExecution.platform ?? null) === requestedExecution.platform;
-    if (driver !== 'codex' || !requiredPair || duplicate.timezone !== task.timezone || !sameExecution) {
-      throw new Error(`External scheduler ${driver}/${externalId} is already registered to ${duplicate.type}; only the two required Codex tasks may share one matching heartbeat`);
+    if (!AGENT_HOST_DRIVERS.includes(driver) || !requiredPair || duplicate.timezone !== task.timezone || !sameExecution) {
+      throw new Error(`External scheduler ${driver}/${externalId} is already registered to ${duplicate.type}; only the two required tasks may share one matching Codex heartbeat or Claude Code scheduled task`);
     }
-    sharedSchedules = sharedCodexSchedules([task, duplicate]);
+    sharedSchedules = sharedHostSchedules([task, duplicate]);
     duplicateConfig = {
       ...duplicate.config,
       registration: {
