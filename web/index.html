@@ -70,6 +70,27 @@
         </article>
       </section>
 
+      <section class="tasks-section" aria-labelledby="tasks-heading" data-testid="tasks-section">
+        <div class="list-heading">
+          <div>
+            <h2 id="tasks-heading" data-i18n="tasksTitle">Assessments &amp; interviews</h2>
+            <p data-i18n="tasksBody">Open steps across all applications, soonest deadline first.</p>
+          </div>
+        </div>
+        <div class="task-list" id="open-tasks" data-testid="open-tasks" aria-live="polite" hidden></div>
+        <section class="empty-state task-empty" id="tasks-empty" data-testid="tasks-empty" hidden>
+          <h3 data-i18n="tasksEmptyTitle">No open assessments or interviews</h3>
+          <p data-i18n="tasksEmptyBody">Online assessments, coding tests, and interview steps with deadlines appear here.</p>
+        </section>
+        <details class="completed-tasks" id="completed-tasks" data-testid="completed-tasks" hidden>
+          <summary>
+            <span id="completed-tasks-label">Completed (0)</span>
+            <span class="details-icons" aria-hidden="true"><img class="details-plus" src="/icons/plus.svg" alt=""><img class="details-minus" src="/icons/minus.svg" alt=""></span>
+          </summary>
+          <div class="task-list" id="done-tasks" data-testid="done-tasks"></div>
+        </details>
+      </section>
+
       <section class="applications-section" aria-labelledby="applications-heading">
         <div class="list-heading">
           <div>
@@ -90,6 +111,7 @@
             <button data-testid="filter-interview" data-filter="interview" type="button" aria-pressed="false"><span data-i18n="filterInterview">Interview / Offer</span><b data-count="interview">0</b></button>
             <button data-testid="filter-closed" data-filter="closed" type="button" aria-pressed="false"><span data-i18n="filterClosed">Closed</span><b data-count="closed">0</b></button>
             <button data-testid="filter-preparing" data-filter="preparing" type="button" aria-pressed="false"><span data-i18n="filterPreparing">Preparing</span><b data-count="preparing">0</b></button>
+            <button data-testid="filter-tasks" data-filter="tasks" type="button" aria-pressed="false"><span data-i18n="filterTasks">Assessments / interviews</span><b data-count="tasks">0</b></button>
           </div>
           <span class="result-count" id="result-count" aria-live="polite">0 of 0</span>
         </div>
@@ -131,6 +153,11 @@
         <div><span class="fact-label" data-field-label="latest"></span><strong class="latest"></strong></div>
       </div>
 
+      <div class="card-tasks" data-testid="card-tasks" hidden>
+        <span class="card-tasks-label"></span>
+        <ul class="card-task-chips"></ul>
+      </div>
+
       <div class="next-action">
         <span class="next-action-label"></span>
         <p class="next-action-copy"></p>
@@ -142,6 +169,11 @@
           <span class="details-icons" aria-hidden="true"><img class="details-plus" src="/icons/plus.svg" alt=""><img class="details-minus" src="/icons/minus.svg" alt=""></span>
         </summary>
         <div class="details-content">
+          <section class="card-task-section" hidden>
+            <h3 class="card-task-title"></h3>
+            <p class="section-note card-task-note"></p>
+            <ul class="card-task-list" data-testid="card-task-list"></ul>
+          </section>
           <section class="history">
             <h3 class="history-title"></h3>
             <p class="section-note history-note"></p>
@@ -156,6 +188,22 @@
         </div>
       </details>
       <div class="record-meta"><span class="record-id"></span><span class="updated-at"></span></div>
+    </article>
+  </template>
+
+  <template id="task-template">
+    <article class="task-row" data-testid="task-row">
+      <div class="task-main">
+        <p class="task-application"><span class="task-company"></span><span class="task-role"></span></p>
+        <h3 class="task-title"></h3>
+        <p class="task-meta"><span class="task-kind"></span><span class="task-platform"></span></p>
+        <p class="task-due-note"></p>
+      </div>
+      <div class="task-when">
+        <time class="task-deadline"></time>
+        <span class="task-badge"></span>
+      </div>
+      <button class="task-action" type="button"></button>
     </article>
   </template>
 

@@ -9,10 +9,14 @@
 ### 新增
 
 - 新增 `claude-code` 调度驱动：一个 Claude Code 桌面版共享定时任务即可承载两个必需的每日任务；`register-external` 输出 `claudeCodeCommandLine`，`automation verify` 和 `doctor` 会核对任务文件、启用状态、每日 cron、时区和两条命令
+- 看板新增“测评与面试准备”区域，汇总所有申请中待完成的在线测评、编程测试、视频面试等面试前步骤，截止时间最近的排在前面；按工作区时区显示截止时间、剩余天数标记和截止说明，并提供“标记完成”与“撤销”按钮
+- 看板新增“测评 / 面试”筛选，每张申请卡片也会列出待完成的步骤
+- 新增 `career-journal task add|list|done|reopen` 命令，用于记录这些步骤；截止时间可选，须为带时区偏移的 ISO 8601 时间；重复运行 `task add` 会更新同一条记录，不会产生重复
 
 ### 变更
 
-- 无
+- 数据库结构版本 3 新增 `application_tasks` 表；已有工作区需先运行 `career-journal migrate --dry-run`、创建备份，再运行 `career-journal migrate --apply`，之后看板才能启动
+- 看板与申请详情接口的返回内容现在包含每条申请的 `tasks`
 
 ### 修复
 
@@ -20,7 +24,7 @@
 
 ### 安全
 
-- 无
+- 新增的 `POST /api/tasks/:id/status` 接口与其他本地接口一样，只接受本机 Host 与 Origin，且修改请求必须使用 JSON；任务的来源元数据不会发送到浏览器
 
 ## [1.0.5] - 2026-09-23
 

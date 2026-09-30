@@ -3,9 +3,15 @@ import {
   applicationStats,
   compareEventsNewestFirst,
   filterApplications,
+  hasOpenTask,
   latestEvent,
   materialKindLabel,
+  openTasks,
   suggestedNextAction,
+  taskDeadlineLabel,
+  taskDeadlineStatus,
+  taskKindLabel,
+  taskQueue,
   verificationLabel,
 } from './dashboard-model.js';
 
@@ -30,6 +36,11 @@ const copy = {
     recorded: 'Recorded', source: 'Source', updated: 'Updated', record: 'Record', openJob: 'Open job posting',
     submitted: 'Submitted', draft: 'Draft', verified: 'Verification', checksum: 'SHA-256', openMaterial: 'Open file', openFolder: 'Show in folder', folderOpened: 'Shown in folder', folderError: 'Could not open folder', results: (visible, total) => `${visible} of ${total}`,
     generated: (value) => `Dashboard updated ${value}`, languageLabel: 'Switch dashboard language to Chinese',
+    tasksTitle: 'Assessments & interviews', tasksBody: 'Open steps across all applications, soonest deadline first.',
+    tasksEmptyTitle: 'No open assessments or interviews', tasksEmptyBody: 'Online assessments, coding tests, and interview steps with deadlines appear here.',
+    filterTasks: 'Assessments / interviews', markDone: 'Mark done', undo: 'Undo', taskUpdateError: 'Could not update',
+    completedTasks: (count) => `Completed (${count})`, taskCompleted: 'Completed', platform: 'Platform', deadline: 'Deadline',
+    openSteps: 'Open steps', cardTasks: 'Assessment and interview steps', cardTasksNote: 'Deadlines use the workspace time zone.',
   },
   'zh-CN': {
     localWorkspace: '本地档案', heroEyebrow: '让每一步都有记录', heroTitle: '求职进度总览',
@@ -48,6 +59,11 @@ const copy = {
     recorded: '记录时间', source: '来源', updated: '更新', record: '记录', openJob: '打开职位页面', submitted: '已提交', draft: '草稿',
     verified: '验证状态', checksum: 'SHA-256', openMaterial: '打开文件', openFolder: '打开所在文件夹', folderOpened: '已在文件夹中显示', folderError: '无法打开文件夹', results: (visible, total) => `显示 ${visible} / ${total} 条`,
     generated: (value) => `看板更新于 ${value}`, languageLabel: '将看板语言切换为英文',
+    tasksTitle: '测评与面试准备', tasksBody: '汇总所有申请中待完成的步骤，截止时间最近的排在前面。',
+    tasksEmptyTitle: '暂无待完成的测评或面试', tasksEmptyBody: '在线测评、编程测试和面试等带截止时间的步骤会显示在这里。',
+    filterTasks: '测评 / 面试', markDone: '标记完成', undo: '撤销', taskUpdateError: '更新失败',
+    completedTasks: (count) => `已完成（${count}）`, taskCompleted: '已完成', platform: '平台', deadline: '截止时间',
+    openSteps: '待完成步骤', cardTasks: '测评与面试步骤', cardTasksNote: '截止时间按工作区时区显示。',
   },
 };
 
@@ -67,6 +83,9 @@ const elements = {
   loading: document.querySelector('#loading'), error: document.querySelector('#error'), errorMessage: document.querySelector('#error-message'),
   resultCount: document.querySelector('#result-count'), template: document.querySelector('#application-template'),
   languageToggle: document.querySelector('#language-toggle'), generatedAt: document.querySelector('#generated-at'),
+  openTasks: document.querySelector('#open-tasks'), doneTasks: document.querySelector('#done-tasks'),
+  tasksEmpty: document.querySelector('#tasks-empty'), completedTasks: document.querySelector('#completed-tasks'),
+  completedTasksLabel: document.querySelector('#completed-tasks-label'), taskTemplate: document.querySelector('#task-template'),
 };
 
 function initialLocale() {
@@ -91,6 +110,32 @@ function formatDate(value, { includeTime = false } = {}) {
   try { return new Intl.DateTimeFormat(state.locale, options).format(date); }
   catch { return new Intl.DateTimeFormat(state.locale, { year: 'numeric', month: 'short', day: 'numeric' }).format(date); }
 }
+
+function formatDeadline(value, { compact = false } = {}) {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return String(value);
+  const options = compact
+    ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
+    : { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' };
+  try { return new Intl.DateTimeFormat(state.locale, { ...options, timeZone: state.timezone }).format(date); }
+  catch { return new Intl.DateTimeFormat(state.locale, options).format(date); }
+}
+
+function taskBadge(task) {
+  const badge = document.createElement('span');
+  if (task.status === 'done') {
+    badge.className = 'task-badge is-done';
+    badge.textContent = t('taskCompleted');
+    return badge;
+  }
+  const deadline = taskDeadlineStatus(task, { timeZone: state.timezone });
+  badge.className = `task-badge is-${deadline.state}${deadline.urgent && deadline.state !== 'overdue' ? ' is-urgent' : ''}`;
+  badge.textContent = taskDeadlineLabel(deadline, state.locale);
+  return badge;
+}
+
+const knownTaskKinds = new Set(['assessment', 'interview', 'other']);
+function taskKindClass(kind) { return `task-kind task-kind-${knownTaskKinds.has(kind) ? kind : 'other'}`; }
 
 function initials(company) {
   const words = String(company ?? '').trim().split(/\s+/).filter(Boolean);
@@ -169,6 +214,99 @@ function renderMaterials(container, application) {
   }
 }
 
+async function updateTaskStatus(task, status, button) {
+  button.disabled = true;
+  try {
+    const response = await fetch(`/api/tasks/${encodeURIComponent(task.id)}/status`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status }),
+    });
+    if (!response.ok) throw new Error('Task update failed');
+    const updated = (await response.json()).task;
+    const application = state.applications.find((item) => item.id === task.applicationId);
+    if (application) application.tasks = (application.tasks ?? []).map((item) => (item.id === updated.id ? updated : item));
+    render();
+  } catch {
+    button.textContent = t('taskUpdateError');
+    window.setTimeout(() => { button.textContent = status === 'done' ? t('markDone') : t('undo'); button.disabled = false; }, 1800);
+  }
+}
+
+function renderTaskRow(task) {
+  const fragment = elements.taskTemplate.content.cloneNode(true);
+  const row = fragment.querySelector('.task-row');
+  const completed = task.status === 'done';
+  row.dataset.taskId = task.id;
+  row.classList.toggle('is-completed', completed);
+  setText(row, '.task-company', task.company);
+  setText(row, '.task-role', task.role);
+  setText(row, '.task-title', task.title);
+  const kind = row.querySelector('.task-kind'); kind.className = taskKindClass(task.kind); kind.textContent = taskKindLabel(task.kind, state.locale);
+  const platform = row.querySelector('.task-platform');
+  platform.textContent = task.platform ? `${t('platform')}: ${task.platform}` : '';
+  platform.hidden = !task.platform;
+  const dueNote = row.querySelector('.task-due-note');
+  dueNote.textContent = task.dueNote ?? '';
+  dueNote.hidden = !task.dueNote;
+  const deadline = row.querySelector('.task-deadline');
+  if (task.dueAt) { deadline.dateTime = task.dueAt; deadline.textContent = formatDeadline(task.dueAt); }
+  deadline.hidden = !task.dueAt;
+  row.querySelector('.task-badge').replaceWith(taskBadge(task));
+  const action = row.querySelector('.task-action');
+  const label = completed ? t('undo') : t('markDone');
+  action.textContent = label;
+  action.setAttribute('aria-label', `${label}: ${task.title}`);
+  action.addEventListener('click', () => updateTaskStatus(task, completed ? 'open' : 'done', action));
+  return fragment;
+}
+
+function renderTasks() {
+  const { open, done } = taskQueue(state.applications);
+  elements.openTasks.replaceChildren(...open.map(renderTaskRow));
+  elements.openTasks.hidden = open.length === 0;
+  elements.tasksEmpty.hidden = open.length !== 0;
+  elements.doneTasks.replaceChildren(...done.map(renderTaskRow));
+  elements.completedTasks.hidden = done.length === 0;
+  elements.completedTasksLabel.textContent = t('completedTasks')(done.length);
+}
+
+function renderCardTasks(card, application) {
+  const pending = openTasks(application);
+  const line = card.querySelector('.card-tasks');
+  line.hidden = pending.length === 0;
+  setText(card, '.card-tasks-label', t('openSteps'));
+  card.querySelector('.card-task-chips').replaceChildren(...pending.map((task) => {
+    const chip = document.createElement('li'); chip.className = 'card-task-chip';
+    const title = document.createElement('span'); title.className = 'card-task-name'; title.textContent = task.title;
+    chip.append(title);
+    if (task.dueAt) { const due = document.createElement('time'); due.dateTime = task.dueAt; due.textContent = formatDeadline(task.dueAt, { compact: true }); chip.append(due); }
+    chip.append(taskBadge(task));
+    return chip;
+  }));
+
+  const tasks = [...pending, ...(application.tasks ?? []).filter((task) => task.status !== 'open')];
+  const section = card.querySelector('.card-task-section');
+  section.hidden = tasks.length === 0;
+  setText(card, '.card-task-title', t('cardTasks'));
+  setText(card, '.card-task-note', t('cardTasksNote'));
+  card.querySelector('.card-task-list').replaceChildren(...tasks.map((task) => {
+    const item = document.createElement('li'); item.className = `card-task-item${task.status === 'done' ? ' is-completed' : ''}`;
+    const top = document.createElement('div'); top.className = 'event-top';
+    const title = document.createElement('strong'); title.textContent = task.title;
+    top.append(title, taskBadge(task));
+    const meta = document.createElement('p'); meta.className = 'micro';
+    meta.textContent = [
+      taskKindLabel(task.kind, state.locale),
+      task.platform ? `${t('platform')}: ${task.platform}` : null,
+      `${t('deadline')}: ${task.dueAt ? formatDeadline(task.dueAt) : taskDeadlineLabel({ state: 'none' }, state.locale)}`,
+    ].filter(Boolean).join(' · ');
+    item.append(top, meta);
+    for (const value of [task.dueNote, task.note].filter(Boolean)) {
+      const note = document.createElement('p'); note.className = 'event-note'; note.textContent = value; item.append(note);
+    }
+    return item;
+  }));
+}
+
 function renderCard(application) {
   const fragment = elements.template.content.cloneNode(true);
   const card = fragment.querySelector('.application-card');
@@ -194,6 +332,7 @@ function renderCard(application) {
   setText(card, '.history-note', t('historyNote'));
   setText(card, '.materials-title', t('materials'));
   setText(card, '.materials-note', t('materialsNote'));
+  renderCardTasks(card, application);
   renderTimeline(card.querySelector('.timeline'), application);
   renderMaterials(card.querySelector('.material-list'), application);
   const jobLink = card.querySelector('.job-link');
@@ -218,8 +357,12 @@ function render() {
   applyLocale();
   const stats = applicationStats(state.applications);
   for (const key of ['applied', 'waiting', 'interview', 'closed', 'preparing']) document.querySelector(`#stat-${key}`).textContent = stats[key];
-  const filterCounts = { all: state.applications.length, waiting: stats.waiting, interview: stats.interview, closed: stats.closed, preparing: stats.preparing };
+  const filterCounts = {
+    all: state.applications.length, waiting: stats.waiting, interview: stats.interview, closed: stats.closed, preparing: stats.preparing,
+    tasks: state.applications.filter(hasOpenTask).length,
+  };
   for (const [key, value] of Object.entries(filterCounts)) document.querySelector(`[data-count="${key}"]`).textContent = value;
+  renderTasks();
   const visible = filterApplications(state.applications, { group: state.group, query: elements.search.value });
   elements.list.replaceChildren(...visible.map(renderCard));
   elements.empty.hidden = visible.length !== 0;

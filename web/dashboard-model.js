@@ -31,10 +31,84 @@ export function applicationStats(applications) {
   return stats;
 }
 
+function taskDueTime(task) {
+  const value = Date.parse(task?.dueAt ?? '');
+  return Number.isNaN(value) ? null : value;
+}
+
+export function compareTasksByDue(left, right) {
+  const leftDue = taskDueTime(left);
+  const rightDue = taskDueTime(right);
+  if (leftDue !== rightDue) {
+    if (leftDue === null) return 1;
+    if (rightDue === null) return -1;
+    return leftDue - rightDue;
+  }
+  return String(left.createdAt ?? '').localeCompare(String(right.createdAt ?? ''))
+    || String(left.id ?? '').localeCompare(String(right.id ?? ''));
+}
+
+export function openTasks(application) {
+  return (application?.tasks ?? []).filter((task) => task.status === 'open').sort(compareTasksByDue);
+}
+
+export function hasOpenTask(application) {
+  return (application?.tasks ?? []).some((task) => task.status === 'open');
+}
+
+export function taskQueue(applications) {
+  const open = [];
+  const done = [];
+  for (const application of applications ?? []) {
+    for (const task of application.tasks ?? []) {
+      const item = { ...task, applicationId: application.id, company: application.company, role: application.role };
+      if (task.status === 'open') open.push(item);
+      else if (task.status === 'done') done.push(item);
+    }
+  }
+  open.sort(compareTasksByDue);
+  done.sort((left, right) => (Date.parse(right.updatedAt ?? 0) || 0) - (Date.parse(left.updatedAt ?? 0) || 0) || compareTasksByDue(left, right));
+  return { open, done };
+}
+
+function calendarDay(time, timeZone) {
+  const options = { year: 'numeric', month: '2-digit', day: '2-digit' };
+  let parts;
+  try { parts = new Intl.DateTimeFormat('en-US', { ...options, timeZone }).formatToParts(new Date(time)); }
+  catch { parts = new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'UTC' }).formatToParts(new Date(time)); }
+  const value = (type) => Number(parts.find((part) => part.type === type)?.value);
+  return Date.UTC(value('year'), value('month') - 1, value('day')) / 86_400_000;
+}
+
+export function taskDeadlineStatus(task, { now = Date.now(), timeZone = 'UTC' } = {}) {
+  const due = taskDueTime(task);
+  if (due === null) return { state: 'none', daysLeft: null, urgent: false };
+  const current = typeof now === 'number' ? now : Date.parse(now);
+  if (due < current) return { state: 'overdue', daysLeft: null, urgent: true };
+  const daysLeft = Math.max(0, calendarDay(due, timeZone) - calendarDay(current, timeZone));
+  return { state: daysLeft === 0 ? 'today' : 'upcoming', daysLeft, urgent: daysLeft < 3 };
+}
+
+const deadlineCopy = {
+  en: { none: 'No deadline', overdue: 'Overdue', today: 'Due today', upcoming: (days) => (days === 1 ? '1 day left' : `${days} days left`) },
+  'zh-CN': { none: '无截止时间', overdue: '已过期', today: '今天截止', upcoming: (days) => `还剩 ${days} 天` },
+};
+
+export function taskDeadlineLabel(status, locale = 'en') {
+  const labels = deadlineCopy[locale === 'zh-CN' ? 'zh-CN' : 'en'];
+  return status.state === 'upcoming' ? labels.upcoming(status.daysLeft) : labels[status.state];
+}
+
+function matchesFilter(application, group) {
+  if (group === 'all') return true;
+  if (group === 'tasks') return hasOpenTask(application);
+  return applicationGroup(application) === group;
+}
+
 export function filterApplications(applications, { group = 'all', query = '' } = {}) {
   const normalized = String(query).trim().toLocaleLowerCase();
   return (applications ?? []).filter((application) => {
-    const matchesGroup = group === 'all' || applicationGroup(application) === group;
+    const matchesGroup = matchesFilter(application, group);
     const displayedExternalId = application.externalId ? `#${application.externalId}` : null;
     const haystack = [application.company, application.role, application.externalId, displayedExternalId, application.id]
       .filter(Boolean).join(' ').toLocaleLowerCase();
@@ -57,6 +131,11 @@ const materialKinds = {
   'zh-CN': { resume: '简历', 'cover-letter': '求职信', cover_letter: '求职信', cv: '履历', portfolio: '作品集' },
 };
 
+const taskKinds = {
+  en: { assessment: 'Assessment', interview: 'Interview', other: 'Other step' },
+  'zh-CN': { assessment: '测评', interview: '面试', other: '其他步骤' },
+};
+
 const verificationStates = {
   en: { passed: 'Passed', failed: 'Failed', pending: 'Pending' },
   'zh-CN': { passed: '通过', failed: '未通过', pending: '待验证' },
@@ -74,6 +153,10 @@ export function materialKindLabel(kind, locale = 'en') {
 
 export function verificationLabel(verification, locale = 'en') {
   return localizedEnum(verification, locale, verificationStates);
+}
+
+export function taskKindLabel(kind, locale = 'en') {
+  return localizedEnum(kind, locale, taskKinds);
 }
 
 const nextActions = {

@@ -8,6 +8,7 @@ import { setup } from '../../src/commands/setup.mjs';
 import { openHomeDatabase } from '../../src/runtime/home.mjs';
 import { createServer } from '../../src/server/app.mjs';
 import { archiveArtifact } from '../../src/domain/artifacts.mjs';
+import { getTask, upsertTask } from '../../src/domain/tasks.mjs';
 
 async function withServer(run, serverOptions = {}) {
   const home = await mkdtemp(path.join(os.tmpdir(), 'jobops-server-'));
@@ -42,6 +43,7 @@ test('health, create, list, detail, and idempotent event routes work', async () 
   assert.equal(dashboard.applications[0].events[0].sourceKind, 'api');
   assert.equal('source' in dashboard.applications[0].events[0], false);
   assert.deepEqual(dashboard.applications[0].artifacts, []);
+  assert.deepEqual(dashboard.applications[0].tasks, []);
 }));
 
 test('opens and reveals an archived material by id without exposing its storage path', async () => {
@@ -149,4 +151,100 @@ test('accepts the friendly localhost Host and matching Origin hostname', async (
     request.end(body);
   });
   assert.equal(result, 201);
+}));
+
+function rawRequest(baseUrl, pathname, { method = 'POST', headers = {}, body = '' } = {}) {
+  const target = new URL(`${baseUrl}${pathname}`);
+  return new Promise((resolve, reject) => {
+    const request = http.request({ hostname: target.hostname, port: target.port, path: target.pathname, method, headers: { ...headers, 'content-length': Buffer.byteLength(body) } }, (response) => {
+      let text = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { text += chunk; });
+      response.once('end', () => resolve({ status: response.statusCode, body: text ? JSON.parse(text) : null }));
+    });
+    request.once('error', reject);
+    request.end(body);
+  });
+}
+
+async function seedTasks(baseUrl, db) {
+  const application = await (await fetch(`${baseUrl}/api/applications`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ company: 'Acme', role: 'SWE Intern' }),
+  })).json();
+  const later = upsertTask(db, { id: 'task-later', applicationId: application.id, kind: 'interview', title: 'Video interview', platform: 'HireVue', dueAt: '2026-10-03T17:00:00Z', dueNote: 'Deadline computed as received time + 7 days', source: { kind: 'email', messageId: 'private-message-id' } }, '2026-09-20T00:00:00Z');
+  const none = upsertTask(db, { id: 'task-none', applicationId: application.id, kind: 'other', title: 'Portfolio upload', dueNote: 'Email gives no deadline' }, '2026-09-20T00:00:00Z');
+  const soon = upsertTask(db, { id: 'task-soon', applicationId: application.id, kind: 'assessment', title: 'Coding test', platform: 'CodeSignal', dueAt: '2026-10-01T09:00:00-07:00', note: 'Use Python' }, '2026-09-20T00:00:00Z');
+  return { application, later, none, soon };
+}
+
+test('dashboard includes each application task in camelCase deadline order without private source data', async () => withServer(async (baseUrl, db) => {
+  const { application } = await seedTasks(baseUrl, db);
+  const dashboard = await (await fetch(`${baseUrl}/api/dashboard`)).json();
+  const [item] = dashboard.applications;
+  assert.equal(item.id, application.id);
+  assert.deepEqual(item.tasks.map((task) => task.id), ['task-soon', 'task-later', 'task-none']);
+  assert.deepEqual(item.tasks[1], {
+    id: 'task-later', kind: 'interview', title: 'Video interview', platform: 'HireVue', dueAt: '2026-10-03T17:00:00Z',
+    dueNote: 'Deadline computed as received time + 7 days', status: 'open', note: '', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z',
+  });
+  assert.equal(item.tasks[2].dueAt, null);
+  assert.equal(item.tasks[2].platform, null);
+  assert.doesNotMatch(JSON.stringify(dashboard), /private-message-id|source_json|applicationId/);
+  const detail = await (await fetch(`${baseUrl}/api/applications/${application.id}`)).json();
+  assert.deepEqual(detail.tasks.map((task) => task.id), ['task-soon', 'task-later', 'task-none']);
+}));
+
+test('task status route marks a task done and reopens it', async () => withServer(async (baseUrl, db) => {
+  await seedTasks(baseUrl, db);
+  const done = await fetch(`${baseUrl}/api/tasks/task-soon/status`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'done' }),
+  });
+  assert.equal(done.status, 200);
+  const body = await done.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.task.id, 'task-soon');
+  assert.equal(body.task.status, 'done');
+  assert.deepEqual(Object.keys(body.task), ['id', 'kind', 'title', 'platform', 'dueAt', 'dueNote', 'status', 'note', 'createdAt', 'updatedAt']);
+  assert.equal(getTask(db, 'task-soon').status, 'done');
+  const dashboard = await (await fetch(`${baseUrl}/api/dashboard`)).json();
+  assert.equal(dashboard.applications[0].tasks.find((task) => task.id === 'task-soon').status, 'done');
+
+  const reopened = await fetch(`${baseUrl}/api/tasks/task-soon/status`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'open' }),
+  });
+  assert.equal(reopened.status, 200);
+  assert.equal((await reopened.json()).task.status, 'open');
+  assert.equal(getTask(db, 'task-soon').status, 'open');
+}));
+
+test('task status route rejects cross-origin, invalid-host, non-JSON, malformed, unknown, and non-POST requests', async () => withServer(async (baseUrl, db) => {
+  await seedTasks(baseUrl, db);
+  const before = getTask(db, 'task-later');
+  const body = JSON.stringify({ status: 'done' });
+  const pathname = '/api/tasks/task-later/status';
+  const port = new URL(baseUrl).port;
+
+  const crossOrigin = await rawRequest(baseUrl, pathname, { headers: { host: `127.0.0.1:${port}`, origin: 'https://untrusted.example', 'content-type': 'application/json' }, body });
+  assert.deepEqual(crossOrigin, { status: 403, body: { error: 'Loopback Host and Origin required' } });
+  const wrongHost = await rawRequest(baseUrl, pathname, { headers: { host: 'untrusted.example', 'content-type': 'application/json' }, body });
+  assert.deepEqual(wrongHost, { status: 403, body: { error: 'Loopback Host and Origin required' } });
+  const nonJson = await rawRequest(baseUrl, pathname, { headers: { host: `127.0.0.1:${port}`, 'content-type': 'text/plain' }, body });
+  assert.deepEqual(nonJson, { status: 415, body: { error: 'Mutating API requests require application/json' } });
+  const invalidJson = await fetch(`${baseUrl}${pathname}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' });
+  assert.equal(invalidJson.status, 400);
+  assert.deepEqual(await invalidJson.json(), { error: 'Invalid JSON body' });
+  for (const payload of [{ status: 'archived' }, {}, null, ['done']]) {
+    const invalidStatus = await fetch(`${baseUrl}${pathname}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+    assert.equal(invalidStatus.status, 400, JSON.stringify(payload));
+    assert.deepEqual(await invalidStatus.json(), { error: 'Task status must be open or done' });
+  }
+  const unknown = await fetch(`${baseUrl}/api/tasks/missing/status`, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+  assert.equal(unknown.status, 404);
+  assert.deepEqual(await unknown.json(), { error: 'Task not found' });
+  const getRequest = await fetch(`${baseUrl}${pathname}`);
+  assert.equal(getRequest.status, 404);
+  assert.deepEqual(await getRequest.json(), { error: 'Not found' });
+  const putRequest = await fetch(`${baseUrl}${pathname}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body });
+  assert.equal(putRequest.status, 404);
+  assert.deepEqual(getTask(db, 'task-later'), before);
 }));

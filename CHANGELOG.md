@@ -9,10 +9,14 @@ All notable changes are documented here. This project follows Semantic Versionin
 ### Added
 
 - Added the `claude-code` scheduler driver: one shared Claude Code desktop scheduled task can carry both required daily tasks, `register-external` prints `claudeCodeCommandLine`, and `automation verify` and `doctor` check the task file, enabled state, daily cron, time zone, and both commands
+- Added an Assessments & interviews dashboard section that lists every open online assessment, coding test, video interview, or other pre-interview step across applications, soonest deadline first, with the deadline in the workspace time zone, a time-left badge, the deadline note, and Mark done / Undo actions
+- Added an Assessments / interviews dashboard filter and an open-steps line on each application card
+- Added `career-journal task add|list|done|reopen` for recording these steps with an optional ISO 8601 deadline that includes a UTC offset; re-running `task add` updates the same task instead of creating a duplicate
 
 ### Changed
 
-- None
+- Database schema version 3 adds the `application_tasks` table; existing workspaces must run `career-journal migrate --dry-run`, create a backup, and run `career-journal migrate --apply` before the dashboard starts
+- Dashboard and application detail API responses now include each application's `tasks`
 
 ### Fixed
 
@@ -20,7 +24,7 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Security
 
-- None
+- The new `POST /api/tasks/:id/status` endpoint uses the same loopback Host and Origin checks and JSON-only mutation rule as the other local API routes, and task source metadata is never sent to the browser
 
 ## [1.0.5] - 2026-09-23
 

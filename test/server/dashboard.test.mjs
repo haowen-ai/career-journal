@@ -29,6 +29,16 @@ test('serves the bilingual career-journal dashboard shell and rejects path trave
     assert.match(html, /data-testid="application-details"/);
     assert.match(html, /data-testid="timeline"/);
     assert.match(html, /data-testid="materials"/);
+    assert.match(html, /data-testid="tasks-section"/);
+    assert.match(html, /data-testid="open-tasks"/);
+    assert.match(html, /data-testid="tasks-empty"/);
+    assert.match(html, /data-testid="completed-tasks"/);
+    assert.match(html, /data-testid="task-row"/);
+    assert.match(html, /data-testid="filter-tasks"/);
+    assert.match(html, /data-testid="card-tasks"/);
+    assert.match(html, /data-testid="card-task-list"/);
+    assert.ok(html.indexOf('class="stats"') < html.indexOf('data-testid="tasks-section"'));
+    assert.ok(html.indexOf('data-testid="tasks-section"') < html.indexOf('id="applications-heading"'));
     assert.equal((await fetch(`${baseUrl}/dashboard-model.js`)).status, 200);
     const icon = await fetch(`${baseUrl}/icons/search.svg`);
     assert.equal(icon.status, 200);
