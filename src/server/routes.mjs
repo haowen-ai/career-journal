@@ -1,5 +1,6 @@
 import { createApplication, listApplications } from '../commands/application.mjs';
 import { recordEvent } from '../domain/events.mjs';
+import { getTask, listTasks, setTaskStatus } from '../domain/tasks.mjs';
 import { createReadStream } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
@@ -52,7 +53,12 @@ function applicationDetail(db, id) {
     .map((event) => ({ ...event, source: JSON.parse(event.source) }));
   const artifacts = db.prepare(`SELECT id, kind, lifecycle, file_name fileName, sha256, submitted_at submittedAt,
     recorded_at recordedAt, verification FROM artifacts WHERE application_id = ? ORDER BY recorded_at DESC, id`).all(id);
-  return { ...application, events, artifacts };
+  const tasks = listTasks(db, { applicationId: id }).map(publicTask);
+  return { ...application, events, artifacts, tasks };
+}
+
+function publicTask({ id, kind, title, platform, dueAt, dueNote, status, note, createdAt, updatedAt }) {
+  return { id, kind, title, platform, dueAt, dueNote, status, note, createdAt, updatedAt };
 }
 
 const safeSourceKinds = new Set(['api', 'cli', 'email', 'import', 'manual', 'system']);
@@ -169,6 +175,14 @@ export async function handleApi(request, response, url, { db, config, artifactRo
       await revealFile(resolvedFile);
       sendJson(response, 200, { ok: true });
     }
+    return true;
+  }
+  const taskStatusMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/status$/);
+  if (taskStatusMatch && request.method === 'POST') {
+    const taskId = decodeURIComponent(taskStatusMatch[1]);
+    const input = await readJson(request);
+    if (!getTask(db, taskId)) sendJson(response, 404, { error: 'Task not found' });
+    else sendJson(response, 200, { ok: true, task: publicTask(setTaskStatus(db, taskId, input?.status)) });
     return true;
   }
   if (url.pathname === '/api/applications' && request.method === 'POST') {

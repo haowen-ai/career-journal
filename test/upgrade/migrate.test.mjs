@@ -9,6 +9,8 @@ import { migrateHome } from '../../src/commands/migrate.mjs';
 import { openDatabase, migrate, schemaMigrations } from '../../src/storage/database.mjs';
 import { defaultConfig } from '../../src/config/defaults.mjs';
 
+const nextVersion = schemaMigrations.at(-1).version + 1;
+
 async function withHome(run) {
   const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-migrate-'));
   try { await run(home); } finally { await rm(home, { recursive: true, force: true }); }
@@ -53,7 +55,7 @@ test('dry-run inspects an existing database without changing its journal mode', 
 
 test('migration apply is idempotent', async () => withHome(async (home) => {
   await setup(home, { timezone: 'UTC', email: { mode: 'skip' } });
-  assert.deepEqual((await migrateHome(home)).applied, [1, 2]);
+  assert.deepEqual((await migrateHome(home)).applied, [1, 2, 3]);
   assert.deepEqual((await migrateHome(home)).applied, []);
 }));
 
@@ -67,10 +69,11 @@ test('migration upgrades and preserves an alpha.5 legacy database in place', asy
   const report = await migrateHome(home);
 
   assert.equal(report.database, database);
-  assert.deepEqual(report.applied, [2]);
+  assert.deepEqual(report.applied, [2, 3]);
   const reopened = openDatabase(database);
   assert.equal(reopened.prepare("SELECT company FROM applications WHERE id = 'legacy'").get().company, 'Legacy Co');
   assert.ok(reopened.prepare('PRAGMA table_info(email_accounts)').all().some((column) => column.name === 'config_json'));
+  assert.equal(reopened.prepare("SELECT COUNT(*) count FROM application_tasks WHERE application_id = 'legacy'").get().count, 0);
   reopened.close();
   await assert.rejects(() => stat(path.join(home, '.career-journal', 'career-journal.db')), { code: 'ENOENT' });
 }));
@@ -83,7 +86,7 @@ test('failed migration restores the exact pre-migration database', async () => w
   db.prepare("INSERT INTO applications (id, company, role, status, created_at, updated_at) VALUES ('keep', 'Keep Co', 'Role', 'lead', '2026-01-01', '2026-01-01')").run();
   db.close();
   const before = await readFile(database);
-  const failing = [...schemaMigrations, { version: 3, name: 'fail', sql: 'CREATE TABLE transient(value TEXT); INSERT INTO missing_table VALUES (1);' }];
+  const failing = [...schemaMigrations, { version: nextVersion, name: 'fail', sql: 'CREATE TABLE transient(value TEXT); INSERT INTO missing_table VALUES (1);' }];
   await assert.rejects(() => migrateHome(home, { migrations: failing }), /missing_table/);
   assert.deepEqual(await readFile(database), before);
   const restored = openDatabase(database);
@@ -99,7 +102,7 @@ test('a locked migration never replaces the live database or loses another commi
   const writer = openDatabase(database);
   writer.exec('PRAGMA busy_timeout = 25; BEGIN IMMEDIATE');
   writer.prepare("INSERT INTO applications (id, company, role, status, created_at, updated_at) VALUES ('concurrent', 'Concurrent Co', 'Role', 'lead', '2026-01-01', '2026-01-01')").run();
-  const candidates = [...schemaMigrations, { version: 3, name: 'locked', sql: 'CREATE TABLE should_not_apply(value TEXT);' }];
+  const candidates = [...schemaMigrations, { version: nextVersion, name: 'locked', sql: 'CREATE TABLE should_not_apply(value TEXT);' }];
   await assert.rejects(() => migrateHome(home, { migrations: candidates, busyTimeoutMs: 25 }), /locked/);
   writer.exec('COMMIT');
   writer.close();

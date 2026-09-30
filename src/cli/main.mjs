@@ -10,6 +10,7 @@ Commands:
   application   Add, list, or show applications
   event         Record an application event
   artifact      Add a draft or confirmed submitted artifact
+  task          Track assessment and interview steps with deadlines
   export        Export local records
   start         Start the local dashboard and API
   automation    Configure and run scheduled tasks
