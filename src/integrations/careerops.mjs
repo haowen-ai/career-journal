@@ -105,3 +105,29 @@ export async function runCareerOps(request, config = {}, dependencies = {}) {
   catch { throw new Error('CareerOps returned invalid JSON'); }
   return validateResult(result, structured);
 }
+
+// Read-only role scan through the same pinned bridge:
+//   node <careerops-root>/career-journal-adapter.mjs scan
+// stdin: { "action": "scan", "readOnly": true }
+// stdout: { "ok": true, "roles": [{ id, company, title, url, locations[] | location, postedAt, description }] }
+export async function runCareerOpsScan(config = {}, dependencies = {}) {
+  const health = await detectCareerOps(config);
+  if (!health.ok) throw new Error(health.detail);
+  const execute = dependencies.execute ?? executeProcess;
+  const execution = await execute({
+    command: config.nodeExecutable ?? process.execPath,
+    args: [health.entrypoint, 'scan'],
+    cwd: health.root,
+    stdin: JSON.stringify({ action: 'scan', readOnly: true }),
+    timeoutMs: config.scanTimeoutMs ?? 300_000,
+  });
+  if (execution.exitCode !== 0) {
+    const detail = String(execution.stderr ?? '').trim().slice(0, 2_000);
+    throw new Error(`CareerOps scan failed${detail ? `: ${detail}` : ''}`);
+  }
+  let result;
+  try { result = JSON.parse(String(execution.stdout ?? '')); }
+  catch { throw new Error('CareerOps scan returned invalid JSON'); }
+  if (!result || result.ok !== true || !Array.isArray(result.roles)) throw new Error('CareerOps scan did not report a successful role list');
+  return result;
+}

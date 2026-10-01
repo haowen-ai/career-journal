@@ -1,0 +1,71 @@
+{
+  "jobs": [
+    {
+      "id": 4000001,
+      "internal_job_id": 3900001,
+      "title": "Machine Learning Intern, Summer 2027",
+      "company_name": "Example Corp",
+      "requisition_id": "REQ-1001",
+      "absolute_url": "https://job-boards.greenhouse.io/examplecorp/jobs/4000001",
+      "location": { "name": "New York, NY" },
+      "offices": [{ "id": 1, "name": "New York", "location": "New York, NY" }],
+      "departments": [{ "id": 10, "name": "Engineering" }],
+      "first_published": "2026-09-28T14:00:00-04:00",
+      "updated_at": "2026-09-29T09:00:00-04:00",
+      "content": "&lt;p&gt;Join our applied machine learning team for Summer 2027.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Pursuing a Bachelor&amp;#39;s or Master&amp;#39;s degree in Computer Science&lt;/li&gt;&lt;li&gt;Python &amp;amp; SQL&lt;/li&gt;&lt;/ul&gt;"
+    },
+    {
+      "id": 4000002,
+      "title": "Data Science Intern - Fall 2026",
+      "company_name": "Example Corp",
+      "absolute_url": "https://job-boards.greenhouse.io/examplecorp/jobs/4000002",
+      "location": { "name": "Seattle, WA" },
+      "departments": [{ "id": 11, "name": "Data" }],
+      "updated_at": "2026-09-20T10:00:00Z",
+      "content": "&lt;p&gt;A fall co-op on the data science team.&lt;/p&gt;"
+    },
+    {
+      "id": 4000003,
+      "title": "Software Engineer Intern, Summer 2027",
+      "company_name": "Example Corp",
+      "absolute_url": "https://job-boards.greenhouse.io/examplecorp/jobs/4000003",
+      "location": { "name": "New York, NY" },
+      "departments": [{ "id": 12, "name": "Platform" }],
+      "updated_at": "2026-09-21T10:00:00Z",
+      "content": "&lt;p&gt;Build backend services.&lt;/p&gt;"
+    },
+    {
+      "id": 4000004,
+      "title": "Research Scientist Intern (PhD), Summer 2027",
+      "company_name": "Example Corp",
+      "absolute_url": "https://job-boards.greenhouse.io/examplecorp/jobs/4000004",
+      "location": { "name": "New York, NY" },
+      "departments": [{ "id": 13, "name": "Research" }],
+      "updated_at": "2026-09-22T10:00:00Z",
+      "content": "&lt;p&gt;Currently pursuing a Ph.D. in machine learning or a related field.&lt;/p&gt;"
+    },
+    {
+      "id": 4000005,
+      "title": "Data Analyst Intern, Summer 2027",
+      "company_name": "Example Corp",
+      "absolute_url": "https://job-boards.greenhouse.io/examplecorp/jobs/4000005",
+      "location": { "name": "New York, NY" },
+      "departments": [{ "id": 14, "name": "Analytics" }],
+      "updated_at": "2026-09-23T10:00:00Z",
+      "content": "&lt;p&gt;This program is open to rising juniors and current sophomores.&lt;/p&gt;"
+    },
+    {
+      "id": 4000006,
+      "title": "Business Data Analyst Intern, Summer 2027",
+      "company_name": "Example Corp",
+      "absolute_url": "https://job-boards.greenhouse.io/examplecorp/jobs/4000006",
+      "location": { "name": "Seattle, WA" },
+      "departments": [{ "id": 14, "name": "Analytics" }],
+      "first_published": "2026-09-30T08:00:00Z",
+      "content": "&lt;p&gt;Currently pursuing a Bachelor&amp;#39;s degree in Statistics, Economics, or a related field.&lt;/p&gt;"
+    },
+    { "id": null, "title": "Malformed record without an id" },
+    { "id": 4000099, "title": "Record without a link", "absolute_url": "javascript:alert(1)" }
+  ],
+  "meta": { "total": 8 }
+}

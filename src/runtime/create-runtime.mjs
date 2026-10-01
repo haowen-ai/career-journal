@@ -12,6 +12,8 @@ import { materialCommand } from '../commands/material.mjs';
 import { updateCommand } from '../commands/update.mjs';
 import { migrateCommand } from '../commands/migrate.mjs';
 import { backupCommand } from '../commands/backup.mjs';
+import { scanCommand } from '../commands/scan.mjs';
+import { queueCommand } from '../commands/queue.mjs';
 
 export function createRuntime({ root, version }) {
   return {
@@ -32,6 +34,8 @@ export function createRuntime({ root, version }) {
       ['update', updateCommand],
       ['migrate', migrateCommand],
       ['backup', backupCommand],
+      ['scan', scanCommand],
+      ['queue', queueCommand],
     ]),
   };
 }

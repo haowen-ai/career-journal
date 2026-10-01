@@ -11,7 +11,7 @@ import {
 import { importEml } from '../email/eml.mjs';
 import { saveConfig } from '../config/store.mjs';
 import { createJevAdapter } from '../decision/jev.mjs';
-import { classifyWithStructuredLlm } from '../decision/structured-llm.mjs';
+import { classifyWithStructuredLlm, rateRoleFitWithStructuredLlm } from '../decision/structured-llm.mjs';
 import { createProvider } from '../providers/interface.mjs';
 import { loadHostBatch, syncHostBatch } from '../email/host-sync.mjs';
 import { automationSetupState, listTasks, taskEmailAccountIds } from '../automation/registry.mjs';
@@ -22,7 +22,9 @@ export function configuredDecisionAdapters(config, fetchImpl = globalThis.fetch,
   if (config.jev?.accessState) adapters.jev = createJevAdapter(config.jev, fetchImpl, env);
   if (config.model?.provider === 'openai-compatible' && config.model.baseUrl && config.model.model) {
     const provider = createProvider(config.model, fetchImpl, env);
-    adapters.structuredLlm = (input) => classifyWithStructuredLlm(provider, input?.text);
+    adapters.structuredLlm = (input) => (input?.kind === 'role-fit'
+      ? rateRoleFitWithStructuredLlm(provider, input)
+      : classifyWithStructuredLlm(provider, input?.text));
     adapters.structuredLlmThreshold = Number.isFinite(Number(config.model.threshold))
       ? Number(config.model.threshold)
       : 0.8;

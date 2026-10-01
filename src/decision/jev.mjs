@@ -1,4 +1,4 @@
-import { EMAIL_CLASSIFICATIONS } from './rules.mjs';
+import { EMAIL_CLASSIFICATIONS, ROLE_FIT_CHOICES } from './rules.mjs';
 import { resolveSecretReference } from '../secrets/reference.mjs';
 
 export const JEV_EMAIL_QUESTION = Object.freeze({
@@ -14,6 +14,14 @@ export const JEV_EMAIL_QUESTION = Object.freeze({
     unknown: 'The message is ambiguous, administrative, or does not support any other outcome',
   }),
 });
+
+export function roleFitQuestion(criteria = {}) {
+  return {
+    type: 'choice',
+    instructions: 'Choose how well this job posting fits the candidate search directions described by the criteria.',
+    criteria: Object.fromEntries(ROLE_FIT_CHOICES.map((choice) => [choice, String(criteria?.[choice] ?? '')])),
+  };
+}
 
 function apiEndpoint(value) {
   const url = new URL(value ?? 'https://api.typesafe.ai/v1/systemone');
@@ -35,6 +43,7 @@ export function createJevAdapter(config, fetchImpl = globalThis.fetch, env = pro
     mode,
     threshold,
     async decide(input) {
+      const roleFit = input?.kind === 'role-fit';
       const endpoint = apiEndpoint(config.baseUrl);
       const { value: secret } = await resolveSecretReference(config.secretRef, { ...capabilities, env });
       const retryDelaysMs = Array.isArray(config.retryDelaysMs) ? config.retryDelaysMs : [250, 750];
@@ -46,7 +55,7 @@ export function createJevAdapter(config, fetchImpl = globalThis.fetch, env = pro
           body: JSON.stringify({
             state: String(input?.text ?? ''),
             model: config.model ?? 'jev-latest',
-            questions: { classification: JEV_EMAIL_QUESTION },
+            questions: roleFit ? { fit: roleFitQuestion(input.criteria) } : { classification: JEV_EMAIL_QUESTION },
           }),
         });
         if (response.ok || ![429, 529].includes(response.status) || attempt === retryDelaysMs.length) break;
@@ -54,6 +63,25 @@ export function createJevAdapter(config, fetchImpl = globalThis.fetch, env = pro
       }
       if (!response.ok) throw new Error(`Jev request failed with HTTP ${response.status}`);
       const payload = await response.json();
+      const usage = payload?.usage;
+      const validUsage = usage
+        && Number.isInteger(usage.input_tokens) && usage.input_tokens >= 0
+        && Number.isInteger(usage.output_tokens) && usage.output_tokens >= 0;
+      if (roleFit) {
+        const fit = payload?.answers?.fit;
+        if (fit?.type !== 'choice'
+          || !ROLE_FIT_CHOICES.includes(fit.choice)
+          || !Number.isFinite(fit.confidence)
+          || fit.confidence < 0
+          || fit.confidence > 1) {
+          throw new Error('Invalid Jev role fit response');
+        }
+        return {
+          fit: fit.choice,
+          confidence: fit.confidence,
+          ...(validUsage ? { usage: { input_tokens: usage.input_tokens, output_tokens: usage.output_tokens } } : {}),
+        };
+      }
       const answer = payload?.answers?.classification;
       if (answer?.type !== 'choice'
         || !EMAIL_CLASSIFICATIONS.includes(answer.choice)
@@ -62,10 +90,6 @@ export function createJevAdapter(config, fetchImpl = globalThis.fetch, env = pro
         || answer.confidence > 1) {
         throw new Error('Invalid Jev classification response');
       }
-      const usage = payload?.usage;
-      const validUsage = usage
-        && Number.isInteger(usage.input_tokens) && usage.input_tokens >= 0
-        && Number.isInteger(usage.output_tokens) && usage.output_tokens >= 0;
       return {
         classification: answer.choice,
         confidence: answer.confidence,
