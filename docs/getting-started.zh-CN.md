@@ -218,6 +218,8 @@ career-journal start --home ~/job-search
 
 ```sh
 career-journal profile questions --json
+career-journal profile questions --round 1 --unasked --json --home ~/job-search
+career-journal profile skip --home ~/job-search --key exclusions
 career-journal profile questions --missing --json --home ~/job-search
 career-journal profile set --home ~/job-search --key search.jobType --value internship
 career-journal profile set --home ~/job-search --key search.locations --value '[{"label":"New York, NY","match":["new york","nyc"]}]'
@@ -228,7 +230,7 @@ career-journal profile status --json --home ~/job-search
 career-journal profile show --home ~/job-search
 ```
 
-- `profile questions` 列出四轮问题（求职目标、申请材料、常用表单答案、扫描来源与节奏），每个问题都有英文和中文提问、选项、是否必填，以及答案保存的位置，另附固定的硬规矩。`--round N` 只看某一轮；`--missing` 只列出仍未回答的必填项，并标出你跳过的项目
+- `profile questions` 列出四轮问题（求职目标、申请材料、常用表单答案、扫描来源与节奏），每个问题都有英文和中文提问、选项、是否必填，以及答案保存的位置，另附固定的硬规矩。`--round N` 只看某一轮；`--unasked` 列出还没回答、也没跳过的全部必答和选答题，问答时就用它；`--missing` 只列出仍未回答的必填项，并标出你跳过的项目。`profile skip --key <问题标识>` 记录跳过的问题
 - `profile set` 写入 `profile.json`，第一次写入时自动创建。`--key` 可以是 `search.season` 这样的点路径，也可以是 `season` 这样的问题键；`--value` 可以是 JSON 或纯文本，`--value null` 用于清空可选项。每次写入都会校验；简历和成绩单路径必须是绝对路径（或以 `~/` 开头），并且指向可读取的文件
 - `profile answer` 写入 `answers.md`，并记录来源（默认 `user`）和日期。带 `--key` 时，第 3 轮的常用表单答案在“Common form answers”下只保留一行，再次回答会原地更新；带 `--question` 时，这一行追加到“Learned while applying”下
 - `profile status` 显示哪几轮已完成，以及扫描和填表是否就绪。扫描需要第 1 轮完成并至少设置一个扫描来源；填表需要第 1、2 轮完成且简历文件可读取。`doctor` 会增加 `profile` 和 `apply` 两行，只作为警告，没有个人资料也能完成核心配置

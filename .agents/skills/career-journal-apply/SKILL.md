@@ -85,7 +85,7 @@ After each sub-agent reports, tell the user in one sentence per tab what it need
 
 ## Commands used
 
-- `profile show|questions|set|answer|status`
+- `profile show|questions|set|answer|skip|status`
 - `queue list|verify`, and `scan run` when the queue is empty and the user asks for new roles
 - `application list --json`
 - `event add --status-after applied`

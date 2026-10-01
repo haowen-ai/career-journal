@@ -36,7 +36,8 @@ async function openDryRunDatabase(home) {
 }
 
 export function scanSourcesConfigured(profile) {
-  return profile.sources.atsBoards.length > 0 || profile.sources.careerOps || profile.sources.simplify.enabled;
+  return profile.sources.atsBoards.length > 0 || profile.sources.careerOps
+    || (profile.sources.simplify.enabled && Boolean(profile.sources.simplify.url));
 }
 
 export async function scanWithContext(context, profile, runtime = {}, { dryRun = false } = {}) {

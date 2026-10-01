@@ -186,11 +186,11 @@ test('orchestrator runs the profile interview after doctor and routes roles, app
   }
   assert.match(english, /Find roles[^\n]*`scan run`[^\n]*`queue verify/);
   assert.match(english, /Apply, start applying[^\n]*career-journal-apply/);
-  assert.match(english, /Profile, preferences, or form answers[^\n]*profile show\|questions\|set\|answer\|status/);
+  assert.match(english, /Profile, preferences, or form answers[^\n]*profile show\|questions\|set\|answer\|skip\|status/);
   assert.match(chinese, /`doctor`[^\n]*个人资料问答/);
   assert.match(chinese, /每轮最多问 4 个问题/);
   assert.match(chinese, /先推断，再确认/);
   assert.match(chinese, /找岗位[^\n]*`scan run`[^\n]*`queue verify/);
   assert.match(chinese, /投递、开始投[^\n]*career-journal-apply/);
-  assert.match(chinese, /个人资料、偏好或表单答案[^\n]*profile show\|questions\|set\|answer\|status/);
+  assert.match(chinese, /个人资料、偏好或表单答案[^\n]*profile show\|questions\|set\|answer\|skip\|status/);
 });
