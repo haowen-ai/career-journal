@@ -22,6 +22,27 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [2.0.1] - 2026-10-01
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Role scans now recognise applications recorded before 2.0: a source-prefixed id such as `simplify:<id>` in `external_id`, a bare requisition id that matches the id inside a new posting link, Oracle HCM and `myworkdaysite.com` links, and embedded Greenhouse links (`?token=<id>`)
+- A role that is likely the same as an application already submitted (similar title, or most of its distinctive words in common) is held back as a duplicate with the reason instead of being queued, so nothing is applied to twice; a likely match to an unsubmitted lead is still queued with a note
+- Titles that say "Scientist" and "Science" for the same role now match
+- A board's listed degrees are used: when the list names only bachelor's or associate degrees, the role is dropped as undergraduate-only for a master's or MBA candidate
+
+### Security
+
+- None
+
 ## [2.0.0] - 2026-10-01
 
 ### Added

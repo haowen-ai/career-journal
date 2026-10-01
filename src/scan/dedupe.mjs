@@ -11,7 +11,7 @@ export const POSSIBLE_DUPLICATE_THRESHOLD = 0.6;
 
 const LEGAL_SUFFIXES = new Set(['inc', 'incorporated', 'llc', 'llp', 'lp', 'ltd', 'limited', 'corp', 'corporation', 'co', 'company', 'plc', 'gmbh', 'ag', 'sa', 'bv', 'pbc']);
 const TITLE_STOPWORDS = new Set(['a', 'an', 'and', 'the', 'of', 'for', 'to', 'in', 'at', 'with', 'or', 'on']);
-const TITLE_STEMS = new Map([['internship', 'intern'], ['internships', 'intern'], ['engineering', 'engineer']]);
+const TITLE_STEMS = new Map([['internship', 'intern'], ['internships', 'intern'], ['engineering', 'engineer'], ['scientist', 'science']]);
 
 export function companyKey(name, aliases = {}) {
   const words = normalizeText(name).replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
@@ -43,6 +43,31 @@ export function titleSimilarity(left, right) {
   return shared / (a.size + b.size - shared);
 }
 
+// Words that describe the programme rather than the role, so two titles for the same role written by
+// different boards ("Campus Graduate Summer Internship Program - 2027 Global Decision Science" and
+// "Data Science Intern - Global Decision Science") still share their distinctive words.
+const GENERIC_TITLE_TOKENS = new Set(['intern', 'coop', 'summer', 'fall', 'winter', 'spring', 'program', 'programme', 'campus',
+  'graduate', 'grad', 'master', 'masters', 'm', 'ms', 'phd', 'undergraduate', 'student', 'early', 'career', 'new', 'york', 'ny',
+  'nyc', 'city', 'remote', 'us', 'usa', 'united', 'state', 'ii', 'iii', 'i', 'associate', 'analyst', 'engineer', 'level']);
+
+function distinctiveTokens(title) {
+  return new Set([...titleTokens(title)].filter((token) => !GENERIC_TITLE_TOKENS.has(token) && !/^(19|20)\d\d$/.test(token)));
+}
+
+// Share of the shorter title's distinctive words found in the other title; 0 when either has fewer than 3.
+export function titleContainment(left, right) {
+  const a = distinctiveTokens(left);
+  const b = distinctiveTokens(right);
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+  if (small.size < 3) return 0;
+  let shared = 0;
+  for (const token of small) if (large.has(token)) shared += 1;
+  return shared / small.size;
+}
+
+export const CONTAINMENT_THRESHOLD = 0.8;
+const SUBMITTED_STATUSES = new Set(['applied', 'assessment', 'interview', 'offer', 'accepted', 'declined', 'rejected']);
+
 function parseUrl(value) {
   try {
     const url = new URL(String(value ?? ''));
@@ -63,6 +88,9 @@ export function requisitionKey(value) {
   const ghJid = param('gh_jid');
   if (ghJid && /^\d+$/.test(ghJid)) return `greenhouse:${ghJid}`;
   if (/(^|\.)greenhouse\.io$/.test(host)) {
+    // Embedded application forms carry the posting id as ?token=<id>.
+    const token = param('token');
+    if (token && /^\d+$/.test(token)) return `greenhouse:${token}`;
     const index = segments.indexOf('jobs');
     if (index >= 0 && /^\d+$/.test(segments[index + 1] ?? '')) return `greenhouse:${segments[index + 1]}`;
   }
@@ -75,10 +103,15 @@ export function requisitionKey(value) {
     const id = segments.find((segment) => uuid.test(segment));
     if (id) return `ashby:${id.toLowerCase()}`;
   }
-  if (/\.myworkdayjobs\.com$/.test(host)) {
+  if (/\.myworkdayjobs\.com$/.test(host) || /(^|\.)myworkdaysite\.com$/.test(host)) {
     const last = segments.at(-1) ?? '';
     const match = /_((?:jr|r|req)?-?\d{3,}(?:-\d+)?)$/i.exec(last);
     if (match) return `workday:${host.split('.')[0]}:${match[1].toLowerCase()}`;
+  }
+  if (/\.oraclecloud\.com$/.test(host)) {
+    // Oracle HCM Candidate Experience: .../CandidateExperience/<lang>/sites/<site>/job/<id>
+    const index = segments.indexOf('job');
+    if (index >= 0 && /^\d+$/.test(segments[index + 1] ?? '')) return `oracle:${host.split('.')[0]}:${segments[index + 1]}`;
   }
   if (/\.icims\.com$/.test(host)) {
     const index = segments.indexOf('jobs');
@@ -113,7 +146,10 @@ function identityKeys(record, aliases) {
   const link = canonicalUrl(record.url);
   if (link) keys.push(['link', `url:${link}`]);
   const company = companyKey(record.company, aliases);
-  for (const id of [record.requisitionId, record.externalId].filter(Boolean)) {
+  // The posting id inside a link also identifies the role within its company, so a link from one board
+  // (or a careers-site wrapper around it) matches a record that stored only the bare requisition id.
+  const linkId = requisition ? requisition.split(':').at(-1) : null;
+  for (const id of [record.requisitionId, record.externalId, linkId].filter(Boolean)) {
     keys.push(['company requisition id', `reqid:${company}:${normalizeText(id).replace(/[^a-z0-9]+/g, '')}`]);
   }
   return keys;
@@ -138,9 +174,13 @@ export function dedupeRoles(roles, existing = [], { aliases = {} } = {}) {
     byCompany.get(company).push({ title: record.title, reference });
   };
   for (const item of existing) {
-    const externalId = item.externalId && !(item.source && item.externalId === `${item.source}:${item.sourceId}`) ? item.externalId : null;
+    let { source, sourceId } = item;
+    // Records written before schema 5 kept a source-prefixed id such as "simplify:<id>" in external_id.
+    const prefixed = /^([a-z][a-z0-9-]*):(.+)$/.exec(item.externalId ?? '');
+    if (!source && prefixed) [, source, sourceId] = prefixed;
+    const externalId = item.externalId && !prefixed ? item.externalId : null;
     register(
-      { source: item.source, sourceId: item.sourceId, url: item.jobUrl, company: item.company, title: item.role, externalId },
+      { source, sourceId, url: item.jobUrl, company: item.company, title: item.role, externalId },
       { kind: 'existing', id: item.id, status: item.status, title: item.role, company: item.company },
     );
   }
@@ -156,7 +196,9 @@ export function dedupeRoles(roles, existing = [], { aliases = {} } = {}) {
     let best = null;
     for (const candidate of byCompany.get(companyKey(role.company, aliases)) ?? []) {
       const similarity = titleSimilarity(role.title, candidate.title);
-      if (!best || similarity > best.similarity) best = { similarity, reference: candidate.reference };
+      const containment = titleContainment(role.title, candidate.title);
+      const score = Math.max(similarity, containment >= CONTAINMENT_THRESHOLD ? POSSIBLE_DUPLICATE_THRESHOLD : 0);
+      if (!best || score > best.score) best = { score, similarity, containment, reference: candidate.reference };
     }
     const similarity = best ? Math.round(best.similarity * 100) / 100 : 0;
     if (best && best.similarity >= DUPLICATE_THRESHOLD) {
@@ -164,7 +206,14 @@ export function dedupeRoles(roles, existing = [], { aliases = {} } = {}) {
       continue;
     }
     const reference = { kind: 'scan', title: role.title, company: role.company };
-    if (best && best.similarity >= POSSIBLE_DUPLICATE_THRESHOLD) {
+    const possible = best && best.score >= POSSIBLE_DUPLICATE_THRESHOLD;
+    // Never queue what may be a role the user already submitted: a likely match to a submitted
+    // application is held back as a duplicate, with the reason, instead of being queued with a note.
+    if (possible && best.reference.kind === 'existing' && SUBMITTED_STATUSES.has(best.reference.status)) {
+      results.push({ role, status: 'duplicate', of: best.reference, similarity, reason: `duplicate: likely the same role as the submitted application ${describe(best.reference)} (title similarity ${similarity}, shared distinctive words ${Math.round(best.containment * 100)}%)` });
+      continue;
+    }
+    if (possible) {
       results.push({ role, status: 'possible-duplicate', of: best.reference, similarity, reason: `possible-duplicate: similar title (similarity ${similarity}) to ${describe(best.reference)}` });
     } else {
       results.push({ role, status: 'new' });
