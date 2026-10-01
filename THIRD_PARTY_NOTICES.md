@@ -23,6 +23,20 @@ No career-ops source code is copied into this repository. Users install it separ
 
 No TypeSafe Agent Skill source code is copied into this repository. The tracker continues to work without Jev. When Jev is enabled, it evaluates every recruiting email first; configured language models, local rules, and manual review provide the fallback path.
 
+## SimplifyJobs listings
+
+- Project: [SimplifyJobs](https://github.com/SimplifyJobs) internship and new-grad lists
+- License: none published
+- Use here: an opt-in role-scan source only. It is off by default; the user turns it on and supplies the list URL in their own profile, and the list is fetched live on the user's machine at scan time
+
+No SimplifyJobs data is bundled, cached in this repository, mirrored, or redistributed. Only the normalised leads the user keeps are stored, in the user's own local database.
+
+## Greenhouse, Lever, and Ashby public job-board APIs
+
+- Endpoints: `boards-api.greenhouse.io`, `api.lever.co`, and `api.ashbyhq.com` public job-board APIs
+- Use here: read-only, unauthenticated requests for the company boards the user lists in their profile. Nothing is submitted to these services and no job data is redistributed
+- Trademarks: Greenhouse, Lever, and Ashby are trademarks of their owners and are named only to describe compatibility
+
 ## Tabler Icons
 
 - Project: [tabler/tabler-icons](https://github.com/tabler/tabler-icons)

@@ -52,3 +52,24 @@ The bridge must emit one JSON object on standard output:
 ```
 
 CAREER JOURNAL rejects a missing file, a different application ID, a submitted lifecycle, malformed JSON, or an unsuccessful exit. A valid file is copied into the immutable draft artifact store and hashed before success is reported.
+
+## Read-only role scan
+
+When the search profile sets `sources.careerOps` to `true` and the pinned installation with its bridge is detected, `career-journal scan run` also runs:
+
+```text
+node <careerops-root>/career-journal-adapter.mjs scan
+```
+
+Standard input is `{ "action": "scan", "readOnly": true }`. The bridge must not write to CareerOps data or contact employers, and must print one JSON object:
+
+```json
+{
+  "ok": true,
+  "roles": [
+    { "id": "stable-id", "company": "Example Corp", "title": "Data Science Intern", "url": "https://example.com/jobs/1", "locations": ["New York, NY"], "postedAt": "2026-09-30T00:00:00Z", "description": "Plain text or HTML" }
+  ]
+}
+```
+
+Roles without a company, title, or http(s) link are ignored. A missing bridge skips this source; a failed or malformed scan is reported as a source error and the other sources still run.

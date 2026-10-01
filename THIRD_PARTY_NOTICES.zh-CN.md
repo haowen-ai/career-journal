@@ -23,6 +23,20 @@ CAREER JOURNAL 会对它所集成的独立开源成果保留完整署名。在�
 
 本仓库没有复制 TypeSafe Agent Skill 的源代码。未配置 Jev 时仍可使用记录功能。启用 Jev 后，每封求职邮件都先交给 Jev；已配置的大语言模型、本地规则和人工复核负责后续兜底。
 
+## SimplifyJobs 职位列表
+
+- 项目：[SimplifyJobs](https://github.com/SimplifyJobs) 发布的实习和应届生职位列表
+- 许可证：未发布任何许可证
+- 在本项目中的用途：仅作为需要用户主动开启的职位扫描来源。默认关闭；用户在自己的档案中开启并填写列表地址后，扫描时才在用户自己的电脑上实时读取
+
+本仓库不打包、不缓存、不镜像，也不再分发任何 SimplifyJobs 数据。只有用户保留的、整理后的职位线索会写入用户自己的本地数据库。
+
+## Greenhouse、Lever 与 Ashby 公开职位接口
+
+- 接口：`boards-api.greenhouse.io`、`api.lever.co` 和 `api.ashbyhq.com` 的公开职位板接口
+- 在本项目中的用途：只读、无需登录地读取用户在档案中列出的公司职位板。不会向这些服务提交任何内容，也不会再分发职位数据
+- 商标：Greenhouse、Lever 和 Ashby 是其各自所有者的商标，本项目仅在说明兼容性时使用这些名称
+
 ## Tabler Icons
 
 - 项目：[tabler/tabler-icons](https://github.com/tabler/tabler-icons)
