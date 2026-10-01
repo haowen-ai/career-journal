@@ -194,6 +194,28 @@ career-journal export json --home ~/job-search --output applications.json
 career-journal start --home ~/job-search
 ```
 
+### Profile and answers sheet
+
+Scans and assisted applying read a private profile that the Agent builds through a short interview after `doctor` passes. `setup` creates nothing, and the CLI never prompts: the Agent reads the questions, asks them in your language, and saves each answer.
+
+```sh
+career-journal profile questions --json
+career-journal profile questions --missing --json --home ~/job-search
+career-journal profile set --home ~/job-search --key search.jobType --value internship
+career-journal profile set --home ~/job-search --key search.locations --value '[{"label":"New York, NY","match":["new york","nyc"]}]'
+career-journal profile set --home ~/job-search --key materials.resumePath --value ~/job-search/resume.pdf
+career-journal profile answer --home ~/job-search --key legal-name --answer "Alex Example"
+career-journal profile answer --home ~/job-search --question "How did you hear about us?" --answer "Company careers page"
+career-journal profile status --json --home ~/job-search
+career-journal profile show --home ~/job-search
+```
+
+- `profile questions` lists the four rounds (search target, materials, common form answers, pace) with English and Chinese prompts, options, whether each item is required, and where the answer is stored. `--round N` narrows to one round; `--missing` lists only required items that are still unanswered, marking the ones you skipped.
+- `profile set` writes `.career-journal/profile/profile.json`, creating it on the first write. `--key` takes a dot-path such as `search.season` or a question key such as `season`; `--value` is JSON or plain text, and `--value null` clears an optional field. Every write is validated, and resume and transcript paths must be absolute (or start with `~/`) and point to a readable file.
+- `profile answer` writes `.career-journal/profile/answers.md` with the source (default `user`) and date. With `--key`, a common form answer from round 3 keeps one row under "Common form answers" and is updated in place; with `--question`, the row is appended under "Learned while applying".
+- `profile status` shows which rounds are complete and whether scans and applying are ready. `doctor` adds `profile` and `apply` lines as warnings: core onboarding passes without a profile, and `apply` stays `incomplete` until rounds 1 and 2 are complete and the resume file is readable.
+- Both files are owner-only (`0600`, directory `0700`), stay on your computer, and never belong in a Git repository. Blank templates are in `config/profile.template.json` and `config/answers.template.md`.
+
 ## Application Materials and CareerOps
 
 [career-ops](https://github.com/career-ops-hq/career-ops) is an independent MIT-licensed project by Santiago Fernández de Valderrama. It is optional for core tracking and required for a verified resume or cover-letter workflow.

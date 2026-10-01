@@ -9,6 +9,7 @@ import { hasCompleteHostSyncCoverage, isLiveVerifiedEmailAccount, listEmailAccou
 import { isCurrentTaskRegistration, listTasks, REQUIRED_TASK_TYPES, taskEmailAccountIds } from '../automation/registry.mjs';
 import { probeTaskRegistration } from '../automation/probe.mjs';
 import { secretReferenceState } from '../secrets/reference.mjs';
+import { profileStatus } from '../domain/profile.mjs';
 
 const major = (version) => Number(String(version).replace(/^v/, '').split('.')[0]);
 const DAILY_HEALTH_WINDOW_MS = 36 * 60 * 60 * 1000;
@@ -40,6 +41,29 @@ function envReferenceState(secretRef, env) {
   const match = /^env:([A-Za-z_][A-Za-z0-9_]*)$/.exec(secretRef);
   if (!match) return { ok: false, detail: 'credential must use env:VARIABLE' };
   return env[match[1]] ? { ok: true, detail: `credential ${match[1]} is available` } : { ok: false, detail: `set environment variable ${match[1]}` };
+}
+
+// The profile is optional for core tracking, so these lines warn but never fail doctor.
+async function profileChecks(home) {
+  let state;
+  try { state = await profileStatus(home); } catch (error) {
+    return [
+      { id: 'profile', severity: 'warn', detail: `cannot read the profile: ${error.message}` },
+      { id: 'apply', severity: 'warn', detail: 'incomplete: fix or remove the profile file, then finish interview rounds 1 and 2' },
+    ];
+  }
+  const complete = state.rounds.filter((round) => round.complete).map((round) => round.round);
+  const incomplete = state.rounds.filter((round) => !round.complete);
+  const profile = !state.exists
+    ? { id: 'profile', severity: 'warn', detail: 'not created; core tracking works without it. Run the profile interview (career-journal profile questions) to enable role scans and assisted applying' }
+    : {
+      id: 'profile',
+      severity: incomplete.length ? 'warn' : 'pass',
+      detail: incomplete.length
+        ? `${complete.length ? `${complete.length === 1 ? 'round' : 'rounds'} ${complete.join(', ')} complete; ` : ''}missing ${incomplete.map((round) => `round ${round.round} (${round.missing.join(', ')})`).join('; ')}`
+        : 'all four interview rounds are complete',
+    };
+  return [profile, { id: 'apply', severity: state.readiness.apply.ready ? 'pass' : 'warn', detail: state.readiness.apply.detail }];
 }
 
 export async function doctor(home, capabilities = {}) {
@@ -203,6 +227,7 @@ export async function doctor(home, capabilities = {}) {
     };
   } else if (config.jev.accessState === 'waitlisted') jevState.detail = 'waitlisted; no key required until access is granted';
   checks.push({ id: 'jev', severity: jevState.ok ? 'pass' : 'warn', detail: jevState.detail });
+  checks.push(...await profileChecks(home));
   return { ok: !checks.some((item) => item.severity === 'fail'), checks };
 }
 

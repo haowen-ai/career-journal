@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": null,
+  "search": {
+    "jobType": null,
+    "season": null,
+    "directions": {
+      "primary": [],
+      "secondary": []
+    },
+    "locations": [],
+    "remoteOk": null,
+    "exclusions": []
+  },
+  "candidate": {
+    "degree": {
+      "level": null,
+      "major": null,
+      "graduation": null
+    },
+    "authorization": {
+      "status": null,
+      "needsSponsorship": null
+    }
+  },
+  "materials": {
+    "resumePath": null,
+    "transcriptPath": null,
+    "transcriptPolicy": "required-only",
+    "links": {
+      "linkedin": null,
+      "github": null,
+      "website": null
+    },
+    "experienceConfirmed": false
+  },
+  "pace": {
+    "batchSize": 5,
+    "scanTime": "08:00",
+    "notify": "desktop"
+  },
+  "sources": {
+    "atsBoards": [],
+    "careerOps": false,
+    "simplify": {
+      "enabled": false,
+      "url": null
+    }
+  },
+  "interview": {
+    "roundsCompleted": [],
+    "skipped": []
+  }
+}
