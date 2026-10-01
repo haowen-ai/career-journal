@@ -38,6 +38,26 @@ async function persistAutomationState(context) {
   await saveConfig(context.root, context.config);
 }
 
+// Claims the native registration, installs the scheduler job, and records its probe evidence
+// in one transaction, so a failed install or probe leaves no claim behind. node:sqlite reports
+// an open transaction through isTransaction.
+export async function installNativeRegistration(db, taskId, registration, install) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const claimed = markTaskRegistration(db, taskId, registration);
+    const installed = await install(claimed);
+    if (!installed?.probe?.ok) throw new Error(`Scheduler installation could not be verified: ${installed?.probe?.detail ?? 'no probe evidence'}`);
+    verifyTaskRegistration(db, claimed.id, {
+      method: 'native-probe', evidenceDigest: installed.probe.evidenceDigest,
+    });
+    db.exec('COMMIT');
+    return installed;
+  } catch (error) {
+    if (db.isTransaction) db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 export async function automationCommand(parsed, io, runtime) {
   const context = await openHomeDatabase(parsed.options.home ?? process.cwd());
   try {
@@ -218,22 +238,9 @@ export async function automationCommand(parsed, io, runtime) {
         platform,
       };
       const native = { ...nativeSchedulerRegistration(existing, platform), execution: schedulerRuntime };
-      context.db.exec('BEGIN IMMEDIATE');
-      let installed;
-      try {
-        const claimed = markTaskRegistration(context.db, existing.id, native);
-        installed = runtime.scheduler?.install
-          ? await runtime.scheduler.install(claimed, schedulerRuntime)
-          : await installNativeScheduler(claimed, schedulerRuntime, { platform });
-        if (!installed?.probe?.ok) throw new Error(`Scheduler installation could not be verified: ${installed?.probe?.detail ?? 'no probe evidence'}`);
-        verifyTaskRegistration(context.db, claimed.id, {
-          method: 'native-probe', evidenceDigest: installed.probe.evidenceDigest,
-        });
-        context.db.exec('COMMIT');
-      } catch (error) {
-        if (context.db.inTransaction) context.db.exec('ROLLBACK');
-        throw error;
-      }
+      const installed = await installNativeRegistration(context.db, existing.id, native, (claimed) => (runtime.scheduler?.install
+        ? runtime.scheduler.install(claimed, schedulerRuntime)
+        : installNativeScheduler(claimed, schedulerRuntime, { platform })));
       await persistAutomationState(context);
       io.out(JSON.stringify({
         installed: true,
