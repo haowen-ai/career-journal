@@ -8,7 +8,7 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Added
 
-- None
+- A **To apply** section on the dashboard, above Assessments & interviews, lists every lead or prepared role without a skip reason, soonest deadline first; roles without a deadline follow in queue order. Rows are grouped into Apply today (due within 2 days in the workspace time zone, or past the deadline by at most 24 hours and marked Deadline passed), Due this week (3–7 days), Later, and No deadline listed, and the last two groups are collapsed. Each row shows fit, location, the deadline with days left, whether the posting is verified, and an Open posting link; a summary line counts what is due today, this week, and later
 
 ### Changed
 

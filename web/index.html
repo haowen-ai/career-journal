@@ -70,6 +70,42 @@
         </article>
       </section>
 
+      <section class="to-apply-section" aria-labelledby="to-apply-heading" data-testid="to-apply-section">
+        <div class="list-heading">
+          <div>
+            <h2 id="to-apply-heading" data-i18n="toApplyTitle">To apply</h2>
+            <p data-i18n="toApplyBody">Roles waiting for you to apply, soonest deadline first.</p>
+          </div>
+        </div>
+        <p class="to-apply-summary" id="to-apply-summary" data-testid="to-apply-summary" aria-live="polite" hidden></p>
+        <section class="apply-group is-today" id="apply-group-today" data-testid="to-apply-today" aria-labelledby="apply-today-heading" hidden>
+          <h3 class="apply-group-title" id="apply-today-heading"><span data-i18n="toApplyToday">Apply today</span><b class="apply-group-count" id="apply-today-count">0</b></h3>
+          <div class="task-list apply-list" id="apply-today-rows" data-testid="to-apply-today-rows"></div>
+        </section>
+        <section class="apply-group is-week" id="apply-group-week" data-testid="to-apply-week" aria-labelledby="apply-week-heading" hidden>
+          <h3 class="apply-group-title" id="apply-week-heading"><span data-i18n="toApplyWeek">Due this week</span><b class="apply-group-count" id="apply-week-count">0</b></h3>
+          <div class="task-list apply-list" id="apply-week-rows" data-testid="to-apply-week-rows"></div>
+        </section>
+        <details class="apply-more" id="apply-group-later" data-testid="to-apply-later" hidden>
+          <summary>
+            <span id="apply-later-label">Later (0)</span>
+            <span class="details-icons" aria-hidden="true"><img class="details-plus" src="/icons/plus.svg" alt=""><img class="details-minus" src="/icons/minus.svg" alt=""></span>
+          </summary>
+          <div class="task-list apply-list" id="apply-later-rows" data-testid="to-apply-later-rows"></div>
+        </details>
+        <details class="apply-more" id="apply-group-none" data-testid="to-apply-none" hidden>
+          <summary>
+            <span id="apply-none-label">No deadline listed (0)</span>
+            <span class="details-icons" aria-hidden="true"><img class="details-plus" src="/icons/plus.svg" alt=""><img class="details-minus" src="/icons/minus.svg" alt=""></span>
+          </summary>
+          <div class="task-list apply-list" id="apply-none-rows" data-testid="to-apply-none-rows"></div>
+        </details>
+        <section class="empty-state task-empty" id="to-apply-empty" data-testid="to-apply-empty" hidden>
+          <h3 data-i18n="toApplyEmptyTitle">Nothing waiting to apply</h3>
+          <p data-i18n="toApplyEmptyBody">Leads you have not applied to or skipped appear here, soonest deadline first.</p>
+        </section>
+      </section>
+
       <section class="tasks-section" aria-labelledby="tasks-heading" data-testid="tasks-section">
         <div class="list-heading">
           <div>
@@ -215,6 +251,21 @@
         <span class="task-badge"></span>
       </div>
       <button class="task-action" type="button"></button>
+    </article>
+  </template>
+
+  <template id="apply-template">
+    <article class="task-row apply-row" data-testid="to-apply-row">
+      <div class="task-main">
+        <p class="task-application"><span class="apply-company"></span></p>
+        <h4 class="task-title apply-role"></h4>
+        <p class="task-meta apply-meta"><span class="fit-badge"></span><span class="apply-location"></span><span class="queue-check apply-check"></span></p>
+      </div>
+      <div class="task-when">
+        <time class="task-deadline apply-deadline"></time>
+        <span class="task-badge"></span>
+      </div>
+      <a class="task-action apply-link" data-testid="to-apply-link" target="_blank" rel="noopener noreferrer"></a>
     </article>
   </template>
 

@@ -97,13 +97,31 @@ img { display: block; }
 .task-row.is-completed .task-title { color: #6a8087; }
 .task-row.is-completed .task-deadline { color: #8b9a9f; }
 .empty-state.task-empty { padding: 30px 20px; }
-.completed-tasks { margin-top: 12px; }
-.completed-tasks > summary { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border: 1px solid var(--line); border-radius: 11px; color: #6a8087; background: #f9fbfa; cursor: pointer; font-size: 10.5px; list-style: none; }
-.completed-tasks > summary::-webkit-details-marker { display: none; }
-.completed-tasks > summary:hover, .completed-tasks[open] > summary { color: var(--teal); background: #f2f7f4; }
-.completed-tasks[open] .details-plus { display: none; }
-.completed-tasks[open] .details-minus { display: block; }
-.completed-tasks .task-list { margin-top: 10px; }
+.completed-tasks, .apply-more { margin-top: 12px; }
+.completed-tasks > summary, .apply-more > summary { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border: 1px solid var(--line); border-radius: 11px; color: #6a8087; background: #f9fbfa; cursor: pointer; font-size: 10.5px; list-style: none; }
+.completed-tasks > summary::-webkit-details-marker, .apply-more > summary::-webkit-details-marker { display: none; }
+.completed-tasks > summary:hover, .completed-tasks[open] > summary, .apply-more > summary:hover, .apply-more[open] > summary { color: var(--teal); background: #f2f7f4; }
+.completed-tasks[open] .details-plus, .apply-more[open] .details-plus { display: none; }
+.completed-tasks[open] .details-minus, .apply-more[open] .details-minus { display: block; }
+.completed-tasks .task-list, .apply-more .task-list { margin-top: 10px; }
+.to-apply-section { padding-top: 40px; }
+.to-apply-section .list-heading { margin-bottom: 14px; }
+.to-apply-summary { margin: 0 0 16px; color: var(--ink); font-size: 11.5px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.to-apply-summary[hidden], .apply-group[hidden], .apply-more[hidden], .apply-row .task-when[hidden], .apply-location[hidden] { display: none; }
+.apply-group + .apply-group, .apply-group + .apply-more { margin-top: 18px; }
+.apply-group-title { display: flex; align-items: center; gap: 8px; margin: 0 0 9px; color: #5d747d; font-size: 11.5px; font-weight: 700; }
+.apply-group-title::before { width: 6px; height: 6px; content: ""; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.apply-group-count { min-width: 12px; color: inherit; opacity: .75; font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.apply-group.is-today .apply-group-title { color: #98701f; }
+.apply-group.is-today .apply-list { border-color: #ecdcb4; box-shadow: inset 3px 0 0 #d4a94a, 0 3px 10px #193d3903; }
+.apply-group.is-today .apply-row { background: #fffdf7; }
+.apply-group.is-today .apply-row + .apply-row { border-top-color: #f3ead3; }
+.apply-row { padding-top: 15px; padding-bottom: 15px; }
+.apply-company { overflow-wrap: anywhere; }
+.apply-location { overflow-wrap: anywhere; }
+.apply-meta .fit-badge { padding: 3px 7px; font-size: 9px; }
+.apply-check { display: inline-flex; align-items: center; }
+.apply-link { grid-column: -2 / -1; text-decoration: none; }
 .card-tasks { display: flex; align-items: baseline; gap: 13px; margin: 0 27px 14px; }
 .card-tasks-label { flex: 0 0 auto; color: #8a9aa0; font-size: 9.5px; font-weight: 700; }
 .card-task-chips { display: flex; flex-wrap: wrap; gap: 7px 16px; margin: 0; padding: 0; list-style: none; }
@@ -246,8 +264,9 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 27px
   .stat-primary .stat-note { grid-column: 1; margin-top: 7px; }
   .stat-card { min-height: 112px; padding: 15px 17px; }
   .stat-card > strong { margin-top: 8px; font-size: 31px; }
-  .tasks-section { padding-top: 28px; }
+  .tasks-section, .to-apply-section { padding-top: 28px; }
   .tasks-section .list-heading { margin-bottom: 15px; }
+  .to-apply-section .list-heading { margin-bottom: 12px; }
   .task-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px 14px; padding: 16px 18px; }
   .task-main { grid-column: 1 / -1; }
   .task-when { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; text-align: left; }
@@ -289,6 +308,8 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 27px
   .topbar { height: 65px; }
   .hero { padding: 20px 0; }
   .reminder, .filters, .search-box, .language-toggle, .details-icons, .task-action, .task-link { display: none; }
+  .task-row { break-inside: avoid; }
+  .apply-more > summary { border: 0; padding: 8px 0; background: transparent; }
   .stats { gap: 6px; }
   .stat-card { min-height: 0; padding: 12px; }
   .application-card { break-inside: avoid; box-shadow: none; }
