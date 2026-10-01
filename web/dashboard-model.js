@@ -134,6 +134,53 @@ export function queueApplications(applications) {
   return (applications ?? []).filter(isQueued).sort(compareQueueApplications);
 }
 
+// The Preparing and Queue views get a sort control and fit filter chips.
+export const ROLE_SORTS = Object.freeze(['deadline', 'fit', 'newest']);
+export const FIT_FILTERS = Object.freeze(['all', 'high', 'medium', 'low', 'none']);
+
+export function hasRoleControls(group) {
+  return group === 'preparing' || group === 'queue';
+}
+
+function addedTime(application) {
+  return timeOrNull(application.postedAt) ?? timeOrNull(application.createdAt);
+}
+
+// Newest first by posting date, or by the date the role was added when the
+// posting date is unknown; ties fall back to the deadline order.
+export function compareNewest(left, right) {
+  const leftTime = addedTime(left);
+  const rightTime = addedTime(right);
+  if (leftTime !== rightTime) {
+    if (leftTime === null) return 1;
+    if (rightTime === null) return -1;
+    return rightTime - leftTime;
+  }
+  return compareToApply(left, right);
+}
+
+// deadline: soonest first, then roles without one in queue order.
+// fit: high, medium, low, unrated, then deadline (the `queue list` order).
+// newest: posted or added date, newest first.
+const roleComparators = { deadline: compareToApply, fit: compareQueueApplications, newest: compareNewest };
+
+export function sortRoles(applications, sort = 'deadline') {
+  return [...(applications ?? [])].sort(roleComparators[sort] ?? roleComparators.deadline);
+}
+
+export function matchesFit(application, fit = 'all') {
+  return fit === 'all' || !FIT_FILTERS.includes(fit) || fitLevel(application?.fit) === fit;
+}
+
+export function fitCounts(applications) {
+  const counts = { all: 0, high: 0, medium: 0, low: 0, none: 0 };
+  for (const application of applications ?? []) {
+    counts.all += 1;
+    counts[fitLevel(application.fit)] += 1;
+  }
+  return counts;
+}
+
 // Each summary card opens the list filter that shows the applications it counts.
 export const STAT_FILTERS = Object.freeze({ applied: 'sent', waiting: 'waiting', interview: 'interview', closed: 'closed', preparing: 'preparing' });
 
@@ -149,7 +196,9 @@ function matchesFilter(application, group) {
   return applicationGroup(application) === group;
 }
 
-export function filterApplications(applications, { group = 'all', query = '' } = {}) {
+// In the Preparing and Queue views, `fit` keeps one fit level and `sort` picks
+// the order. Without `sort`, the Queue view keeps the `queue list` order.
+export function filterApplications(applications, { group = 'all', query = '', sort = null, fit = 'all' } = {}) {
   const normalized = String(query).trim().toLocaleLowerCase();
   const visible = (applications ?? []).filter((application) => {
     const matchesGroup = matchesFilter(application, group);
@@ -158,7 +207,10 @@ export function filterApplications(applications, { group = 'all', query = '' } =
       .filter(Boolean).join(' ').toLocaleLowerCase();
     return matchesGroup && (!normalized || haystack.includes(normalized));
   });
-  return group === 'queue' ? visible.sort(compareQueueApplications) : visible;
+  if (!hasRoleControls(group)) return visible;
+  const fitted = visible.filter((application) => matchesFit(application, fit));
+  if (sort) return sortRoles(fitted, sort);
+  return group === 'queue' ? fitted.sort(compareQueueApplications) : fitted;
 }
 
 const fitCopy = {
@@ -200,6 +252,7 @@ function skipReasonOf(application) {
 // DOM. Returns null for applications past the preparing stage that were not
 // skipped from the queue. The deadline time-left hint only applies while the
 // role is still being prepared; a skipped role keeps its deadline date only.
+// The hint uses the posting wording: "Deadline passed", "No deadline listed".
 export function queueSummary(application, { locale = 'en', now = Date.now(), timeZone = 'UTC' } = {}) {
   const preparing = applicationGroup(application) === 'preparing';
   const skipReason = skipReasonOf(application);
@@ -210,7 +263,7 @@ export function queueSummary(application, { locale = 'en', now = Date.now(), tim
   return {
     queued: isQueued(application),
     fit: { level, label: fitLabel(level, locale), note: application.fitNote || null },
-    deadline: { at: deadlineAt, status: deadline, hint: deadline ? taskDeadlineLabel(deadline, locale) : null },
+    deadline: { at: deadlineAt, status: deadline, hint: deadline ? roleDeadlineLabel(deadline, locale) : null },
     location: application.location || null,
     source: sourceName(application.source),
     check: { state: application.verifiedAt ? 'verified' : 'unverified', at: application.verifiedAt || null, label: postingCheckLabel(application, locale) },
@@ -265,10 +318,12 @@ export function toApplyQueue(applications, { now = Date.now(), timeZone = 'UTC' 
 const toApplyCopy = {
   en: {
     passed: 'Deadline passed',
+    unlisted: 'No deadline listed',
     summary: (today, week, more) => [`${today} to apply today`, `${week} this week`, more ? `${more} more` : null],
   },
   'zh-CN': {
     passed: '已过截止',
+    unlisted: '未写截止日期',
     summary: (today, week, more) => [`今天要投 ${today} 个`, `本周截止 ${week} 个`, more ? `其余 ${more} 个` : null],
   },
 };
@@ -277,8 +332,11 @@ function toApplyLanguage(locale) {
   return toApplyCopy[locale === 'zh-CN' ? 'zh-CN' : 'en'];
 }
 
-export function toApplyDeadlineLabel(status, locale = 'en') {
-  return status.state === 'overdue' ? toApplyLanguage(locale).passed : taskDeadlineLabel(status, locale);
+// Deadline wording for a role's application deadline, as opposed to a task.
+export function roleDeadlineLabel(status, locale = 'en') {
+  if (status.state === 'overdue') return toApplyLanguage(locale).passed;
+  if (status.state === 'none') return toApplyLanguage(locale).unlisted;
+  return taskDeadlineLabel(status, locale);
 }
 
 // "2 to apply today · 5 this week · 140 more"; the last part is left out when
@@ -309,7 +367,7 @@ export function toApplyRow(application, { locale = 'en', now = Date.now(), timeZ
     role: application.role,
     fit: { level, label: fitLabel(level, locale), note: application.fitNote || null },
     location: application.location || null,
-    deadline: { at: deadlineAt, status, label: deadlineAt ? toApplyDeadlineLabel(status, locale) : null },
+    deadline: { at: deadlineAt, status, label: deadlineAt ? roleDeadlineLabel(status, locale) : null },
     check: { state: application.verifiedAt ? 'verified' : 'unverified', label: postingCheckLabel(application, locale) },
     jobUrl: safeHttpUrl(application.jobUrl),
   };

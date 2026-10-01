@@ -153,6 +153,26 @@
           </div>
           <span class="result-count" id="result-count" aria-live="polite">0 of 0</span>
         </div>
+        <div class="role-controls" id="role-controls" data-testid="role-controls" hidden>
+          <div class="role-control">
+            <span class="control-label" id="sort-label" data-i18n="sortLabel">Sort by</span>
+            <div class="segmented" role="group" aria-labelledby="sort-label">
+              <button data-testid="sort-deadline" data-sort="deadline" type="button" aria-pressed="true"><span data-i18n="sortDeadline">Deadline (soonest first)</span></button>
+              <button data-testid="sort-fit" data-sort="fit" type="button" aria-pressed="false"><span data-i18n="sortFit">Fit</span></button>
+              <button data-testid="sort-newest" data-sort="newest" type="button" aria-pressed="false"><span data-i18n="sortNewest">Newest</span></button>
+            </div>
+          </div>
+          <div class="role-control">
+            <span class="control-label" id="fit-filter-label" data-i18n="fitFilterLabel">Fit</span>
+            <div class="fit-chips" role="group" aria-labelledby="fit-filter-label">
+              <button data-testid="fit-all" data-fit="all" type="button" aria-pressed="true"><span data-i18n="fitAll">All</span><b data-fit-count="all">0</b></button>
+              <button data-testid="fit-high" data-fit="high" type="button" aria-pressed="false"><span data-i18n="fitHigh">High</span><b data-fit-count="high">0</b></button>
+              <button data-testid="fit-medium" data-fit="medium" type="button" aria-pressed="false"><span data-i18n="fitMedium">Medium</span><b data-fit-count="medium">0</b></button>
+              <button data-testid="fit-low" data-fit="low" type="button" aria-pressed="false"><span data-i18n="fitLow">Low</span><b data-fit-count="low">0</b></button>
+              <button data-testid="fit-none" data-fit="none" type="button" aria-pressed="false"><span data-i18n="fitNone">Unrated</span><b data-fit-count="none">0</b></button>
+            </div>
+          </div>
+        </div>
 
         <p class="loading-state" id="loading" data-i18n="loading">Loading applications…</p>
         <div class="application-list" id="applications" aria-live="polite"></div>
