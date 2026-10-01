@@ -188,6 +188,28 @@ career-journal export json --home ~/job-search --output applications.json
 career-journal start --home ~/job-search
 ```
 
+### 求职资料与答案表
+
+职位扫描和辅助填表都读取一份私密的求职资料。`doctor` 通过后，Agent 通过几轮简短问答帮你建立它。`setup` 不会创建任何资料文件，CLI 也不会交互提问：由 Agent 读取问题、用你的语言提问，再逐项保存答案。
+
+```sh
+career-journal profile questions --json
+career-journal profile questions --missing --json --home ~/job-search
+career-journal profile set --home ~/job-search --key search.jobType --value internship
+career-journal profile set --home ~/job-search --key search.locations --value '[{"label":"New York, NY","match":["new york","nyc"]}]'
+career-journal profile set --home ~/job-search --key materials.resumePath --value ~/job-search/resume.pdf
+career-journal profile answer --home ~/job-search --key legal-name --answer "Alex Example"
+career-journal profile answer --home ~/job-search --question "How did you hear about us?" --answer "Company careers page"
+career-journal profile status --json --home ~/job-search
+career-journal profile show --home ~/job-search
+```
+
+- `profile questions` 列出四轮问题（求职目标、申请材料、常用表单答案、节奏），每个问题都有英文和中文提问、选项、是否必填，以及答案保存的位置。`--round N` 只看某一轮；`--missing` 只列出仍未回答的必填项，并标出你跳过的项目。
+- `profile set` 写入 `.career-journal/profile/profile.json`，第一次写入时自动创建。`--key` 可以是 `search.season` 这样的点路径，也可以是 `season` 这样的问题键；`--value` 可以是 JSON 或纯文本，`--value null` 用于清空可选项。每次写入都会校验；简历和成绩单路径必须是绝对路径（或以 `~/` 开头），并且指向可读取的文件。
+- `profile answer` 写入 `.career-journal/profile/answers.md`，并记录来源（默认 `user`）和日期。带 `--key` 时，第 3 轮的常用表单答案在“Common form answers”下只保留一行，再次回答会原地更新；带 `--question` 时，这一行追加到“Learned while applying”下。
+- `profile status` 显示哪几轮已完成，以及扫描和填表是否就绪。`doctor` 会增加 `profile` 和 `apply` 两行，只作为警告：没有求职资料也能完成核心配置；在第 1、2 轮完成且简历文件可读取之前，`apply` 一直显示 `incomplete`。
+- 这两个文件只有本人可读写（文件 `0600`，目录 `0700`），只保存在你的电脑上，绝不应放进 Git 仓库。空白模板位于 `config/profile.template.json` 和 `config/answers.template.md`。
+
 ## 申请材料与 CareerOps
 
 [career-ops](https://github.com/career-ops-hq/career-ops) 是 Santiago Fernández de Valderrama 独立开发、采用 MIT 许可证的开源项目。只记录求职进度时不必安装它；需要生成并验证简历或求职信时必须安装。
