@@ -17,7 +17,7 @@ import {
   REQUIRED_TASK_TYPES,
 } from '../../src/automation/registry.mjs';
 import { runDeadlineReview, runDailyConsolidation } from '../../src/automation/tasks.mjs';
-import { automationCommand } from '../../src/commands/automation.mjs';
+import { automationCommand, installNativeRegistration } from '../../src/commands/automation.mjs';
 import { setup } from '../../src/commands/setup.mjs';
 import { memoryIO } from '../../test-utils/helpers.mjs';
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
@@ -243,6 +243,84 @@ test('install creates and verifies a native scheduler registration and refuses m
       /IMAPS|trusted external scheduler/i,
     );
   } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test('a failed native install or probe rolls back its registration claim and closes the transaction', async () => {
+  const db = openDatabase(':memory:'); migrate(db);
+  try {
+    const task = upsertTask(db, { type: 'deadline-review', enabled: true, timezone: 'UTC', time: '20:15', notificationPolicy: 'actionable' });
+    const registration = {
+      driver: 'launchd', externalId: 'io.career-journal.deadline-review',
+      execution: { node: '/opt/node/bin/node', cli: '/repo/bin/career-journal.mjs', home: '/data', platform: 'darwin' },
+    };
+    const evidence = `sha256:${'b'.repeat(64)}`;
+    const failures = [
+      [async () => ({ probe: { ok: false, detail: 'job is not loaded' } }), /could not be verified: job is not loaded/],
+      [async () => null, /could not be verified: no probe evidence/],
+      [async () => { throw new Error('launchctl bootstrap failed'); }, /launchctl bootstrap failed/],
+    ];
+    for (const [install, expected] of failures) {
+      let claimSeen = null;
+      await assert.rejects(() => installNativeRegistration(db, task.id, registration, async (claimed) => {
+        claimSeen = claimed.config.registration.status;
+        return install();
+      }), expected);
+      assert.equal(claimSeen, 'pending-verification', 'the claim exists inside the transaction');
+      assert.equal(db.isTransaction, false, 'the rollback guard closed the transaction');
+      assert.equal(listTasks(db).find((item) => item.id === task.id).config.registration, undefined, 'no claim survives a failed install');
+    }
+    const installed = await installNativeRegistration(db, task.id, registration, async () => ({ kind: 'launchd', probe: { ok: true, detail: 'loaded', evidenceDigest: evidence } }));
+    assert.equal(installed.kind, 'launchd');
+    assert.equal(db.isTransaction, false);
+    assert.equal(listTasks(db).find((item) => item.id === task.id).config.registration.status, 'verified');
+  } finally { db.close(); }
+});
+
+test('automation install reports a failed probe and leaves the task unregistered', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-auto-install-rollback-'));
+  try {
+    await setup(home, {
+      timezone: 'UTC',
+      email: { mode: 'configure', provider: 'host', address: 'candidate@example.test', settings: { connector: 'gmail' } },
+      provisionAutomations: true,
+    });
+    const runtime = {
+      root: process.cwd(), version: 'test', platform: 'darwin',
+      scheduler: { install: async () => ({ installed: false, probe: { ok: false, detail: 'job is not loaded' } }) },
+    };
+    await assert.rejects(
+      () => automationCommand({ subcommand: 'install', options: { home, task: 'deadline-review' } }, memoryIO(), runtime),
+      /Scheduler installation could not be verified: job is not loaded/,
+    );
+    const inspect = await import('../../src/runtime/home.mjs').then(({ openHomeDatabase }) => openHomeDatabase(home));
+    try {
+      assert.equal(listTasks(inspect.db).find((task) => task.type === 'deadline-review').config.registration, undefined);
+    } finally { inspect.db.close(); }
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test('a failed shared registration rolls back both task rows', () => {
+  const db = openDatabase(':memory:'); migrate(db);
+  try {
+    const mail = upsertTask(db, {
+      type: 'mail-sync', enabled: true, timezone: 'UTC', time: '20:00',
+      accountId: 'host:candidate@example.test', notificationPolicy: 'actionable',
+    });
+    const deadline = upsertTask(db, { type: 'deadline-review', enabled: true, timezone: 'UTC', time: '20:15', notificationPolicy: 'actionable' });
+    const execution = { node: '/opt/node/bin/node', cli: '/repo/bin/career-journal.mjs', home: '/data', platform: 'darwin' };
+    markTaskRegistration(db, mail.id, { driver: 'codex', externalId: 'career-journal-daily', registeredAt: '2026-09-19T12:00:00.000Z', execution });
+    const before = listTasks(db).find((task) => task.id === mail.id).config.registration;
+    // Fail the second write of the pair, after the first row was already updated.
+    db.exec(`CREATE TRIGGER fail_second_write BEFORE UPDATE ON automations WHEN NEW.id = '${deadline.id}'
+      BEGIN SELECT RAISE(ABORT, 'simulated write failure'); END`);
+    assert.throws(
+      () => markTaskRegistration(db, deadline.id, { driver: 'codex', externalId: 'career-journal-daily', registeredAt: '2026-09-19T12:01:00.000Z', execution }),
+      /simulated write failure/,
+    );
+    assert.equal(db.isTransaction, false, 'the rollback guard closed the transaction');
+    assert.deepEqual(listTasks(db).find((task) => task.id === mail.id).config.registration, before, 'the first row is restored');
+    assert.equal(listTasks(db).find((task) => task.id === deadline.id).config.registration, undefined);
+  } finally { db.close(); }
 });
 
 test('external scheduler registration stores an unverified claim and binding revision', async () => {

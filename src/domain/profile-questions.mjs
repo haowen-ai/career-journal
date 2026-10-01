@@ -77,44 +77,57 @@ export const profileRounds = deepFreeze([
   {
     round: 4,
     id: 'pace',
-    title: { en: 'Rules and pace', zh: '规则与节奏' },
+    title: { en: 'Scan sources, rules, and pace', zh: '扫描来源、规则与节奏' },
     intro: {
-      en: 'Batch size, daily scan time, and notifications. The hard rules below are always on and cannot be turned off.',
-      zh: '每批数量、每日扫描时间和通知方式。下列硬性规则始终生效，不能关闭。',
+      en: 'Which companies and sources the daily role scan reads, batch size, daily scan time, and notifications. The hard rules below are always on and cannot be turned off.',
+      zh: '每日岗位扫描读取哪些公司和来源、每批数量、每日扫描时间和通知方式。下列硬性规则始终生效，不能关闭。',
     },
   },
 ]);
 
+// The fixed hard rules of the career-journal-apply Skill, word for word in both languages
+// (.agents/skills/career-journal-apply/SKILL.md and SKILL.zh-CN.md). Round 4 shows them;
+// nothing turns them off. Change them only together with the Skill and its fill brief.
 export const hardRules = deepFreeze([
   {
     id: 'never-submit',
-    en: 'The Agent never clicks the final submit. Any button labelled Submit is yours.',
-    zh: 'Agent 绝不替你点击最终提交。任何标为“提交”的按钮都由你来点。',
+    en: 'Never click any button labelled Submit* (Submit, Submit Application, Submit Profile, and similar), even when it looks like an intermediate step, and never click any other button that sends the application. Stop before it; the user clicks it.',
+    zh: '不点任何写着 Submit*（Submit、Submit Application、Submit Profile 等）的按钮，即使它看起来只是中间步骤；也不点其他任何会把申请发出去的按钮。停在它前面，由用户自己点。',
   },
   {
     id: 'never-sign-in',
-    en: 'The Agent never signs in, creates accounts, or types passwords or verification codes for you, and never bypasses a CAPTCHA.',
-    zh: 'Agent 绝不替你登录、注册账号、输入密码或验证码，也绝不绕过人机验证。',
+    en: 'Never sign in, create accounts, or type passwords or verification codes for the user, and never solve or bypass a CAPTCHA.',
+    zh: '不替用户登录、注册账号，不输入密码或验证码，也不做或绕过 CAPTCHA。',
   },
   {
-    id: 'never-consent',
-    en: 'The Agent never ticks consent, attestation, or arbitration boxes, and never signs an e-signature for you.',
-    zh: 'Agent 绝不替你勾选同意、声明或仲裁条款，也绝不替你电子签名。',
+    id: 'never-consent-or-sign',
+    en: 'Never tick consent, attestation, certification, or arbitration boxes, and never sign: no drawn signature and no typed name or date entered as an e-signature.',
+    zh: '不勾同意、声明、认证或仲裁条款，不代签名：不手写签名，也不输入姓名或日期作为电子签名。',
   },
   {
     id: 'never-write-essays',
-    en: 'The Agent never writes essays such as why-us answers or cover letters; it only organises what you said in your own words.',
-    zh: 'Agent 绝不代写文书（例如“为什么选择我们”或求职信），只整理你用自己的话说过的内容。',
+    en: "Never write essays: cover letters, why-us, motivation, and supplemental answers are the user's. Only organise the user's own words.",
+    zh: '不写作文：cover letter、why us、动机和补充问答都属于用户本人。只整理用户自己说的话。',
   },
   {
-    id: 'never-take-assessments',
-    en: 'The Agent never takes assessments or attends interviews.',
-    zh: 'Agent 绝不代做测评，也绝不代为参加面试。',
+    id: 'transcript-only-when-required',
+    en: 'Upload the transcript only when the form makes a transcript a required field; never into resume, optional, or "other attachments" slots.',
+    zh: '成绩单只在表单把成绩单设为必填项时上传；不放进简历、可选或“其他附件”位置。',
   },
   {
-    id: 'never-share-personal-data',
-    en: 'Personal data never goes into a repository or logs and is never sent to third parties.',
-    zh: '个人信息绝不写进代码仓库或日志，也绝不发送给第三方。',
+    id: 'one-chosen-resume',
+    en: 'Upload exactly one resume, the one the user chose: `materials.resumePath`, or a per-role version only when the user picked it for that role. Never substitute another version.',
+    zh: '只上传一份简历，即用户选定的那份：`materials.resumePath`，或者用户为该岗位明确指定的版本。不换成其他版本。',
+  },
+  {
+    id: 'one-bullet-per-line',
+    en: 'Enter work descriptions one bullet per line, each line starting with "• ".',
+    zh: '工作描述每条一行，行首加“• ”。',
+  },
+  {
+    id: 'no-personal-data-in-repository',
+    en: "Never put personal data into the repository. Profile, answers, resumes, transcripts, screenshots, filled briefs, and fill reports stay in the user's data home or a private temporary directory.",
+    zh: '不把个人资料写进仓库。资料、答案表、简历、成绩单、截图、填好的任务说明和填表报告只放在用户的数据目录或私有临时目录。',
   },
 ]);
 
@@ -434,7 +447,35 @@ export const profileQuestions = deepFreeze([
     { en: 'Certifications and awards worth listing on forms. Optional.', zh: '值得在表单上填写的证书和奖项。可不填。' },
     { type: 'text', required: false, allowOther: true, target: ANSWERS_TARGET, example: 'Example Cloud Practitioner (2026)' }),
 
-  // Round 4: rules and pace.
+  // Round 4: scan sources, rules, and pace. Ask the three sources questions together.
+  question('watch-companies', 4, 'sources',
+    { en: 'Companies to watch', zh: '关注的公司' },
+    {
+      en: "Which companies should the daily role scan watch? Name as many as you like. The Agent finds each company's official Greenhouse, Lever, or Ashby job board from its careers page and saves it; a company that uses another hiring system cannot be scanned this way, and the Agent tells you which ones.",
+      zh: '每日岗位扫描要关注哪些公司？数量不限。Agent 会从每家公司的招聘页找到它在 Greenhouse、Lever 或 Ashby 上的官方职位板并保存；使用其他招聘系统的公司无法用这种方式扫描，Agent 会告诉你是哪几家。',
+    },
+    {
+      type: 'ats-boards', required: true, allowOther: true, target: 'sources.atsBoards',
+      example: [{ ats: 'greenhouse', board: 'examplecorp', company: 'ExampleCorp' }],
+    }),
+  question('careerops-source', 4, 'sources',
+    { en: 'CareerOps portal scans', zh: 'CareerOps 门户扫描' },
+    {
+      en: 'Also scan the company portals tracked by CareerOps? Optional and off by default. It runs only when CareerOps, a separately installed MIT-licensed project, is set up on this computer.',
+      zh: '是否同时扫描 CareerOps 跟踪的公司招聘门户？可选，默认关闭。只有这台电脑上已经安装并配置 CareerOps（一个单独安装、采用 MIT 许可证的项目）时才会运行。',
+    },
+    { type: 'boolean', required: false, target: 'sources.careerOps', default: false, options: yesNo }),
+  question('simplify-source', 4, 'sources',
+    { en: 'SimplifyJobs list', zh: 'SimplifyJobs 列表' },
+    {
+      en: 'Also read the public SimplifyJobs internship and new-grad list? The list has no licence, so it stays off unless you turn it on. When on, it is read live on this computer at scan time and is never bundled, cached, or redistributed. To turn it on, give the https link to the list\'s JSON file.',
+      zh: '是否同时读取 SimplifyJobs 公开的实习和应届生岗位列表？这份列表没有许可证，所以除非你主动开启，否则一直关闭。开启后只在扫描时在这台电脑上实时读取，从不打包、缓存或再分发。要开启，请提供该列表 JSON 文件的 https 链接。',
+    },
+    {
+      type: 'opt-in-url', required: false, allowOther: true, target: 'sources.simplify', default: { enabled: false, url: null },
+      options: [option({ enabled: false, url: null }, 'No, keep it off (default)', '不开启（默认）')],
+      example: { enabled: true, url: 'https://example.com/listings.json' },
+    }),
   question('batch-size', 4, 'pace',
     { en: 'Batch size', zh: '每批数量' },
     { en: 'How many roles should the Agent fill at a time? Any whole number from 1 to 10.', zh: 'Agent 每批同时填写几个职位？可以是 1 到 10 之间的整数。' },

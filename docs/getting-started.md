@@ -36,9 +36,9 @@ After `doctor` passes and the Jev and history-import questions are answered or s
 | 1 | Job type and season, primary and secondary directions, locations in order and remote, degree and graduation date, work authorization, hard exclusions | Which roles to scan and which to skip |
 | 2 | The one resume to upload, an optional transcript, LinkedIn, GitHub, and website, and each education and work entry read from the resume | What to upload and enter |
 | 3 | Common form answers: contact details, voluntary disclosures (each may be "prefer not to say"), languages, availability, salary wording, and similar | The user's own answers sheet |
-| 4 | Batch size, daily scan time and notification, and the fixed hard rules | Pace; the hard rules are shown and cannot be turned off |
+| 4 | Companies to watch and the opt-in CareerOps and SimplifyJobs sources, batch size, daily scan time and notification, whether to schedule a daily role scan, and the fixed hard rules | Where scans look and how fast to apply; the hard rules are shown and cannot be turned off |
 
-Core onboarding does not depend on the profile; assisted applying stays unavailable until rounds 1 and 2 are complete. When upgrading from 1.x, the Agent first infers what it can from existing applications, configuration, and the resume, asks the user to confirm every inferred value, and then asks only what is still missing.
+Core onboarding does not depend on the profile. Assisted applying stays unavailable until rounds 1 and 2 are complete, and role scans until round 1 is complete and at least one scan source is set. When upgrading from 1.x, the Agent first infers what it can from existing applications, configuration, and the resume, asks the user to confirm every inferred value, and then asks only what is still missing. The files, commands, and scan sources are described in [Profile, role scans, and assisted applying](#profile-role-scans-and-assisted-applying).
 
 ## Standalone CLI and API-host setup
 
@@ -212,9 +212,15 @@ career-journal queue list --home ~/job-search --json
 career-journal start --home ~/job-search
 ```
 
+## Profile, role scans, and assisted applying
+
+Role scans and assisted applying read a private profile that the Agent builds through the [profile interview](#profile-interview) after `doctor` passes. `setup` creates nothing, and the CLI never prompts: the Agent reads the questions, asks them in your language, and saves each answer.
+
 ### Profile and answers sheet
 
-Scans and assisted applying read a private profile that the Agent builds through a short interview after `doctor` passes. `setup` creates nothing, and the CLI never prompts: the Agent reads the questions, asks them in your language, and saves each answer.
+- `<home>/.career-journal/profile/profile.json` holds the structured answers from rounds 1, 2, and 4. A workspace upgraded from v0.1.0-alpha.5 or earlier keeps the same files under `.jobops/profile/`
+- `<home>/.career-journal/profile/answers.md` holds the form answers from round 3 and every new question answered while applying, appended under `## Learned while applying` with the date and source
+- Resumes and transcripts are referenced by path, not copied. Both files are owner-only (`0600`, directory `0700`), stay on your computer, and never belong in a Git repository. Blank templates are in `config/profile.template.json` and `config/answers.template.md`
 
 ```sh
 career-journal profile questions --json
@@ -228,25 +234,32 @@ career-journal profile status --json --home ~/job-search
 career-journal profile show --home ~/job-search
 ```
 
-- `profile questions` lists the four rounds (search target, materials, common form answers, pace) with English and Chinese prompts, options, whether each item is required, and where the answer is stored. `--round N` narrows to one round; `--missing` lists only required items that are still unanswered, marking the ones you skipped.
-- `profile set` writes `.career-journal/profile/profile.json`, creating it on the first write. `--key` takes a dot-path such as `search.season` or a question key such as `season`; `--value` is JSON or plain text, and `--value null` clears an optional field. Every write is validated, and resume and transcript paths must be absolute (or start with `~/`) and point to a readable file.
-- `profile answer` writes `.career-journal/profile/answers.md` with the source (default `user`) and date. With `--key`, a common form answer from round 3 keeps one row under "Common form answers" and is updated in place; with `--question`, the row is appended under "Learned while applying".
-- `profile status` shows which rounds are complete and whether scans and applying are ready. `doctor` adds `profile` and `apply` lines as warnings: core onboarding passes without a profile, and `apply` stays `incomplete` until rounds 1 and 2 are complete and the resume file is readable.
-- Both files are owner-only (`0600`, directory `0700`), stay on your computer, and never belong in a Git repository. Blank templates are in `config/profile.template.json` and `config/answers.template.md`.
-## Profile, role scans, and assisted applying
+- `profile questions` lists the four rounds (search target, materials, common form answers, scan sources and pace) with English and Chinese prompts, options, whether each item is required, and where the answer is stored, plus the fixed hard rules. `--round N` narrows to one round; `--missing` lists only required items that are still unanswered, marking the ones you skipped
+- `profile set` writes `profile.json`, creating it on the first write. `--key` takes a dot-path such as `search.season` or a question key such as `season`; `--value` is JSON or plain text, and `--value null` clears an optional field. Every write is validated, and resume and transcript paths must be absolute (or start with `~/`) and point to a readable file
+- `profile answer` writes `answers.md` with the source (default `user`) and date. With `--key`, a common form answer from round 3 keeps one row under "Common form answers" and is updated in place; with `--question`, the row is appended under "Learned while applying"
+- `profile status` shows which rounds are complete and whether scans and applying are ready. Scans need round 1 and at least one scan source; applying needs rounds 1 and 2 and a readable resume file. `doctor` adds `profile` and `apply` lines as warnings only, so core onboarding passes without a profile
 
-### Where the profile lives
+### Role scans and the queue
 
-- `<home>/.career-journal/profile/profile.json` holds the structured answers from rounds 1, 2, and 4
-- `<home>/.career-journal/profile/answers.md` holds form answers from round 3 and every new question answered while applying, appended under `## Learned while applying` with the date and source
-- Resumes and transcripts are referenced by path, not copied. Profile files are private to the user (file mode `0600`, folder `0700`) and never belong in the repository
+`scan run` reads the workspace profile (or `--profile <path>`), fetches roles read-only from its scan sources, filters them by the profile, removes duplicates, rates fit, and queues the rest as `lead` applications. `--dry-run` previews a scan without writing anything or calling a model.
 
-### Role scans
+```sh
+career-journal profile set --home ~/job-search --key sources.atsBoards --value '[{"ats":"greenhouse","board":"examplecorp","company":"ExampleCorp"}]'
+career-journal scan run --home ~/job-search --dry-run
+career-journal scan run --home ~/job-search --json
+career-journal queue list --home ~/job-search
+career-journal queue verify --home ~/job-search --id <application> --result ok --reason "Official posting checked" --deadline 2026-10-15T23:59:00-04:00
+career-journal queue verify --home ~/job-search --id <application> --result skip --reason "PhD students only"
+```
 
-- `career-journal scan run --home ~/job-search --dry-run` previews a scan without writing; without `--dry-run`, kept roles are added as leads
-- The default sources are the official public job-board APIs of Greenhouse, Lever, and Ashby for companies the user lists. CareerOps portal scans and the SimplifyJobs list are opt-in. SimplifyJobs publishes no licence, so it is read live on the user's machine at scan time and is never bundled, cached in the repository, or redistributed
-- Filters come only from the profile. The same requisition ID, the same link, or a near-identical company and title count as one role, which is applied to once
-- The Agent reads each new lead's official posting and records `queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>]`. Every skip has a reason. `queue list` shows the queue by fit, deadline, location rank, and posted date
+- **Companies you watch (default source):** the official public Greenhouse, Lever, and Ashby job-board APIs for the boards in `sources.atsBoards`. You name the companies; the Agent finds each company's board token in the links on its own careers page (`boards.greenhouse.io/<token>`, `jobs.lever.co/<token>`, or `jobs.ashbyhq.com/<token>`), saves the full list with `profile set --key sources.atsBoards`, and checks that every board reads `ok` in `scan run --dry-run`. Companies that use another hiring system cannot be scanned this way, and the Agent tells you which ones
+- **CareerOps (opt-in):** used when `sources.careerOps` is `true` and its bridge is detected
+- **SimplifyJobs (opt-in):** used only when you set `sources.simplify.enabled` and supply `sources.simplify.url`. The list has no licence, so it is read live on your machine at scan time and never bundled, cached in the repository, or redistributed; see [Third-Party Notices](../THIRD_PARTY_NOTICES.md)
+- **Filters:** only from the profile: season and job type, direction keywords, degree (PhD-only or undergraduate-only wording; a bachelor's mention alone never drops a role), citizenship, clearance, export-control, or sponsorship requirements, explicit no-return-offer wording, and location rank from `search.locations` plus `remoteOk`. Every dropped role has a reason in the `--json` output
+- **Duplicates:** the same source id, requisition id in the link, link, or company with a near-identical title count as one role, which is applied to once. A role already applied to or skipped is never queued again; a similar title is queued with a possible-duplicate note
+- **Fit:** `high`, `medium`, or `low` from Jev, then the configured structured LLM. Without either, a local rule rates a primary direction in the title high and a secondary one medium, and the note says the fit is rule-based
+- **Queue:** the Agent reads each new lead's official posting and records `queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>]`; every skip has a reason, and `skip` moves the lead to `withdrawn` with an event that carries it. `queue list` shows leads that are not skipped, ordered by fit, deadline, location rank, and posting date
+- **Daily scan (optional):** created only when you say yes in round 4, and always as its own scheduled task: a second Codex heartbeat or Claude Code scheduled task at `pace.scanTime`. It cannot join the shared job that runs `mail-sync` and `deadline-review`, which is fixed to 20:00 and 20:15 and accepts no other task. `automation configure --task role-scan --enabled` takes the time from `pace.scanTime`, and `automation register-external --task role-scan` records the new job's own ID. Onboarding does not create it and `doctor` does not require it
 
 ### Assisted applying
 
@@ -258,7 +271,7 @@ When the user says "start applying", the Agent follows the [`career-journal-appl
 4. A required question the answers sheet does not cover goes to the user with options; the answer is saved with `profile answer` and reused next time
 5. After the user submits, the Agent confirms from the confirmation email or the site's received page and records `event add --status-after applied`. Assessment and interview invitations become `task add` entries with `--due-at`, `--due-note`, and `--link`
 
-The hard rules are fixed text in the Skill and no setting turns them off:
+The hard rules are fixed text in the Skill, shown in round 4, and no setting turns them off:
 
 - Never click any button labelled Submit*
 - Never sign in, create accounts, or type passwords or verification codes, and never bypass a CAPTCHA
@@ -270,24 +283,6 @@ The hard rules are fixed text in the Skill and no setting turns them off:
 - Never put personal data into the repository
 
 Per-site technique for Workday, Oracle HCM, iCIMS, Greenhouse, Ashby, Lever, Yello, and SuccessFactors is in [`references/ats-tips.md`](../.agents/skills/career-journal-apply/references/ats-tips.md), and the brief each sub-agent receives is in [`references/fill-brief.md`](../.agents/skills/career-journal-apply/references/fill-brief.md).
-### Role scan and queue
-
-`scan run` reads the search profile at `<home>/.career-journal/profile/profile.json` (or `--profile <path>`). It fetches roles read-only from the official public Greenhouse, Lever, and Ashby job-board APIs for the boards in `sources.atsBoards`, filters them by the profile, removes duplicates, rates fit, and queues the rest as `lead` applications.
-
-```sh
-career-journal scan run --home ~/job-search --dry-run
-career-journal scan run --home ~/job-search --json
-career-journal queue list --home ~/job-search
-career-journal queue verify --home ~/job-search --id <application> --result ok --reason "Official posting checked" --deadline 2026-10-15T23:59:00-04:00
-career-journal queue verify --home ~/job-search --id <application> --result skip --reason "PhD students only"
-```
-
-- **Filters:** season and job type, direction keywords, degree (PhD-only or undergraduate-only wording; a bachelor's mention alone never drops a role), citizenship, clearance, export-control, or sponsorship requirements, explicit no-return-offer wording, and location rank from `search.locations` plus `remoteOk`. Every dropped role has a reason in the `--json` output
-- **Duplicates:** the same source id, requisition id in the link, link, or company with a near-identical title. A role already applied to or skipped is never queued again; a similar title is queued with a possible-duplicate note
-- **Fit:** `high`, `medium`, or `low` from Jev, then the configured structured LLM. Without either, a local rule rates a primary direction in the title high and a secondary one medium, and the note says the fit is rule-based. `--dry-run` writes nothing and calls no model
-- **Queue:** `queue list` shows leads that are not skipped, ordered by fit, deadline, location rank, and posting date. `queue verify --result skip` moves the lead to `withdrawn` with an event that carries the reason
-- **Optional sources:** CareerOps when `sources.careerOps` is `true` and its bridge is detected. SimplifyJobs only when you set `sources.simplify.enabled` and supply `sources.simplify.url`; its list has no licence, so it is read live on your machine and never bundled or redistributed
-- **Optional schedule:** `automation configure --task role-scan --enabled` defaults to the profile's `pace.scanTime`. Onboarding does not create it and `doctor` does not require it; give it its own scheduled task
 
 ## Application Materials and CareerOps
 
@@ -323,7 +318,7 @@ After the key exists in the environment, run `npm run test:jev-live` for an expl
 
 ## Daily Automations
 
-Setup provisions only `mail-sync` at 20:00 and `deadline-review` at 20:15 in the detected computer time zone. These defaults can be changed explicitly during setup or with `automation configure`. `daily-consolidation` is retained only for upgrade compatibility, and `backup create` remains an optional on-demand command. Neither is created during new onboarding.
+Setup provisions only `mail-sync` at 20:00 and `deadline-review` at 20:15 in the detected computer time zone. These defaults can be changed explicitly during setup or with `automation configure`. `daily-consolidation` is retained only for upgrade compatibility, and `backup create` remains an optional on-demand command. Neither is created during new onboarding. The optional `role-scan` task is offered in profile round 4 and always runs as its own scheduled task; see [Role scans and the queue](#role-scans-and-the-queue).
 
 The scheduler that actually wakes the process lives outside CAREER JOURNAL. A Codex automation, service scheduler, or API host must create the required schedules. `register-external` records a pending claim after successful creation; it neither creates nor verifies a schedule. Do not register a placeholder ID. Codex uses one shared heartbeat for the required pair; native schedulers may use separate jobs.
 

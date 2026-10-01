@@ -35,6 +35,10 @@ The product non-goals also stand: never take assessments or attend interviews, a
 5. Apply company rules. When a company allows one application per candidate, pick the best fit through the decision router (Jev when enabled, otherwise the current Agent) and skip the others with a reason. Record when Jev was not used.
 6. Tell the user in one short message which N roles this batch covers.
 
+## When the queue is empty
+
+If the queue has no verified leads and the user wants new roles, run `scan run`. When `profile status --json` says there are no scan sources, ask which companies to watch and resolve each company to its job-board token from the company's own careers page: a link to `boards.greenhouse.io/<token>` or `job-boards.greenhouse.io/<token>` is Greenhouse, `jobs.lever.co/<token>` is Lever, and `jobs.ashbyhq.com/<token>` is Ashby; the token is the first path segment. Save the complete list with `profile set --key sources.atsBoards --value '[{"ats":"greenhouse","board":"<token>","company":"<Company>"}]'`, check that every board reads `ok` in `scan run --dry-run`, and tell the user which companies use another hiring system and cannot be scanned. Never guess a token. The opt-in CareerOps and SimplifyJobs sources are covered in the `career-journal` Skill under Scan sources.
+
 ## Dispatch
 
 - One fill sub-agent per role. Give each the brief in [`references/fill-brief.md`](references/fill-brief.md) with every placeholder filled, plus [`references/ats-tips.md`](references/ats-tips.md). Write a filled brief only to a private temporary path, never into the repository.
