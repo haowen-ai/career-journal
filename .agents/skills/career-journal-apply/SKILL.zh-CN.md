@@ -30,6 +30,10 @@
 5. 遵守公司规则。公司规定每人只能投一个岗位时，通过判断路由（启用 Jev 时用 Jev，否则由当前 Agent 判断）选最对口的一个，其余标记“不投”并写原因；没有用 Jev 时要注明。
 6. 用一条简短消息告诉用户这一批是哪 N 个岗位。
 
+## 队列为空时
+
+队列里没有已核实的岗位、用户又想找新岗位时，运行 `scan run`。`profile status --json` 显示没有扫描来源时，先问用户要关注哪些公司，再从每家公司自己的招聘页找到它的职位板标识（token）：链接指向 `boards.greenhouse.io/<token>` 或 `job-boards.greenhouse.io/<token>` 的是 Greenhouse，`jobs.lever.co/<token>` 是 Lever，`jobs.ashbyhq.com/<token>` 是 Ashby；标识就是域名后的第一段路径。用 `profile set --key sources.atsBoards --value '[{"ats":"greenhouse","board":"<token>","company":"<公司名>"}]'` 一次写入完整列表，确认 `scan run --dry-run` 中每个职位板都显示 `ok`，并告诉用户哪些公司使用其他招聘系统、无法扫描。不得猜测标识。需要用户自己开启的 CareerOps 和 SimplifyJobs 来源见 `career-journal` Skill 的“扫描来源”。
+
 ## 派发
 
 - 每个岗位一个填表子 Agent。把 [`references/fill-brief.zh-CN.md`](references/fill-brief.zh-CN.md) 中的任务说明填好全部占位符后交给它，同时附上 [`references/ats-tips.zh-CN.md`](references/ats-tips.zh-CN.md)。填好的任务说明只写到私有临时路径，不写进仓库。
