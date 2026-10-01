@@ -15,6 +15,8 @@ import {
   ROLE_SORTS,
   statFilter,
   suggestedNextAction,
+  taskCardHint,
+  taskCardSummary,
   taskDeadlineLabel,
   taskDeadlineStatus,
   taskKindLabel,
@@ -58,6 +60,7 @@ const copy = {
       applied: 'Show sent applications', waiting: 'Show Waiting applications', interview: 'Show Interview / Offer applications',
       closed: 'Show Closed applications', preparing: 'Show Preparing applications',
     }[stat]} (${count})`,
+    statTasks: 'Assessments & interviews', statTasksLabel: (count, hint) => `Go to Assessments & interviews (${count}): ${hint}`,
     toApplyTitle: 'To apply', toApplyBody: 'Roles waiting for you to apply, soonest deadline first.',
     toApplyToday: 'Apply today', toApplyWeek: 'Due this week', toApplyLater: (count) => `Later (${count})`,
     toApplyNone: (count) => `No deadline listed (${count})`, openPosting: 'Open posting',
@@ -92,6 +95,7 @@ const copy = {
       applied: '查看已投递的申请', waiting: '查看等待进展的申请', interview: '查看面试 / Offer 的申请',
       closed: '查看已结束的申请', preparing: '查看准备中的申请',
     }[stat]}（${count}）`,
+    statTasks: '测评与面试准备', statTasksLabel: (count, hint) => `前往测评与面试准备（${count}）：${hint}`,
     toApplyTitle: '等待我投递', toApplyBody: '等你投递的岗位，截止时间最近的排在前面。',
     toApplyToday: '今天要投', toApplyWeek: '本周截止', toApplyLater: (count) => `稍后（${count}）`,
     toApplyNone: (count) => `未写截止日期（${count}）`, openPosting: '打开官网',
@@ -125,6 +129,8 @@ const elements = {
   applyEmpty: document.querySelector('#to-apply-empty'),
   applyLaterLabel: document.querySelector('#apply-later-label'), applyNoneLabel: document.querySelector('#apply-none-label'),
   roleControls: document.querySelector('#role-controls'),
+  tasksCard: document.querySelector('[data-testid="stat-card-tasks"]'), tasksCount: document.querySelector('#stat-tasks'),
+  tasksHint: document.querySelector('#stat-tasks-hint'),
 };
 
 // Remembered view choices are a convenience: without storage the defaults apply.
@@ -319,6 +325,17 @@ function renderTaskRow(task) {
   action.setAttribute('aria-label', `${label}: ${task.title}`);
   action.addEventListener('click', () => updateTaskStatus(task, completed ? 'open' : 'done', action));
   return fragment;
+}
+
+// The Assessments & interviews card counts open steps; it turns amber when a
+// step is past due or due within 2 days.
+function renderTasksCard() {
+  const summary = taskCardSummary(state.applications, { timeZone: state.timezone });
+  const hint = taskCardHint(summary, { locale: state.locale, timeZone: state.timezone });
+  elements.tasksCount.textContent = summary.open;
+  elements.tasksHint.textContent = hint;
+  elements.tasksCard.classList.toggle('is-urgent', summary.urgent);
+  elements.tasksCard.setAttribute('aria-label', t('statTasksLabel')(summary.open, hint));
 }
 
 function renderTasks() {
@@ -526,6 +543,7 @@ function render() {
     tasks: state.applications.filter(hasOpenTask).length, queue: state.applications.filter(isQueued).length,
   };
   for (const [key, value] of Object.entries(filterCounts)) document.querySelector(`[data-count="${key}"]`).textContent = value;
+  renderTasksCard();
   renderToApply();
   renderTasks();
   const roleView = hasRoleControls(state.group);
@@ -574,13 +592,22 @@ document.querySelectorAll('[data-fit]').forEach((button) => button.addEventListe
   saveChoice('career-journal-role-fit', state.fit);
   render();
 }));
+function scrollBehavior() {
+  try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'; } catch { return 'smooth'; }
+}
+
 // A summary card applies its list filter exactly as the filter button does,
 // then brings the list into view.
 document.querySelectorAll('[data-stat]').forEach((card) => card.addEventListener('click', () => {
   document.querySelector(`[data-filter="${statFilter(card.dataset.stat)}"]`).click();
-  let reduceMotion = false;
-  try { reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch {}
-  document.querySelector('.applications-section').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+  document.querySelector('.applications-section').scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
+}));
+// A card with a scroll target leaves the list filter alone: it brings that
+// section into view and moves focus to its heading.
+document.querySelectorAll('[data-scroll-target]').forEach((card) => card.addEventListener('click', () => {
+  const heading = document.getElementById(card.dataset.scrollTarget);
+  (heading.closest('section') ?? heading).scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
+  heading.focus({ preventScroll: true });
 }));
 elements.languageToggle.addEventListener('click', () => {
   state.locale = state.locale === 'en' ? 'zh-CN' : 'en';

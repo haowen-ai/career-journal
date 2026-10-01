@@ -68,6 +68,11 @@
           <strong id="stat-preparing" data-testid="stat-preparing">0</strong>
           <span class="stat-note" data-i18n="statPreparingNote">Not yet confirmed as submitted</span>
         </button>
+        <button class="stat-card stat-tasks" type="button" data-scroll-target="tasks-heading" data-testid="stat-card-tasks" aria-label="Go to Assessments &amp; interviews">
+          <span class="stat-label"><span class="semantic-dot dot-tasks" aria-hidden="true"></span><span data-i18n="statTasks">Assessments &amp; interviews</span></span>
+          <strong id="stat-tasks" data-testid="stat-tasks">0</strong>
+          <span class="stat-note" id="stat-tasks-hint" data-testid="stat-tasks-hint">Nothing open</span>
+        </button>
       </section>
 
       <section class="to-apply-section" aria-labelledby="to-apply-heading" data-testid="to-apply-section">
@@ -109,7 +114,7 @@
       <section class="tasks-section" aria-labelledby="tasks-heading" data-testid="tasks-section">
         <div class="list-heading">
           <div>
-            <h2 id="tasks-heading" data-i18n="tasksTitle">Assessments &amp; interviews</h2>
+            <h2 id="tasks-heading" tabindex="-1" data-i18n="tasksTitle">Assessments &amp; interviews</h2>
             <p data-i18n="tasksBody">Open steps across all applications, soonest deadline first.</p>
           </div>
         </div>
