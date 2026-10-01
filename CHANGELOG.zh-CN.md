@@ -8,11 +8,14 @@
 
 ### 新增
 
-- 无
+- 新增 `career-journal profile show|questions|set|answer|status`，用于 2.0 首次使用时的求职资料问答。`profile questions --json` 以数据形式返回四轮问题（求职目标、申请材料、常用表单答案、节奏），每个问题都有英文和简体中文提问、选项、“其他”自由填写、是否必填，以及答案写入的资料字段或答案表；`--round N` 只看某一轮，`--missing` 只列出仍未回答的必填项
+- 新增本地求职资料 `.career-journal/profile/profile.json`，在第一次运行 `profile set` 时创建。每次写入都会校验（职位类型、方向、学位和工作许可的取值；毕业时间为 `YYYY-MM`；每批数量 1–10；扫描时间为 `HH:MM`；简历和成绩单路径必须可读取）；`profile status` 显示哪几轮已完成，以及扫描和辅助填表是否就绪
+- 新增私密答案表 `.career-journal/profile/answers.md`。`profile answer --question` 在“Learned while applying”下追加一行，并按工作区时区记录来源和日期；`profile answer --key` 让每个常用表单答案在“Common form answers”下只保留一行
+- 新增空白模板 `config/profile.template.json` 和 `config/answers.template.md`
 
 ### 变更
 
-- 无
+- `doctor` 新增 `profile` 和 `apply` 两行，只作为警告，因此没有求职资料也能通过核心配置；在问答第 1、2 轮完成且简历文件可读取之前，`apply` 显示 `incomplete`
 
 ### 修复
 
@@ -20,7 +23,8 @@
 
 ### 安全
 
-- 无
+- 求职资料文件以原子方式写入，只有本人可读写（文件 `0600`，目录 `0700`）；并发写入会排队，不会丢失答案；资料相关命令从不访问网络
+- Git 现在忽略 `.career-journal/`，即使把工作区建在代码仓库里，也不会把个人资料提交进去
 
 ## [1.1.0] - 2026-10-01
 

@@ -8,11 +8,14 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Added
 
-- None
+- Added `career-journal profile show|questions|set|answer|status` for the 2.0 first-run profile interview. `profile questions --json` returns the four rounds (search target, materials, common form answers, pace) as data with English and Simplified Chinese prompts, options, an Other allowance, required flags, and the profile field or answers sheet each answer fills; `--round N` narrows to one round and `--missing` lists only unanswered required items
+- Added a local profile at `.career-journal/profile/profile.json`, created by the first `profile set`. Writes are validated (job type, directions, degree, and authorization enums; graduation as `YYYY-MM`; batch size 1–10; scan time `HH:MM`; readable resume and transcript paths) and `profile status` reports which rounds are complete and whether scans and assisted applying are ready
+- Added a private answers sheet at `.career-journal/profile/answers.md`. `profile answer --question` appends a row under "Learned while applying" with its source and date in the workspace time zone; `profile answer --key` keeps one row per common form answer under "Common form answers"
+- Added blank templates `config/profile.template.json` and `config/answers.template.md`
 
 ### Changed
 
-- None
+- `doctor` adds `profile` and `apply` lines. They are warnings only, so core onboarding still passes without a profile; `apply` reports `incomplete` until interview rounds 1 and 2 are complete and the resume file is readable
 
 ### Fixed
 
@@ -20,7 +23,8 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Security
 
-- None
+- Profile files are written atomically with owner-only permissions (`0600` files in a `0700` directory), concurrent writes are serialized so no answer is lost, and profile commands never use the network
+- `.career-journal/` is now ignored by Git so a workspace created inside a checkout cannot commit personal profile data
 
 ## [1.1.0] - 2026-10-01
 
