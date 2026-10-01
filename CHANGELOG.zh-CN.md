@@ -12,6 +12,8 @@
 - 新增本地求职资料 `.career-journal/profile/profile.json`，在第一次运行 `profile set` 时创建。每次写入都会校验（职位类型、方向、学位和工作许可的取值；毕业时间为 `YYYY-MM`；每批数量 1–10；扫描时间为 `HH:MM`；简历和成绩单路径必须可读取）；`profile status` 显示哪几轮已完成，以及扫描和辅助填表是否就绪
 - 新增私密答案表 `.career-journal/profile/answers.md`。`profile answer --question` 在“Learned while applying”下追加一行，并按工作区时区记录来源和日期；`profile answer --key` 让每个常用表单答案在“Common form answers”下只保留一行
 - 新增空白模板 `config/profile.template.json` 和 `config/answers.template.md`
+- 看板中准备阶段的申请卡片显示匹配度标签（高匹配、中匹配或低匹配）、按工作区时区显示的截止时间和剩余天数、地点、来源职位板，以及岗位原文是否已核实。核对后被跳过的线索会在已撤回的卡片上显示跳过原因
+- 看板新增“投递队列”筛选，列出没有跳过原因的线索，顺序与 `queue list` 一致：先按匹配度，再按截止时间，再按发布时间。地点顺序需要求职档案，而看板不读取档案，所以浏览器中不按地点排序
 
 ### 变更
 
@@ -37,6 +39,8 @@
 ### 变更
 
 - 数据库结构版本 5 为 `applications` 新增可为空的 `source`、`source_id`、`location`、`posted_at`、`deadline_at`、`fit`、`fit_confidence`、`fit_note`、`verified_at` 和 `skip_reason` 列，并为 `(source, source_id)` 建立索引。升级时先运行 `career-journal migrate --dry-run`、创建备份，再运行 `career-journal migrate --apply`
+- `/api/dashboard` 和 `GET /api/applications/:id` 现在为每条申请返回 `source`、`location`、`postedAt`、`deadlineAt`、`fit`、`fitConfidence`、`fitNote`、`verifiedAt` 和 `skipReason`；不返回来源 ID、岗位原文或判断记录
+- 看板时间线中的岗位扫描和岗位核对事件会显示对应来源，不再显示为“其他”
 
 ### 修复
 
