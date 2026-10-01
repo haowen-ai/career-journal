@@ -8,6 +8,8 @@ export const BUILT_IN_TASKS = Object.freeze({
   'deadline-review': { description: 'Review applications in assessment, interview, or offer stages', requires: 'core' },
   'daily-consolidation': { description: 'Consolidate project-local job-search knowledge', requires: 'core' },
   'local-backup': { description: 'Create a secret-free local backup', requires: 'core' },
+  // Optional; never created by onboarding and never required by doctor.
+  'role-scan': { description: 'Scan official job boards for new roles that match the search profile', requires: 'profile', optional: true },
 });
 
 function contentCursor(type, value) {

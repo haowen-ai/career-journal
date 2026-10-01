@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "roles": [
+    {
+      "id": "careerops-0001",
+      "company": "Example Robotics",
+      "title": "Perception ML Intern, Summer 2027",
+      "url": "https://jobs.example.com/robotics/perception-ml-intern",
+      "location": "Seattle, WA",
+      "postedAt": "2026-09-25T00:00:00Z",
+      "description": "Master's students are welcome."
+    },
+    { "company": "Example Robotics", "title": "Missing link" }
+  ]
+}

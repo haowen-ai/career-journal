@@ -5,8 +5,9 @@ import { migration001 } from './migrations/001-initial.mjs';
 import { migration002 } from './migrations/002-email-account-settings.mjs';
 import { migration003 } from './migrations/003-application-tasks.mjs';
 import { migration004 } from './migrations/004-task-links.mjs';
+import { migration005 } from './migrations/005-role-queue.mjs';
 
-export const schemaMigrations = [migration001, migration002, migration003, migration004];
+export const schemaMigrations = [migration001, migration002, migration003, migration004, migration005];
 
 export function openDatabase(file) {
   const resolved = file === ':memory:' ? file : path.resolve(file);

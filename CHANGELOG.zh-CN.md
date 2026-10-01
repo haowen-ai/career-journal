@@ -28,6 +28,15 @@
 - `AGENTS.md`、两份 README 和两份使用指南新增个人资料问答、岗位扫描、代填申请、固定硬规矩，以及个人资料的存放位置（`<home>/.career-journal/profile/`，不进仓库）
 - PRD 0.24 把非目标从“不自动批量投递”改为“不自动提交”：代填只在用户自己的浏览器里进行，登录、同意、签名和提交都由用户本人完成；并链接 2.0 设计
 - `scripts/check-release.mjs` 新增 `apply-skill` 检查：Skill 和两份参考文档必须同时有英文和简体中文版本，并具备语言链接、发现用的 frontmatter、全部硬规矩、全部五种标签标题、每个招聘系统的章节，以及 `career-journal` Skill 和 `AGENTS.md` 中的路由
+- 新增 `career-journal scan run [--dry-run] [--json] [--profile <path>]`。它读取求职档案，只读地调用官方公开的 Greenhouse、Lever 和 Ashby 职位板接口抓取用户列出的公司职位（启用并检测到 CareerOps 时也会使用它；只有用户主动开启并填写地址时才读取 SimplifyJobs），按季度、方向、学历、工作身份、明确不提供转正机会的写法和地点筛选，去重，把匹配度评为 high、medium 或 low，再把新职位记为线索。每个被排除的职位都有原因；`--dry-run` 不写入任何内容，也不调用任何模型
+- 新增 `career-journal queue list [--json]`，按匹配度、截止时间、地点排序和发布时间排列；新增 `queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>]` 记录核对结果，`skip` 会把线索改为已撤回，并记录一条带原因的事件
+- 新增可选的 `role-scan` 自动任务，默认使用档案中的 `pace.scanTime`；新用户配置时不会创建它，`doctor` 也不要求它
+- 职位匹配度成为新的判断类型：先由 Jev 判断，再交给已配置的大语言模型，最后用职位名称规则兜底（主要方向为 high，次要方向为 medium，其余为 low），并记录为规则判断
+- CareerOps 桥接契约新增只读的 `scan` 操作
+
+### 变更
+
+- 数据库结构版本 5 为 `applications` 新增可为空的 `source`、`source_id`、`location`、`posted_at`、`deadline_at`、`fit`、`fit_confidence`、`fit_note`、`verified_at` 和 `skip_reason` 列，并为 `(source, source_id)` 建立索引。升级时先运行 `career-journal migrate --dry-run`、创建备份，再运行 `career-journal migrate --apply`
 
 ### 修复
 

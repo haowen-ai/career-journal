@@ -19,11 +19,13 @@ import { nativeSchedulerRegistration } from '../automation/platform.mjs';
 import { installNativeScheduler } from '../automation/native-scheduler.mjs';
 import { hostCommandLineForTask, probeTaskRegistration } from '../automation/probe.mjs';
 import { createBackup } from './backup.mjs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { saveConfig, workspaceDirectory } from '../config/store.mjs';
 import { syncImapEmailAccount } from '../email/imap-sync.mjs';
 import { isLiveVerifiedEmailAccount, listEmailAccounts } from '../email/accounts.mjs';
 import { configuredDecisionAdapters } from './email.mjs';
+import { loadScanProfile } from '../scan/profile-input.mjs';
+import { scanFailed, scanWithContext } from './scan.mjs';
 
 const HOST_SYNC_RUN_MAX_AGE_MS = 30 * 60 * 1000;
 
@@ -43,11 +45,15 @@ export async function automationCommand(parsed, io, runtime) {
       const tasks = listTasks(context.db);
       const existing = tasks.find((task) => task.id === automationId(parsed, tasks));
       const enabled = parsed.options.enabled === true ? true : parsed.options.disabled === true ? false : existing?.enabled;
+      // role-scan defaults to the profile's pace.scanTime when no time is given.
+      const profileScanTime = parsed.options.task === 'role-scan' && !parsed.options.time && !existing?.schedule
+        ? (await loadScanProfile(context.root, { path: typeof parsed.options.profile === 'string' ? parsed.options.profile : undefined })).pace.scanTime ?? '08:00'
+        : null;
       const task = upsertTask(context.db, {
         type: parsed.options.task,
         enabled,
         timezone: parsed.options.timezone ?? existing?.timezone ?? context.config.timezone,
-        time: parsed.options.time ?? existing?.schedule,
+        time: parsed.options.time ?? existing?.schedule ?? profileScanTime,
         accountId: Object.hasOwn(parsed.options, 'account') ? parsed.options.account : existing?.accountId ?? null,
         notificationPolicy: parsed.options.notify ?? existing?.notificationPolicy ?? 'actionable',
       });
@@ -161,6 +167,21 @@ export async function automationCommand(parsed, io, runtime) {
           return { accounts: results, changed, cursor };
         },
         'deadline-review': async (task) => runDeadlineReview(context.db, task),
+        'role-scan': async () => {
+          const profile = await loadScanProfile(context.root);
+          const summary = await scanWithContext(context, profile, runtime);
+          if (scanFailed(summary)) throw new Error('Every role-scan source failed; nothing new was queued');
+          const queuedIds = summary.queued.map((item) => item.id).filter(Boolean);
+          return {
+            cursor: `sha256:${createHash('sha256').update(JSON.stringify({ type: 'role-scan', at: summary.scannedAt, queuedIds })).digest('hex')}`,
+            changed: queuedIds.length,
+            message: queuedIds.length ? `${queuedIds.length} new role(s) queued` : 'No new roles matched the profile',
+            counts: summary.counts,
+            dropReasons: summary.dropReasons,
+            sources: summary.sources,
+            queued: summary.queued,
+          };
+        },
         'daily-consolidation': async (task) => runDailyConsolidation(context.db, task, { home: context.root }),
         'local-backup': async (task) => {
           const stamp = new Date().toISOString().replace(/[:.]/g, '-');

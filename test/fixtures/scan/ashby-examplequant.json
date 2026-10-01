@@ -1,0 +1,53 @@
+{
+  "apiVersion": "1",
+  "jobs": [
+    {
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "title": "Machine Learning Intern, Summer 2027",
+      "department": "Research",
+      "team": "Machine Learning",
+      "employmentType": "Intern",
+      "location": "Remote",
+      "secondaryLocations": [],
+      "publishedAt": "2026-09-27T12:00:00.000+00:00",
+      "isListed": true,
+      "isRemote": true,
+      "workplaceType": "Remote",
+      "jobUrl": "https://jobs.ashbyhq.com/examplequant/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "applyUrl": "https://jobs.ashbyhq.com/examplequant/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/application",
+      "descriptionHtml": "<p>Open to Master's and PhD students.</p>",
+      "descriptionPlain": "Open to Master's and PhD students."
+    },
+    {
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "title": "Analytics Intern (Undergraduate), Summer 2027",
+      "department": "Analytics",
+      "employmentType": "Intern",
+      "location": "New York, NY",
+      "publishedAt": "2026-09-26T12:00:00.000+00:00",
+      "isListed": true,
+      "isRemote": false,
+      "jobUrl": "https://jobs.ashbyhq.com/examplequant/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "descriptionPlain": "Pursuing a Bachelor's degree."
+    },
+    {
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "title": "Unlisted Machine Learning Intern",
+      "location": "New York, NY",
+      "isListed": false,
+      "jobUrl": "https://jobs.ashbyhq.com/examplequant/cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    },
+    {
+      "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "title": "Data Science Intern, Summer 2027",
+      "department": "Data",
+      "employmentType": "Intern",
+      "location": "Manhattan, New York",
+      "secondaryLocations": [{ "location": "Seattle, WA" }],
+      "publishedAt": "2026-09-29T12:00:00.000+00:00",
+      "isListed": true,
+      "jobUrl": "https://jobs.ashbyhq.com/examplequant/dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "descriptionHtml": "<p>Open to students pursuing a Bachelor&#39;s, Master&#39;s, or PhD.</p>"
+    }
+  ]
+}

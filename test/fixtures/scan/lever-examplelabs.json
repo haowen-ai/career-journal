@@ -1,0 +1,50 @@
+[
+  {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "text": "Quantitative Research Intern",
+    "hostedUrl": "https://jobs.lever.co/examplelabs/11111111-1111-4111-8111-111111111111",
+    "applyUrl": "https://jobs.lever.co/examplelabs/11111111-1111-4111-8111-111111111111/apply",
+    "categories": { "commitment": "Intern", "location": "New York, NY", "team": "Research", "allLocations": ["New York, NY"] },
+    "createdAt": 1790092800000,
+    "descriptionPlain": "Our Summer 2027 internship program pairs you with researchers.",
+    "lists": [{ "text": "Requirements", "content": "<li>Pursuing a graduate degree in a quantitative field</li>" }],
+    "additionalPlain": "",
+    "workplaceType": "on-site"
+  },
+  {
+    "id": "22222222-2222-4222-8222-222222222222",
+    "text": "AI Engineering Intern",
+    "hostedUrl": "https://jobs.lever.co/examplelabs/22222222-2222-4222-8222-222222222222",
+    "categories": { "commitment": "Intern", "location": "Austin, TX", "team": "Engineering" },
+    "createdAt": 1790179200000,
+    "descriptionPlain": "Summer 2027.",
+    "workplaceType": "on-site"
+  },
+  {
+    "id": "33333333-3333-4333-8333-333333333333",
+    "text": "Data Science Intern",
+    "hostedUrl": "https://jobs.lever.co/examplelabs/33333333-3333-4333-8333-333333333333",
+    "categories": { "commitment": "Intern", "location": "Remote - US", "team": "Data" },
+    "createdAt": 1790265600000,
+    "descriptionPlain": "Must be a U.S. citizen. Active Secret clearance required.",
+    "workplaceType": "remote"
+  },
+  {
+    "id": "44444444-4444-4444-8444-444444444444",
+    "text": "Applied AI Intern",
+    "hostedUrl": "https://jobs.lever.co/examplelabs/44444444-4444-4444-8444-444444444444",
+    "categories": { "commitment": "Intern", "location": "New York, NY", "team": "Applied AI" },
+    "createdAt": 1790352000000,
+    "descriptionPlain": "A 10-week project. This internship does not lead to a full-time position.",
+    "workplaceType": "hybrid"
+  },
+  {
+    "id": "55555555-5555-4555-8555-555555555555",
+    "text": "Senior Data Scientist",
+    "hostedUrl": "https://jobs.lever.co/examplelabs/55555555-5555-4555-8555-555555555555",
+    "categories": { "commitment": "Full-time", "location": "New York, NY", "team": "Data" },
+    "createdAt": 1790438400000,
+    "descriptionPlain": "Five years of experience.",
+    "workplaceType": "on-site"
+  }
+]

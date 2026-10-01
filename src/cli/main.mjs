@@ -20,6 +20,8 @@ Commands:
   update        Check for updates
   migrate       Inspect or apply data migrations
   backup        Create a secret-free local backup
+  scan          Scan official job boards for roles that match the profile
+  queue         List or verify queued roles before applying
 
 Options:
   -h, --help     Show this help
