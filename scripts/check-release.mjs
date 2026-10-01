@@ -19,6 +19,85 @@ async function candidateFiles(root) {
   return states.filter(([, exists]) => exists).map(([file]) => file);
 }
 
+// Personal data never belongs in the repository. Examples use example domains, the
+// 555-01xx phone range, and placeholder home-directory names; anything else fails.
+export const PERSONAL_DATA_ALLOWLIST = Object.freeze({
+  // Example and placeholder domains (subdomains included), plus GitHub's public no-reply addresses.
+  emailDomains: Object.freeze(['example.com', 'example.org', 'example.net', 'example.edu', 'school.edu', 'your-domain.edu', 'users.noreply.github.com']),
+  // Top-level domains reserved for testing and documentation (RFC 2606, RFC 6761).
+  reservedTopLevelDomains: Object.freeze(['test', 'example', 'invalid', 'localhost']),
+  // Synthetic addresses the mailbox tests use on ordinary domains. Listed one by one so that
+  // any other address on these domains still fails.
+  emailAddresses: Object.freeze(['personal@candidate.dev', 'school@candidate.edu', 'recruiter@company.com']),
+  // Placeholder account names in test paths, and shared system folders that belong to no one.
+  homeDirectoryNames: Object.freeze(['candidate', 'example', 'Shared', 'Public', 'Default']),
+});
+
+const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@((?:[A-Za-z0-9-]+\.)+([A-Za-z]{2,}))(?![A-Za-z0-9-])/g;
+// file@2x.png and similar asset names look like addresses but are file names.
+const FILE_EXTENSION_TLDS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'js', 'mjs', 'cjs', 'ts', 'json', 'css', 'html', 'map']);
+// US numbers: (212) 555-0100, 212-555-0100, 212.555.0100, 212 555 0100 with an optional +1 or 1
+// prefix, +1 555 0100, and +12125550100.
+const PHONE_PATTERN = /(?<![\w.+-])(?:\+?1[\s.-]?)?(?:\(\d{3}\)[\s.-]?|\d{3}[\s.-])\d{3}[\s.-]\d{4}(?![\w-])|(?<![\w.+-])\+1[\s.-]?\d{3}[\s.-]?\d{4}(?![\w-])|(?<![\w.+-])\+1\d{10}(?!\d)/g;
+// /Users/<name>, /home/<name>, and C:\Users\<name> (also with escaped backslashes or forward slashes).
+const HOME_PATH_PATTERN = /(?<![A-Za-z0-9_.~-])(?:\/Users\/|\/home\/|[A-Za-z]:(?:\\+|\/)Users(?:\\+|\/))([A-Za-z0-9][A-Za-z0-9._-]*)/g;
+
+function lineAt(text, index) {
+  let line = 1;
+  for (let position = text.indexOf('\n'); position !== -1 && position < index; position = text.indexOf('\n', position + 1)) line += 1;
+  return line;
+}
+
+function allowedEmail(address, domain, topLevel) {
+  const lower = address.toLowerCase();
+  const host = domain.toLowerCase();
+  return PERSONAL_DATA_ALLOWLIST.emailAddresses.includes(lower)
+    || PERSONAL_DATA_ALLOWLIST.reservedTopLevelDomains.includes(topLevel.toLowerCase())
+    || PERSONAL_DATA_ALLOWLIST.emailDomains.some((allowed) => host === allowed || host.endsWith(`.${allowed}`));
+}
+
+function allowedPhone(match) {
+  const digits = match.replace(/\D/g, '');
+  return digits.slice(-7, -4) === '555' && /^01\d\d$/.test(digits.slice(-4));
+}
+
+// Shows enough to find the value without repeating it in release logs.
+function masked(kind, value) {
+  if (kind === 'email') {
+    const [local, domain] = value.split('@');
+    return `${local[0]}***@${domain}`;
+  }
+  if (kind === 'phone') return `***${value.replace(/\D/g, '').slice(-2)}`;
+  return value.replace(/([\\/]+)([A-Za-z0-9])[A-Za-z0-9._-]*$/, '$1$2***');
+}
+
+export function findPersonalData(text) {
+  const findings = [];
+  const add = (kind, value, index) => findings.push({ kind, value, line: lineAt(text, index), masked: masked(kind, value) });
+  for (const match of text.matchAll(EMAIL_PATTERN)) {
+    const [address, domain, topLevel] = match;
+    if (FILE_EXTENSION_TLDS.has(topLevel.toLowerCase()) || allowedEmail(address, domain, topLevel)) continue;
+    add('email', address, match.index);
+  }
+  for (const match of text.matchAll(PHONE_PATTERN)) if (!allowedPhone(match[0])) add('phone', match[0], match.index);
+  for (const match of text.matchAll(HOME_PATH_PATTERN)) {
+    if (PERSONAL_DATA_ALLOWLIST.homeDirectoryNames.some((name) => name.toLowerCase() === match[1].toLowerCase())) continue;
+    add('home-path', match[0], match.index);
+  }
+  return findings.sort((left, right) => left.line - right.line);
+}
+
+// Every tracked or unignored text file; binary files (any NUL byte) are skipped.
+export async function personalDataFindings(root, files) {
+  const findings = [];
+  for (const file of files ?? await candidateFiles(root)) {
+    const content = await readFile(path.join(root, file));
+    if (content.includes(0)) continue;
+    for (const finding of findPersonalData(content.toString('utf8'))) findings.push({ file, ...finding });
+  }
+  return findings;
+}
+
 export async function checkRelease(root) {
   const checks = [];
   const errors = [];
@@ -236,6 +315,14 @@ export async function checkRelease(root) {
     if (secretPatterns.some((pattern) => pattern.test(content))) { secretFile = file; break; }
   }
   check('tracked-secrets', secretFile === null, secretFile ?? 'none found');
+
+  try {
+    const personal = await personalDataFindings(root, files);
+    const listed = personal.slice(0, 10).map((item) => `${item.file}:${item.line} ${item.kind} ${item.masked}`);
+    check('personal-data', personal.length === 0, personal.length
+      ? `${personal.length} finding(s): ${listed.join('; ')}${personal.length > listed.length ? '; ...' : ''}`
+      : 'no email addresses outside example domains, phone numbers outside 555-01xx, or personal home paths');
+  } catch (error) { check('personal-data', false, error.message); }
 
   let missingImport = null;
   for (const file of textFiles.filter((item) => item.endsWith('.mjs'))) {
