@@ -474,8 +474,9 @@ test('sorts preparing and queued roles by deadline, fit, or newest', () => {
     lead('low-none', { fit: 'low', postedAt: null, createdAt: '2026-09-15T00:00:00Z' }),
     lead('no-dates', { fit: 'medium', postedAt: null, createdAt: null }),
   ];
+  const SORT_NOW = Date.parse('2026-09-30T12:00:00Z');
   assert.deepEqual(ROLE_SORTS, ['deadline', 'fit', 'newest']);
-  assert.deepEqual(sortRoles(roles, 'deadline').map((item) => item.id),
+  assert.deepEqual(sortRoles(roles, 'deadline', { now: SORT_NOW }).map((item) => item.id),
     ['unrated-soonest', 'low-soon', 'medium-mid', 'high-late', 'high-none-new', 'high-none-old', 'no-dates', 'low-none']);
   assert.deepEqual(sortRoles(roles, 'fit').map((item) => item.id),
     ['high-late', 'high-none-new', 'high-none-old', 'medium-mid', 'no-dates', 'low-soon', 'low-none', 'unrated-soonest']);
@@ -484,9 +485,9 @@ test('sorts preparing and queued roles by deadline, fit, or newest', () => {
   assert.deepEqual(sortRoles(roles, 'newest').map((item) => item.id),
     ['medium-mid', 'high-none-new', 'unrated-soonest', 'low-none', 'low-soon', 'high-late', 'high-none-old', 'no-dates']);
   assert.equal([...roles].sort(compareNewest)[0].id, 'medium-mid', 'the added date stands in for a missing posting date');
-  assert.deepEqual(sortRoles(roles, 'unknown').map((item) => item.id), sortRoles(roles, 'deadline').map((item) => item.id));
-  assert.deepEqual(sortRoles(roles).map((item) => item.id), sortRoles(roles, 'deadline').map((item) => item.id));
-  assert.notEqual(sortRoles(roles, 'deadline'), roles, 'returns a new array');
+  assert.deepEqual(sortRoles(roles, 'unknown', { now: SORT_NOW }).map((item) => item.id), sortRoles(roles, 'deadline', { now: SORT_NOW }).map((item) => item.id));
+  assert.deepEqual(sortRoles(roles, undefined, { now: SORT_NOW }).map((item) => item.id), sortRoles(roles, 'deadline', { now: SORT_NOW }).map((item) => item.id));
+  assert.notEqual(sortRoles(roles, 'deadline', { now: SORT_NOW }), roles, 'returns a new array');
   assert.deepEqual(sortRoles(undefined), []);
 });
 
@@ -521,4 +522,16 @@ test('filters preparing and queued roles by fit level, counts each level, and co
   assert.deepEqual(filterApplications(roles, { group: 'preparing', fit: 'high', sort: 'deadline', query: 'role high-a' }).map((item) => item.id), ['high-a']);
   // Other views ignore the fit choice and keep their order.
   assert.deepEqual(filterApplications(roles, { group: 'all', fit: 'low', sort: 'fit' }).map((item) => item.id), roles.map((item) => item.id));
+});
+
+test('the deadline sort puts roles whose deadline passed more than a day ago after roles without a deadline', () => {
+  const now = Date.parse('2026-10-10T12:00:00Z');
+  const roles = [
+    { id: 'long-past', status: 'lead', fit: 'high', deadlineAt: '2026-10-01T23:59:00-04:00' },
+    { id: 'none', status: 'lead', fit: 'high', deadlineAt: null },
+    { id: 'just-passed', status: 'lead', fit: 'low', deadlineAt: '2026-10-10T00:00:00Z' },
+    { id: 'upcoming', status: 'lead', fit: 'medium', deadlineAt: '2026-10-12T23:59:00-04:00' },
+  ];
+  assert.deepEqual(sortRoles(roles, 'deadline', { now }).map((item) => item.id), ['just-passed', 'upcoming', 'none', 'long-past']);
+  assert.deepEqual(filterApplications(roles, { group: 'preparing', sort: 'deadline', now }).map((item) => item.id), ['just-passed', 'upcoming', 'none', 'long-past']);
 });

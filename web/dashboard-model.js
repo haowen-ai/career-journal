@@ -164,8 +164,19 @@ export function compareNewest(left, right) {
 // newest: posted or added date, newest first.
 const roleComparators = { deadline: compareToApply, fit: compareQueueApplications, newest: compareNewest };
 
-export function sortRoles(applications, sort = 'deadline') {
-  return [...(applications ?? [])].sort(roleComparators[sort] ?? roleComparators.deadline);
+// Under the deadline sort, roles whose deadline passed more than a day ago can no longer be applied to,
+// so they go after the roles without a deadline instead of to the top of the list.
+function deadlineBucket(application, now) {
+  const due = timeOrNull(application?.deadlineAt);
+  if (due === null) return 1;
+  return due < now - PAST_DEADLINE_GRACE_MS ? 2 : 0;
+}
+
+export function sortRoles(applications, sort = 'deadline', { now = Date.now() } = {}) {
+  const compare = roleComparators[sort] ?? roleComparators.deadline;
+  const byDeadline = compare === compareToApply;
+  return [...(applications ?? [])].sort((left, right) => (byDeadline ? deadlineBucket(left, now) - deadlineBucket(right, now) : 0)
+    || compare(left, right));
 }
 
 export function matchesFit(application, fit = 'all') {
@@ -198,7 +209,7 @@ function matchesFilter(application, group) {
 
 // In the Preparing and Queue views, `fit` keeps one fit level and `sort` picks
 // the order. Without `sort`, the Queue view keeps the `queue list` order.
-export function filterApplications(applications, { group = 'all', query = '', sort = null, fit = 'all' } = {}) {
+export function filterApplications(applications, { group = 'all', query = '', sort = null, fit = 'all', now = Date.now() } = {}) {
   const normalized = String(query).trim().toLocaleLowerCase();
   const visible = (applications ?? []).filter((application) => {
     const matchesGroup = matchesFilter(application, group);
@@ -209,7 +220,7 @@ export function filterApplications(applications, { group = 'all', query = '', so
   });
   if (!hasRoleControls(group)) return visible;
   const fitted = visible.filter((application) => matchesFit(application, fit));
-  if (sort) return sortRoles(fitted, sort);
+  if (sort) return sortRoles(fitted, sort, { now });
   return group === 'queue' ? fitted.sort(compareQueueApplications) : fitted;
 }
 
