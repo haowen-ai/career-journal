@@ -36,9 +36,9 @@ Agent 会先取得最新仓库副本，再读取 [`AGENTS.md`](../AGENTS.md) 和
 | 1 | 实习还是全职、哪一季，主次方向，按先后排列的地点和是否接受远程，学历和毕业时间，工作身份，一定不要的岗位 | 决定扫描哪些岗位、跳过哪些 |
 | 2 | 要上传的那一份简历、可选的成绩单、LinkedIn、GitHub 和个人网站，以及从简历读出的每段学历和工作经历 | 决定上传和填写什么 |
 | 3 | 常见表单题：联系方式、自愿披露（每项都可以选“不愿透露”）、语言、到岗时间、期望薪资的写法等 | 生成用户自己的答案表 |
-| 4 | 一批投几个、每天几点扫描和怎么通知，以及固定的硬规矩 | 节奏；硬规矩只展示，不能关闭 |
+| 4 | 关注哪些公司、是否开启 CareerOps 和 SimplifyJobs 来源，一批投几个、每天几点扫描和怎么通知、要不要每天定时扫描，以及固定的硬规矩 | 决定去哪里扫描、多快投递；硬规矩只展示，不能关闭 |
 
-核心配置不依赖个人资料；第 1、2 轮完成前不能使用代填申请。从 1.x 升级时，Agent 先从已有申请、配置和简历中推断能推断的内容，请用户逐项确认，再只补问仍缺的项。
+核心配置不依赖个人资料。第 1、2 轮完成前不能使用代填申请；第 1 轮完成且至少设置了一个扫描来源之前不能扫描岗位。从 1.x 升级时，Agent 先从已有申请、配置和简历中推断能推断的内容，请用户逐项确认，再只补问仍缺的项。资料文件、命令和扫描来源见[个人资料、岗位扫描与代填申请](#个人资料岗位扫描与代填申请)。
 
 ## 独立使用 CLI 或 API 配置
 
@@ -206,9 +206,15 @@ career-journal queue list --home ~/job-search --json
 career-journal start --home ~/job-search
 ```
 
-### 求职资料与答案表
+## 个人资料、岗位扫描与代填申请
 
-职位扫描和辅助填表都读取一份私密的求职资料。`doctor` 通过后，Agent 通过几轮简短问答帮你建立它。`setup` 不会创建任何资料文件，CLI 也不会交互提问：由 Agent 读取问题、用你的语言提问，再逐项保存答案。
+岗位扫描和代填申请都读取一份私密的个人资料。`doctor` 通过后，Agent 通过[个人资料问答](#个人资料问答)帮你建立它。`setup` 不会创建任何资料文件，CLI 也不会交互提问：由 Agent 读取问题、用你的语言提问，再逐项保存答案。
+
+### 个人资料与答案表
+
+- `<home>/.career-journal/profile/profile.json` 保存第 1、2、4 轮的结构化答案。从 v0.1.0-alpha.5 或更早版本升级的工作区，同样的文件放在 `.jobops/profile/` 下
+- `<home>/.career-journal/profile/answers.md` 保存第 3 轮的表单答案，以及投递时新回答的每道题；新答案追加到 `## Learned while applying` 下，并注明日期和来源
+- 简历和成绩单只记录文件路径，不复制。这两个文件只有本人可读写（文件 `0600`，目录 `0700`），只保存在你的电脑上，绝不应放进 Git 仓库。空白模板位于 `config/profile.template.json` 和 `config/answers.template.md`
 
 ```sh
 career-journal profile questions --json
@@ -222,25 +228,32 @@ career-journal profile status --json --home ~/job-search
 career-journal profile show --home ~/job-search
 ```
 
-- `profile questions` 列出四轮问题（求职目标、申请材料、常用表单答案、节奏），每个问题都有英文和中文提问、选项、是否必填，以及答案保存的位置。`--round N` 只看某一轮；`--missing` 只列出仍未回答的必填项，并标出你跳过的项目。
-- `profile set` 写入 `.career-journal/profile/profile.json`，第一次写入时自动创建。`--key` 可以是 `search.season` 这样的点路径，也可以是 `season` 这样的问题键；`--value` 可以是 JSON 或纯文本，`--value null` 用于清空可选项。每次写入都会校验；简历和成绩单路径必须是绝对路径（或以 `~/` 开头），并且指向可读取的文件。
-- `profile answer` 写入 `.career-journal/profile/answers.md`，并记录来源（默认 `user`）和日期。带 `--key` 时，第 3 轮的常用表单答案在“Common form answers”下只保留一行，再次回答会原地更新；带 `--question` 时，这一行追加到“Learned while applying”下。
-- `profile status` 显示哪几轮已完成，以及扫描和填表是否就绪。`doctor` 会增加 `profile` 和 `apply` 两行，只作为警告：没有求职资料也能完成核心配置；在第 1、2 轮完成且简历文件可读取之前，`apply` 一直显示 `incomplete`。
-- 这两个文件只有本人可读写（文件 `0600`，目录 `0700`），只保存在你的电脑上，绝不应放进 Git 仓库。空白模板位于 `config/profile.template.json` 和 `config/answers.template.md`。
-## 个人资料、岗位扫描与代填申请
+- `profile questions` 列出四轮问题（求职目标、申请材料、常用表单答案、扫描来源与节奏），每个问题都有英文和中文提问、选项、是否必填，以及答案保存的位置，另附固定的硬规矩。`--round N` 只看某一轮；`--missing` 只列出仍未回答的必填项，并标出你跳过的项目
+- `profile set` 写入 `profile.json`，第一次写入时自动创建。`--key` 可以是 `search.season` 这样的点路径，也可以是 `season` 这样的问题键；`--value` 可以是 JSON 或纯文本，`--value null` 用于清空可选项。每次写入都会校验；简历和成绩单路径必须是绝对路径（或以 `~/` 开头），并且指向可读取的文件
+- `profile answer` 写入 `answers.md`，并记录来源（默认 `user`）和日期。带 `--key` 时，第 3 轮的常用表单答案在“Common form answers”下只保留一行，再次回答会原地更新；带 `--question` 时，这一行追加到“Learned while applying”下
+- `profile status` 显示哪几轮已完成，以及扫描和填表是否就绪。扫描需要第 1 轮完成并至少设置一个扫描来源；填表需要第 1、2 轮完成且简历文件可读取。`doctor` 会增加 `profile` 和 `apply` 两行，只作为警告，没有个人资料也能完成核心配置
 
-### 个人资料放在哪里
+### 岗位扫描与待投队列
 
-- `<home>/.career-journal/profile/profile.json` 保存第 1、2、4 轮的结构化答案
-- `<home>/.career-journal/profile/answers.md` 保存第 3 轮的表单答案，以及投递时新回答的每道题；新答案追加到 `## Learned while applying` 下，并注明日期和来源
-- 简历和成绩单只记录文件路径，不复制。资料文件只有用户本人可读写（文件权限 `0600`，目录 `0700`），绝不放进仓库
+`scan run` 读取工作区里的个人资料（也可用 `--profile <path>` 指定），只读地从扫描来源抓取职位，按资料筛选、去重、评估匹配度，再把剩下的职位记为 `lead` 状态的申请。`--dry-run` 只预览，不写入任何内容，也不调用任何模型。
 
-### 岗位扫描
+```sh
+career-journal profile set --home ~/job-search --key sources.atsBoards --value '[{"ats":"greenhouse","board":"examplecorp","company":"ExampleCorp"}]'
+career-journal scan run --home ~/job-search --dry-run
+career-journal scan run --home ~/job-search --json
+career-journal queue list --home ~/job-search
+career-journal queue verify --home ~/job-search --id <application> --result ok --reason "Official posting checked" --deadline 2026-10-15T23:59:00-04:00
+career-journal queue verify --home ~/job-search --id <application> --result skip --reason "PhD students only"
+```
 
-- `career-journal scan run --home ~/job-search --dry-run` 只预览扫描结果、不写入；去掉 `--dry-run` 后，保留下来的岗位会加入为待投递线索
-- 默认来源是用户列出的公司在 Greenhouse、Lever 和 Ashby 上的官方公开岗位接口。CareerOps 门户扫描和 SimplifyJobs 列表需要用户自己开启。SimplifyJobs 没有发布许可证，所以只在用户电脑上扫描时实时读取，项目不打包、不在仓库中缓存、也不转发它的数据
-- 筛选条件全部来自个人资料。同一岗位编号、同一链接，或公司和岗位名高度相似的，视为同一个岗位，只投一次
-- Agent 会逐个阅读新岗位的官网原文，再用 `queue verify --id <application> --result ok|skip --reason <原因> [--deadline <iso>]` 记录。每个“不投”都有原因。`queue list` 按匹配度、截止日期、地点顺序和发布日期显示队列
+- **关注的公司（默认来源）：** `sources.atsBoards` 中各公司在 Greenhouse、Lever 和 Ashby 上的官方公开职位板接口。你说出公司名，Agent 从公司自己招聘页上的链接找到职位板标识（`boards.greenhouse.io/<token>`、`jobs.lever.co/<token>` 或 `jobs.ashbyhq.com/<token>`），用 `profile set --key sources.atsBoards` 写入完整列表，并确认 `scan run --dry-run` 中每个职位板都显示 `ok`。使用其他招聘系统的公司无法这样扫描，Agent 会告诉你是哪几家
+- **CareerOps（用户自选开启）：** `sources.careerOps` 为 `true` 且检测到其桥接文件时使用
+- **SimplifyJobs（用户自选开启）：** 只有当你开启 `sources.simplify.enabled` 并填写 `sources.simplify.url` 时才读取。这份列表没有许可证，因此只在扫描时在你的电脑上实时读取，项目不打包、不在仓库中缓存、也不再分发；见[第三方开源声明](../THIRD_PARTY_NOTICES.zh-CN.md)
+- **筛选：** 条件全部来自个人资料：季度与职位类型、方向关键词、学历（只招博士或只招本科生的写法；只是提到本科学位不会被排除）、公民身份、安全许可、出口管制或签证担保要求、明确写出不提供转正机会的职位，以及按 `search.locations` 顺序和 `remoteOk` 计算的地点排序。每个被排除的职位都在 `--json` 输出中写明原因
+- **去重：** 来源 ID 相同、链接中的职位编号相同、链接相同，或同一公司的职位名称几乎一致，都算同一个职位，只投一次。已经投递或已跳过的职位不会再次进入队列；名称相近的职位会进入队列并标注“可能重复”
+- **匹配度：** 先由 Jev 给出 `high`、`medium` 或 `low`，再交给已配置的大语言模型。两者都没有时，用本地规则判断：职位名称含主要方向为 `high`，含次要方向为 `medium`，并在备注中写明是规则判断
+- **队列：** Agent 逐个阅读新职位的官网原文，再用 `queue verify --id <application> --result ok|skip --reason <原因> [--deadline <iso>]` 记录；每个“不投”都有原因，`skip` 会把线索改为 `withdrawn`，并记录一条带原因的事件。`queue list` 列出尚未跳过的线索，按匹配度、截止时间、地点排序和发布时间排列
+- **每日扫描（可选）：** 只有你在第 4 轮同意后才创建，而且总是单独的定时任务：另建一个 Codex heartbeat 或 Claude Code 定时任务，在 `pace.scanTime` 运行。它不能加入运行 `mail-sync` 和 `deadline-review` 的共享任务，那个任务固定在 20:00 和 20:15 运行，也不接受其他任务。`automation configure --task role-scan --enabled` 的时间取自 `pace.scanTime`，`automation register-external --task role-scan` 登记新任务自己的 ID。新用户配置时不会创建它，`doctor` 也不要求它
 
 ### 代填申请
 
@@ -252,7 +265,7 @@ career-journal profile show --home ~/job-search
 4. 答案表没有覆盖的必填题会带着选项转给用户；回答用 `profile answer` 保存，下次直接使用
 5. 用户提交后，Agent 用确认邮件或网站的“已收到”页面核对，再记录 `event add --status-after applied`。测评和面试邀请用 `task add` 记录，带 `--due-at`、`--due-note` 和 `--link`
 
-硬规矩是 Skill 中的固定文字，任何设置都不能关闭：
+硬规矩是 Skill 中的固定文字，会在第 4 轮展示，任何设置都不能关闭：
 
 - 不点任何写着 Submit* 的按钮
 - 不登录、不注册账号，不输入密码或验证码，不绕过 CAPTCHA
@@ -264,24 +277,6 @@ career-journal profile show --home ~/job-search
 - 不把个人资料写进仓库
 
 Workday、Oracle HCM、iCIMS、Greenhouse、Ashby、Lever、Yello 和 SuccessFactors 的填法要点见 [`references/ats-tips.zh-CN.md`](../.agents/skills/career-journal-apply/references/ats-tips.zh-CN.md)，交给每个子 Agent 的任务说明见 [`references/fill-brief.zh-CN.md`](../.agents/skills/career-journal-apply/references/fill-brief.zh-CN.md)。
-### 职位扫描与待投队列
-
-`scan run` 读取 `<home>/.career-journal/profile/profile.json` 中的求职档案（也可用 `--profile <path>` 指定）。它只读地调用官方公开的 Greenhouse、Lever 和 Ashby 职位板接口，抓取 `sources.atsBoards` 中列出的公司职位，按档案筛选、去重、评估匹配度，再把剩下的职位记为 `lead` 状态的申请。
-
-```sh
-career-journal scan run --home ~/job-search --dry-run
-career-journal scan run --home ~/job-search --json
-career-journal queue list --home ~/job-search
-career-journal queue verify --home ~/job-search --id <application> --result ok --reason "Official posting checked" --deadline 2026-10-15T23:59:00-04:00
-career-journal queue verify --home ~/job-search --id <application> --result skip --reason "PhD students only"
-```
-
-- **筛选：** 季度与职位类型、方向关键词、学历（只招博士或只招本科生的写法；只是提到本科学位不会被排除）、公民身份、安全许可、出口管制或签证担保要求、明确写出不提供转正机会的职位，以及按 `search.locations` 顺序和 `remoteOk` 计算的地点排序。每个被排除的职位都在 `--json` 输出中写明原因
-- **去重：** 来源 ID 相同、链接中的职位编号相同、链接相同，或同一公司的职位名称几乎一致，都算同一个职位。已经投递或已跳过的职位不会再次进入队列；名称相近的职位会进入队列并标注“可能重复”
-- **匹配度：** 先由 Jev 给出 `high`、`medium` 或 `low`，再交给已配置的大语言模型。两者都没有时，用本地规则判断：职位名称含主要方向为 `high`，含次要方向为 `medium`，并在备注中写明是规则判断。`--dry-run` 不写入任何内容，也不调用任何模型
-- **队列：** `queue list` 列出尚未跳过的线索，按匹配度、截止时间、地点排序和发布时间排列。`queue verify --result skip` 会把线索改为 `withdrawn`，并记录一条带原因的事件
-- **可选来源：** `sources.careerOps` 为 `true` 且检测到其桥接文件时使用 CareerOps。只有当你开启 `sources.simplify.enabled` 并自己填写 `sources.simplify.url` 时才读取 SimplifyJobs；它的列表没有许可证，因此只在你的电脑上实时读取，不会被打包或再分发
-- **可选定时任务：** `automation configure --task role-scan --enabled` 默认使用档案中的 `pace.scanTime`。新用户配置时不会创建它，`doctor` 也不要求它；需要时请为它单独创建一个定时任务
 
 ## 申请材料与 CareerOps
 
@@ -317,7 +312,7 @@ career-journal setup --home ~/job-search --material-rules /path/to/personal-resu
 
 ## 每日自动化
 
-`setup` 默认使用电脑当前检测到的时区，只安排两个每日任务：20:00 运行 `mail-sync`，20:15 运行 `deadline-review`。可以在执行 `setup` 时或之后通过 `automation configure` 修改时间。`daily-consolidation` 只为旧版本升级保留；`backup create` 是可选的按需命令。新用户首次配置时不会创建这两项任务。
+`setup` 默认使用电脑当前检测到的时区，只安排两个每日任务：20:00 运行 `mail-sync`，20:15 运行 `deadline-review`。可以在执行 `setup` 时或之后通过 `automation configure` 修改时间。`daily-consolidation` 只为旧版本升级保留；`backup create` 是可选的按需命令。新用户首次配置时不会创建这两项任务。可选的 `role-scan` 任务在个人资料第 4 轮询问，并且总是单独创建一个定时任务；见[岗位扫描与待投队列](#岗位扫描与待投队列)。
 
 CAREER JOURNAL 自己不会在后台等待时间并启动任务。Codex 自动化、操作系统调度器或 API 运行服务必须真正创建并执行每个任务。`register-external` 只负责记录一个已经创建、等待验证的外部任务；它不会替你创建任务，也不会让任务自动通过验证。不要使用随便填写的占位 ID。
 

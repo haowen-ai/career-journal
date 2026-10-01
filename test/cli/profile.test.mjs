@@ -75,6 +75,9 @@ test('profile questions prints the interview as data without needing a workspace
 
   const text = await ok(['profile', 'questions', '--round', '4']);
   assert.deepEqual(text.trim().split('\n').map((line) => line.split('\t').slice(0, 4)), [
+    ['round 4', 'watch-companies', 'required', 'sources.atsBoards'],
+    ['round 4', 'careerops-source', 'optional', 'sources.careerOps'],
+    ['round 4', 'simplify-source', 'optional', 'sources.simplify'],
     ['round 4', 'batch-size', 'required', 'pace.batchSize'],
     ['round 4', 'scan-time', 'required', 'pace.scanTime'],
     ['round 4', 'notify', 'required', 'pace.notify'],
@@ -205,12 +208,22 @@ test('profile answer dates each row in the workspace time zone', async () => {
 
 test('profile status and questions --missing follow the interview to apply readiness', async () => fixture(async (home) => {
   await completeRoundsOneAndTwo(home);
+  const noSources = await json(['profile', 'status', '--home', home, '--json']);
+  assert.equal(noSources.exists, true);
+  assert.deepEqual(noSources.rounds.map((round) => round.complete), [true, true, false, false]);
+  assert.deepEqual(noSources.readiness.scan, {
+    ready: false, detail: 'incomplete: no scan sources; name companies to watch or turn on an opt-in source (round 4)',
+  });
+  assert.deepEqual(noSources.readiness.apply, { ready: true, detail: 'ready: interview rounds 1 and 2 are complete and the resume file is readable' });
+  assert.deepEqual(noSources.missing.map((item) => item.key), ['legal-name', 'email', 'phone', 'address', 'watch-companies']);
+  assert.match(await ok(['profile', 'status', '--home', home]), /^scan: incomplete: no scan sources; /m);
+
+  await ok(['profile', 'set', '--home', home, '--key', 'watch-companies', '--value', '[{"ats":"greenhouse","board":"examplecorp","company":"ExampleCorp"}]']);
   const ready = await json(['profile', 'status', '--home', home, '--json']);
-  assert.equal(ready.exists, true);
   assert.deepEqual(ready.rounds.map((round) => round.complete), [true, true, false, true]);
-  assert.deepEqual(ready.readiness.scan, { ready: true, detail: 'ready: interview round 1 is complete' });
-  assert.deepEqual(ready.readiness.apply, { ready: true, detail: 'ready: interview rounds 1 and 2 are complete and the resume file is readable' });
+  assert.deepEqual(ready.readiness.scan, { ready: true, detail: 'ready: interview round 1 is complete and at least one scan source is set' });
   assert.deepEqual(ready.missing.map((item) => item.key), ['legal-name', 'email', 'phone', 'address']);
+  assert.deepEqual((await json(['profile', 'show', '--home', home, '--json'])).profile.sources.atsBoards, [{ ats: 'greenhouse', board: 'examplecorp', company: 'ExampleCorp' }]);
 
   await ok(['profile', 'set', '--home', home, '--key', 'interview.skipped', '--value', '["address"]']);
   await ok(['profile', 'set', '--home', home, '--key', 'interview.roundsCompleted', '--value', '[1,2]']);

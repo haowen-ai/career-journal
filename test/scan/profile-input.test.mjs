@@ -28,6 +28,26 @@ test('reads the shared profile contract from the data home', async () => withHom
   assert.equal('materials' in profile, false, 'scan input keeps only scan fields');
 }));
 
+test('a legacy .jobops workspace keeps its profile next to its config, and the workspace profile is fully validated', async () => withHome(async (home) => {
+  const fixture = await readFixture('profile.json');
+  await mkdir(path.join(home, '.jobops'), { recursive: true });
+  await writeFile(path.join(home, '.jobops', 'config.json'), '{}\n');
+  const file = defaultProfilePath(home);
+  assert.equal(file, path.join(home, '.jobops', 'profile', 'profile.json'));
+  await assert.rejects(() => loadScanProfile(home), (error) => error.message.includes(`No search profile found at ${file}.`));
+  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  await writeFile(file, JSON.stringify(fixture), { mode: 0o600 });
+  const profile = await loadScanProfile(home);
+  assert.deepEqual(profile.sources.atsBoards.map((item) => item.board), ['examplecorp', 'examplelabs', 'examplequant']);
+  assert.equal(profile.sources.atsBoards[1].company, 'Example Labs');
+
+  // The workspace profile follows the full profile contract; a hand-edited unknown field is refused.
+  await writeFile(file, JSON.stringify({ ...fixture, search: { ...fixture.search, salary: 100 } }));
+  await assert.rejects(() => loadScanProfile(home), /Unknown profile field: search\.salary/);
+  await writeFile(file, JSON.stringify({ ...fixture, schemaVersion: undefined }));
+  await assert.rejects(() => loadScanProfile(home), /Unsupported profile schema/);
+}));
+
 test('--profile reads another path and missing files explain the next step', async () => withHome(async (home) => {
   await assert.rejects(() => loadScanProfile(home), /No search profile found at .*profile\.json\. Complete the profile interview first, or pass --profile <path>\./);
   const other = path.join(home, 'elsewhere.json');
