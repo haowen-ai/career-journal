@@ -10,7 +10,7 @@ import {
 } from '../../src/domain/profile.mjs';
 
 const chinese = /[\u4e00-\u9fff]/;
-const types = new Set(['choice', 'multi-choice', 'boolean', 'confirm', 'text', 'month', 'path', 'url', 'locations', 'integer', 'time']);
+const types = new Set(['choice', 'multi-choice', 'boolean', 'confirm', 'text', 'month', 'path', 'url', 'locations', 'integer', 'time', 'ats-boards', 'opt-in-url']);
 const named = (value) => Boolean(value) && typeof value.en === 'string' && value.en.trim() !== '' && typeof value.zh === 'string' && value.zh.trim() !== '';
 const bilingual = (value) => named(value) && chinese.test(value.zh);
 
@@ -36,7 +36,9 @@ test('every interview question is complete, bilingual, and points at a profile f
     if (question.target === ANSWERS_TARGET) assert.equal(question.round, 3, question.key);
     else {
       assert.notEqual(question.round, 3, question.key);
-      assert.ok(profileFields.includes(question.target), `${question.key} target ${question.target}`);
+      // A target is a profile field, or an object of profile fields that is set in one write (sources.simplify).
+      const field = profileFields.includes(question.target) || profileFields.some((item) => item.startsWith(`${question.target}.`));
+      assert.ok(field, `${question.key} target ${question.target}`);
     }
     assert.equal(questionByKey(question.key), question);
   }
@@ -58,7 +60,12 @@ test('the four rounds cover the interview described in the 2.0 design', () => {
     'relatives-government', 'relatives-at-company', 'non-compete', 'certifications']) {
     assert.equal(questionByKey(key)?.round, 3, key);
   }
-  assert.deepEqual(keysIn(4), ['batch-size', 'scan-time', 'notify']);
+  assert.deepEqual(keysIn(4), ['watch-companies', 'careerops-source', 'simplify-source', 'batch-size', 'scan-time', 'notify']);
+  assert.deepEqual(questionsForRound(4).filter((question) => question.group === 'sources').map((question) => [question.key, question.target, question.required]), [
+    ['watch-companies', 'sources.atsBoards', true],
+    ['careerops-source', 'sources.careerOps', false],
+    ['simplify-source', 'sources.simplify', false],
+  ]);
   assert.ok(questionsForRound(3).every((question) => question.target === ANSWERS_TARGET));
   assert.deepEqual(questionsForRound(3).filter((question) => question.required).map((question) => question.key), ['legal-name', 'email', 'phone', 'address']);
 });
@@ -95,7 +102,7 @@ test('choice options use the profile vocabulary and every option value is accept
 
 test('free-text questions allow Other, and voluntary disclosures allow prefer not to say', () => {
   for (const question of profileQuestions) {
-    if (['text', 'path', 'url', 'month', 'locations'].includes(question.type)) assert.equal(question.allowOther, true, question.key);
+    if (['text', 'path', 'url', 'month', 'locations', 'ats-boards', 'opt-in-url'].includes(question.type)) assert.equal(question.allowOther, true, question.key);
     if (question.target === ANSWERS_TARGET && question.options.length) assert.equal(question.allowOther, true, question.key);
   }
   for (const key of ['gender', 'race-ethnicity', 'veteran-status', 'disability-status', 'first-generation']) {
@@ -108,15 +115,63 @@ test('free-text questions allow Other, and voluntary disclosures allow prefer no
   assert.match(questionByKey('salary-expectation').options[0].label.en, /posted range/);
 });
 
-test('round 4 shows the fixed hard rules in both languages', () => {
-  assert.equal(hardRules.length, 6);
+test('round 4 asks which companies to watch and offers both opt-in sources with their terms', () => {
+  const companies = questionByKey('watch-companies');
+  for (const ats of ['Greenhouse', 'Lever', 'Ashby']) assert.match(companies.prompts.en, new RegExp(ats));
+  assert.match(companies.prompts.en, /careers page/);
+  assert.match(companies.prompts.zh, /招聘页/);
+  assert.deepEqual(companies.example, [{ ats: 'greenhouse', board: 'examplecorp', company: 'ExampleCorp' }]);
+
+  const careerOps = questionByKey('careerops-source');
+  assert.equal(careerOps.default, false);
+  assert.match(careerOps.prompts.en, /off by default/);
+  assert.match(careerOps.prompts.zh, /默认关闭/);
+
+  const simplify = questionByKey('simplify-source');
+  assert.deepEqual(simplify.default, { enabled: false, url: null });
+  assert.deepEqual(simplify.options.map((option) => option.value), [{ enabled: false, url: null }]);
+  assert.match(simplify.prompts.en, /has no licence/);
+  assert.match(simplify.prompts.en, /read live on this computer at scan time/);
+  assert.match(simplify.prompts.en, /never bundled, cached, or redistributed/);
+  assert.match(simplify.prompts.zh, /没有许可证/);
+  assert.match(simplify.prompts.zh, /实时读取/);
+  assert.match(simplify.prompts.zh, /从不打包、缓存或再分发/);
+});
+
+// The numbered list under the hard-rules heading of an apply Skill file, without the numbers.
+async function skillHardRules(file, heading) {
+  const lines = (await readFile(file, 'utf8')).split('\n');
+  const start = lines.indexOf(heading);
+  assert.notEqual(start, -1, `${file} has ${heading}`);
+  const rules = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^#{1,6}\s/.test(line)) break;
+    const item = /^(\d+)\. (.+)$/.exec(line);
+    if (item) {
+      assert.equal(Number(item[1]), rules.length + 1, `${file} numbers its hard rules in order`);
+      rules.push(item[2]);
+    }
+  }
+  return rules;
+}
+
+test('round 4 shows exactly the apply Skill hard rules, word for word in both languages', async () => {
+  assert.equal(hardRules.length, 8);
   for (const rule of hardRules) {
-    assert.match(rule.id, /^never-[a-z-]+$/);
+    assert.match(rule.id, /^[a-z][a-z-]+$/);
     assert.ok(rule.en.trim() && chinese.test(rule.zh), rule.id);
   }
-  const english = hardRules.map((rule) => rule.en).join('\n');
-  for (const pattern of [/final submit/i, /passwords or verification codes/i, /CAPTCHA/, /consent/i, /e-signature/i, /essays/i, /assessments/i, /personal data/i]) {
-    assert.match(english, pattern);
+  assert.equal(new Set(hardRules.map((rule) => rule.id)).size, hardRules.length);
+  const skill = '.agents/skills/career-journal-apply';
+  for (const [language, files, heading] of [
+    ['en', [`${skill}/SKILL.md`, `${skill}/references/fill-brief.md`], '## Hard rules'],
+    ['zh', [`${skill}/SKILL.zh-CN.md`, `${skill}/references/fill-brief.zh-CN.md`], '## 硬规矩'],
+  ]) {
+    for (const file of files) {
+      const text = await readFile(file, 'utf8');
+      for (const rule of hardRules) assert.ok(text.includes(rule[language]), `${file} is missing hard rule ${rule.id} (${language})`);
+      assert.deepEqual(await skillHardRules(file, heading), hardRules.map((rule) => rule[language]), `${file} lists the same rules in the same order`);
+    }
   }
   assert.ok(Object.isFrozen(hardRules) && Object.isFrozen(hardRules[0]));
 });
