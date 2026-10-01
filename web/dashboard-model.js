@@ -99,21 +99,115 @@ export function taskDeadlineLabel(status, locale = 'en') {
   return status.state === 'upcoming' ? labels.upcoming(status.daysLeft) : labels[status.state];
 }
 
+// The apply queue is the same set `career-journal queue list` shows: leads that
+// have not been skipped.
+export function isQueued(application) {
+  return String(application?.status ?? '').toLowerCase() === 'lead' && application?.skipReason == null;
+}
+
+const FIT_ORDER = Object.freeze({ high: 0, medium: 1, low: 2 });
+
+function timeOrNull(value) {
+  const parsed = Date.parse(value ?? '');
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function lastIfMissing(value) {
+  return value == null ? Number.POSITIVE_INFINITY : value;
+}
+
+// Mirrors compareQueueItems in src/commands/queue.mjs: fit (high, medium, low,
+// then unrated), the earliest deadline, then the most recently posted role.
+// `queue list` also breaks ties by the profile's location rank. The dashboard
+// API does not send the search profile to the browser, so that tiebreak is
+// skipped here; roles that differ only by location rank fall through to the
+// posting date, as they do in `queue list` when no profile exists.
+export function compareQueueApplications(left, right) {
+  return lastIfMissing(FIT_ORDER[left.fit]) - lastIfMissing(FIT_ORDER[right.fit])
+    || lastIfMissing(timeOrNull(left.deadlineAt)) - lastIfMissing(timeOrNull(right.deadlineAt))
+    || (timeOrNull(right.postedAt) ?? Number.NEGATIVE_INFINITY) - (timeOrNull(left.postedAt) ?? Number.NEGATIVE_INFINITY)
+    || String(left.createdAt).localeCompare(String(right.createdAt))
+    || String(left.id).localeCompare(String(right.id));
+}
+
+export function queueApplications(applications) {
+  return (applications ?? []).filter(isQueued).sort(compareQueueApplications);
+}
+
 function matchesFilter(application, group) {
   if (group === 'all') return true;
   if (group === 'tasks') return hasOpenTask(application);
+  if (group === 'queue') return isQueued(application);
   return applicationGroup(application) === group;
 }
 
 export function filterApplications(applications, { group = 'all', query = '' } = {}) {
   const normalized = String(query).trim().toLocaleLowerCase();
-  return (applications ?? []).filter((application) => {
+  const visible = (applications ?? []).filter((application) => {
     const matchesGroup = matchesFilter(application, group);
     const displayedExternalId = application.externalId ? `#${application.externalId}` : null;
     const haystack = [application.company, application.role, application.externalId, displayedExternalId, application.id]
       .filter(Boolean).join(' ').toLocaleLowerCase();
     return matchesGroup && (!normalized || haystack.includes(normalized));
   });
+  return group === 'queue' ? visible.sort(compareQueueApplications) : visible;
+}
+
+const fitCopy = {
+  en: { high: 'High fit', medium: 'Medium fit', low: 'Low fit', none: 'Fit not rated' },
+  'zh-CN': { high: '高匹配', medium: '中匹配', low: '低匹配', none: '未评匹配度' },
+};
+
+export function fitLevel(fit) {
+  const normalized = String(fit ?? '').toLowerCase();
+  return normalized in FIT_ORDER ? normalized : 'none';
+}
+
+export function fitLabel(fit, locale = 'en') {
+  return fitCopy[locale === 'zh-CN' ? 'zh-CN' : 'en'][fitLevel(fit)];
+}
+
+const postingCheckCopy = {
+  en: { verified: 'Verified', unverified: 'Not yet verified' },
+  'zh-CN': { verified: '已核实', unverified: '尚未核实' },
+};
+
+export function postingCheckLabel(application, locale = 'en') {
+  return postingCheckCopy[locale === 'zh-CN' ? 'zh-CN' : 'en'][application?.verifiedAt ? 'verified' : 'unverified'];
+}
+
+const sourceNames = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', careerops: 'CareerOps', simplify: 'SimplifyJobs' };
+
+export function sourceName(source) {
+  if (source == null || source === '') return null;
+  return sourceNames[String(source).toLowerCase()] ?? String(source);
+}
+
+function skipReasonOf(application) {
+  const reason = application?.skipReason;
+  return reason == null || !String(reason).trim() ? null : String(reason).trim();
+}
+
+// What a card shows about a queued role, as data so it can be tested without a
+// DOM. Returns null for applications past the preparing stage that were not
+// skipped from the queue. The deadline time-left hint only applies while the
+// role is still being prepared; a skipped role keeps its deadline date only.
+export function queueSummary(application, { locale = 'en', now = Date.now(), timeZone = 'UTC' } = {}) {
+  const preparing = applicationGroup(application) === 'preparing';
+  const skipReason = skipReasonOf(application);
+  if (!preparing && !skipReason) return null;
+  const level = fitLevel(application.fit);
+  const deadlineAt = timeOrNull(application.deadlineAt) === null ? null : application.deadlineAt;
+  const deadline = preparing ? taskDeadlineStatus({ dueAt: deadlineAt }, { now, timeZone }) : null;
+  return {
+    queued: isQueued(application),
+    fit: { level, label: fitLabel(level, locale), note: application.fitNote || null },
+    deadline: { at: deadlineAt, status: deadline, hint: deadline ? taskDeadlineLabel(deadline, locale) : null },
+    location: application.location || null,
+    source: sourceName(application.source),
+    check: { state: application.verifiedAt ? 'verified' : 'unverified', at: application.verifiedAt || null, label: postingCheckLabel(application, locale) },
+    skipReason,
+  };
 }
 
 export function compareEventsNewestFirst(left, right) {
