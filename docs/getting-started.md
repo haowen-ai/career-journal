@@ -194,6 +194,25 @@ career-journal export json --home ~/job-search --output applications.json
 career-journal start --home ~/job-search
 ```
 
+### Role scan and queue
+
+`scan run` reads the search profile at `<home>/.career-journal/profile/profile.json` (or `--profile <path>`). It fetches roles read-only from the official public Greenhouse, Lever, and Ashby job-board APIs for the boards in `sources.atsBoards`, filters them by the profile, removes duplicates, rates fit, and queues the rest as `lead` applications.
+
+```sh
+career-journal scan run --home ~/job-search --dry-run
+career-journal scan run --home ~/job-search --json
+career-journal queue list --home ~/job-search
+career-journal queue verify --home ~/job-search --id <application> --result ok --reason "Official posting checked" --deadline 2026-10-15T23:59:00-04:00
+career-journal queue verify --home ~/job-search --id <application> --result skip --reason "PhD students only"
+```
+
+- **Filters:** season and job type, direction keywords, degree (PhD-only or undergraduate-only wording; a bachelor's mention alone never drops a role), citizenship, clearance, export-control, or sponsorship requirements, explicit no-return-offer wording, and location rank from `search.locations` plus `remoteOk`. Every dropped role has a reason in the `--json` output
+- **Duplicates:** the same source id, requisition id in the link, link, or company with a near-identical title. A role already applied to or skipped is never queued again; a similar title is queued with a possible-duplicate note
+- **Fit:** `high`, `medium`, or `low` from Jev, then the configured structured LLM. Without either, a local rule rates a primary direction in the title high and a secondary one medium, and the note says the fit is rule-based. `--dry-run` writes nothing and calls no model
+- **Queue:** `queue list` shows leads that are not skipped, ordered by fit, deadline, location rank, and posting date. `queue verify --result skip` moves the lead to `withdrawn` with an event that carries the reason
+- **Optional sources:** CareerOps when `sources.careerOps` is `true` and its bridge is detected. SimplifyJobs only when you set `sources.simplify.enabled` and supply `sources.simplify.url`; its list has no licence, so it is read live on your machine and never bundled or redistributed
+- **Optional schedule:** `automation configure --task role-scan --enabled` defaults to the profile's `pace.scanTime`. Onboarding does not create it and `doctor` does not require it; give it its own scheduled task
+
 ## Application Materials and CareerOps
 
 [career-ops](https://github.com/career-ops-hq/career-ops) is an independent MIT-licensed project by Santiago Fernández de Valderrama. It is optional for core tracking and required for a verified resume or cover-letter workflow.

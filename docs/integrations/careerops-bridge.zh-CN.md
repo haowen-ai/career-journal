@@ -52,3 +52,24 @@ node <careerops-root>/career-journal-adapter.mjs material prepare|verify
 ```
 
 CAREER JOURNAL 会拒绝以下结果：输出文件不存在、应用 ID 不一致、生命周期被标记为已提交、JSON 格式错误或子进程执行失败。合法文件会在报告成功前被计算哈希，并复制到不可变的草稿材料存储区。
+
+## 只读职位扫描
+
+当求职档案把 `sources.careerOps` 设为 `true`，并且检测到锁定版本的 CareerOps 及其桥接文件时，`career-journal scan run` 还会运行：
+
+```text
+node <careerops-root>/career-journal-adapter.mjs scan
+```
+
+标准输入为 `{ "action": "scan", "readOnly": true }`。桥接不得写入 CareerOps 数据，也不得联系雇主，只需通过标准输出返回一个 JSON 对象：
+
+```json
+{
+  "ok": true,
+  "roles": [
+    { "id": "stable-id", "company": "Example Corp", "title": "Data Science Intern", "url": "https://example.com/jobs/1", "locations": ["New York, NY"], "postedAt": "2026-09-30T00:00:00Z", "description": "纯文本或 HTML" }
+  ]
+}
+```
+
+缺少公司、职位名称或 http(s) 链接的条目会被忽略。没有桥接文件时跳过这个来源；扫描失败或返回格式错误时记为该来源出错，其他来源照常运行。
