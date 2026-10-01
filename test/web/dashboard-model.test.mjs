@@ -6,19 +6,26 @@ import {
   compareEventsNewestFirst,
   compareQueueApplications,
   compareTasksByDue,
+  compareNewest,
   filterApplications,
+  FIT_FILTERS,
+  fitCounts,
   fitLabel,
   fitLevel,
   hasOpenTask,
+  hasRoleControls,
   isQueued,
   isWaitingToApply,
   latestEvent,
+  matchesFit,
   materialKindLabel,
   openTasks,
   postingCheckLabel,
   queueApplications,
   queueSummary,
+  ROLE_SORTS,
   safeHttpUrl,
+  sortRoles,
   sourceName,
   STAT_FILTERS,
   statFilter,
@@ -29,7 +36,7 @@ import {
   taskQueue,
   TO_APPLY_GROUPS,
   compareToApply,
-  toApplyDeadlineLabel,
+  roleDeadlineLabel,
   toApplyGroup,
   toApplyQueue,
   toApplyRow,
@@ -271,7 +278,7 @@ test('summarizes queue facts for preparing cards and skip reasons for withdrawn 
   assert.deepEqual(manual, {
     queued: false,
     fit: { level: 'none', label: '未评匹配度', note: null },
-    deadline: { at: null, status: { state: 'none', daysLeft: null, urgent: false }, hint: '无截止时间' },
+    deadline: { at: null, status: { state: 'none', daysLeft: null, urgent: false }, hint: '未写截止日期' },
     location: null,
     source: null,
     check: { state: 'unverified', at: null, label: '尚未核实' },
@@ -279,7 +286,7 @@ test('summarizes queue facts for preparing cards and skip reasons for withdrawn 
   });
 
   const overdue = queueSummary(lead('overdue', { fit: 'medium', deadlineAt: '2026-09-30T23:59:00-04:00' }), { locale: 'zh-CN', now, timeZone });
-  assert.equal(overdue.deadline.hint, '已过期');
+  assert.equal(overdue.deadline.hint, '已过截止');
   assert.equal(overdue.fit.label, '中匹配');
 
   const skipped = queueSummary(lead('skipped', {
@@ -412,10 +419,10 @@ test('describes each role to apply with fit, location, deadline badge, posting c
   assert.equal(undated.fit.label, 'Fit not rated');
   assert.equal(undated.jobUrl, null);
 
-  assert.equal(toApplyDeadlineLabel({ state: 'overdue', daysLeft: null, urgent: true }, 'en'), 'Deadline passed');
-  assert.equal(toApplyDeadlineLabel({ state: 'overdue', daysLeft: null, urgent: true }, 'zh-CN'), '已过截止');
-  assert.equal(toApplyDeadlineLabel({ state: 'today', daysLeft: 0, urgent: true }, 'zh-CN'), '今天截止');
-  assert.equal(toApplyDeadlineLabel({ state: 'upcoming', daysLeft: 5, urgent: false }, 'en'), '5 days left');
+  assert.equal(roleDeadlineLabel({ state: 'overdue', daysLeft: null, urgent: true }, 'en'), 'Deadline passed');
+  assert.equal(roleDeadlineLabel({ state: 'overdue', daysLeft: null, urgent: true }, 'zh-CN'), '已过截止');
+  assert.equal(roleDeadlineLabel({ state: 'today', daysLeft: 0, urgent: true }, 'zh-CN'), '今天截止');
+  assert.equal(roleDeadlineLabel({ state: 'upcoming', daysLeft: 5, urgent: false }, 'en'), '5 days left');
 });
 
 test('accepts only http and https posting links', () => {
@@ -454,4 +461,64 @@ test('maps each summary card to the list filter that shows exactly the applicati
   assert.deepEqual(filterApplications(applications, { group: 'sent' }).map((item) => item.id),
     ['applied', 'assessment', 'interview', 'offer', 'rejected', 'withdrawn-after-submit', 'lead-with-submitted-file']);
   assert.deepEqual(filterApplications(applications, { group: 'sent', query: 'offer' }).map((item) => item.id), ['offer']);
+});
+
+test('sorts preparing and queued roles by deadline, fit, or newest', () => {
+  const roles = [
+    lead('high-late', { fit: 'high', deadlineAt: '2026-10-20T23:59:00-04:00', postedAt: '2026-09-02T00:00:00Z' }),
+    lead('low-soon', { fit: 'low', deadlineAt: '2026-10-02T23:59:00-04:00', postedAt: '2026-09-05T00:00:00Z' }),
+    lead('medium-mid', { fit: 'medium', deadlineAt: '2026-10-06T23:59:00-04:00', postedAt: null, createdAt: '2026-09-30T00:00:00Z' }),
+    lead('unrated-soonest', { fit: null, deadlineAt: '2026-10-01T23:59:00-04:00', postedAt: '2026-09-28T00:00:00Z' }),
+    lead('high-none-new', { fit: 'high', postedAt: '2026-09-29T00:00:00Z' }),
+    lead('high-none-old', { fit: 'high', postedAt: '2026-09-01T00:00:00Z' }),
+    lead('low-none', { fit: 'low', postedAt: null, createdAt: '2026-09-15T00:00:00Z' }),
+    lead('no-dates', { fit: 'medium', postedAt: null, createdAt: null }),
+  ];
+  assert.deepEqual(ROLE_SORTS, ['deadline', 'fit', 'newest']);
+  assert.deepEqual(sortRoles(roles, 'deadline').map((item) => item.id),
+    ['unrated-soonest', 'low-soon', 'medium-mid', 'high-late', 'high-none-new', 'high-none-old', 'no-dates', 'low-none']);
+  assert.deepEqual(sortRoles(roles, 'fit').map((item) => item.id),
+    ['high-late', 'high-none-new', 'high-none-old', 'medium-mid', 'no-dates', 'low-soon', 'low-none', 'unrated-soonest']);
+  // Fit order is the `queue list` order without a profile.
+  assert.deepEqual(sortRoles(roles, 'fit').map((item) => item.id), queueApplications(roles).map((item) => item.id));
+  assert.deepEqual(sortRoles(roles, 'newest').map((item) => item.id),
+    ['medium-mid', 'high-none-new', 'unrated-soonest', 'low-none', 'low-soon', 'high-late', 'high-none-old', 'no-dates']);
+  assert.equal([...roles].sort(compareNewest)[0].id, 'medium-mid', 'the added date stands in for a missing posting date');
+  assert.deepEqual(sortRoles(roles, 'unknown').map((item) => item.id), sortRoles(roles, 'deadline').map((item) => item.id));
+  assert.deepEqual(sortRoles(roles).map((item) => item.id), sortRoles(roles, 'deadline').map((item) => item.id));
+  assert.notEqual(sortRoles(roles, 'deadline'), roles, 'returns a new array');
+  assert.deepEqual(sortRoles(undefined), []);
+});
+
+test('filters preparing and queued roles by fit level, counts each level, and combines with sort and search', () => {
+  const roles = [
+    lead('high-a', { fit: 'high', deadlineAt: '2026-10-09T00:00:00Z' }),
+    lead('high-b', { fit: 'HIGH', deadlineAt: '2026-10-03T00:00:00Z' }),
+    lead('medium', { fit: 'medium' }),
+    lead('low', { fit: 'low' }),
+    lead('unrated', { fit: null }),
+    lead('odd', { fit: 'excellent' }),
+    lead('prepared-high', { status: 'prepared', fit: 'high', deadlineAt: '2026-10-05T00:00:00Z' }),
+    lead('applied-high', { status: 'applied', fit: 'high' }),
+  ];
+  assert.deepEqual(FIT_FILTERS, ['all', 'high', 'medium', 'low', 'none']);
+  assert.equal(hasRoleControls('preparing'), true);
+  assert.equal(hasRoleControls('queue'), true);
+  assert.equal(hasRoleControls('all'), false);
+  assert.equal(hasRoleControls('waiting'), false);
+  assert.equal(matchesFit(roles[1], 'high'), true);
+  assert.equal(matchesFit(roles[5], 'none'), true);
+  assert.equal(matchesFit(roles[2], 'high'), false);
+  assert.equal(matchesFit(roles[2], 'all'), true);
+  assert.equal(matchesFit(roles[2], 'bogus'), true, 'an unknown choice filters nothing');
+
+  const preparing = filterApplications(roles, { group: 'preparing' });
+  assert.deepEqual(fitCounts(preparing), { all: 7, high: 3, medium: 1, low: 1, none: 2 });
+  assert.deepEqual(fitCounts([]), { all: 0, high: 0, medium: 0, low: 0, none: 0 });
+  assert.deepEqual(filterApplications(roles, { group: 'preparing', fit: 'high', sort: 'deadline' }).map((item) => item.id), ['high-b', 'prepared-high', 'high-a']);
+  assert.deepEqual(filterApplications(roles, { group: 'queue', fit: 'high', sort: 'deadline' }).map((item) => item.id), ['high-b', 'high-a']);
+  assert.deepEqual(filterApplications(roles, { group: 'queue', fit: 'none', sort: 'fit' }).map((item) => item.id), ['odd', 'unrated']);
+  assert.deepEqual(filterApplications(roles, { group: 'preparing', fit: 'high', sort: 'deadline', query: 'role high-a' }).map((item) => item.id), ['high-a']);
+  // Other views ignore the fit choice and keep their order.
+  assert.deepEqual(filterApplications(roles, { group: 'all', fit: 'low', sort: 'fit' }).map((item) => item.id), roles.map((item) => item.id));
 });

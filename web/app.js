@@ -2,13 +2,17 @@ import {
   applicationGroup,
   applicationStats,
   compareEventsNewestFirst,
+  FIT_FILTERS,
   filterApplications,
+  fitCounts,
   hasOpenTask,
+  hasRoleControls,
   isQueued,
   latestEvent,
   materialKindLabel,
   openTasks,
   queueSummary,
+  ROLE_SORTS,
   statFilter,
   suggestedNextAction,
   taskDeadlineLabel,
@@ -48,6 +52,8 @@ const copy = {
     completedTasks: (count) => `Completed (${count})`, taskCompleted: 'Completed', platform: 'Platform', openLink: 'Open link', deadline: 'Deadline',
     openSteps: 'Open steps', cardTasks: 'Assessment and interview steps', cardTasksNote: 'Deadlines use the workspace time zone.',
     filterQueue: 'Queue', queueFacts: 'Role queue details', location: 'Location', skipReason: 'Skip reason',
+    sortLabel: 'Sort by', sortDeadline: 'Deadline (soonest first)', sortFit: 'Fit', sortNewest: 'Newest',
+    fitFilterLabel: 'Fit', fitAll: 'All', fitHigh: 'High', fitMedium: 'Medium', fitLow: 'Low', fitNone: 'Unrated',
     filterSent: 'Sent', statCardLabel: (stat, count) => `${{
       applied: 'Show sent applications', waiting: 'Show Waiting applications', interview: 'Show Interview / Offer applications',
       closed: 'Show Closed applications', preparing: 'Show Preparing applications',
@@ -80,6 +86,8 @@ const copy = {
     completedTasks: (count) => `已完成（${count}）`, taskCompleted: '已完成', platform: '平台', openLink: '打开链接', deadline: '截止时间',
     openSteps: '待完成步骤', cardTasks: '测评与面试步骤', cardTasksNote: '截止时间按工作区时区显示。',
     filterQueue: '投递队列', queueFacts: '待投岗位信息', location: '地点', skipReason: '跳过原因',
+    sortLabel: '排序', sortDeadline: '截止时间（最近的在前）', sortFit: '匹配度', sortNewest: '最新加入',
+    fitFilterLabel: '匹配度', fitAll: '全部', fitHigh: '高', fitMedium: '中', fitLow: '低', fitNone: '未评',
     filterSent: '已投递', statCardLabel: (stat, count) => `${{
       applied: '查看已投递的申请', waiting: '查看等待进展的申请', interview: '查看面试 / Offer 的申请',
       closed: '查看已结束的申请', preparing: '查看准备中的申请',
@@ -101,7 +109,10 @@ const sourceCopy = {
   'zh-CN': { api: 'API', cli: '命令行', email: '邮件', import: '导入', manual: '手动记录', system: '系统', 'role-scan': '岗位扫描', 'queue-verify': '岗位核对', other: '其他' },
 };
 
-const state = { applications: [], group: 'all', locale: initialLocale(), timezone: 'UTC', generatedAt: null };
+const state = {
+  applications: [], group: 'all', locale: initialLocale(), timezone: 'UTC', generatedAt: null,
+  sort: savedChoice('career-journal-role-sort', ROLE_SORTS, 'deadline'), fit: savedChoice('career-journal-role-fit', FIT_FILTERS, 'all'),
+};
 const elements = {
   search: document.querySelector('#search'), list: document.querySelector('#applications'), empty: document.querySelector('#empty'),
   loading: document.querySelector('#loading'), error: document.querySelector('#error'), errorMessage: document.querySelector('#error-message'),
@@ -113,7 +124,21 @@ const elements = {
   applyTemplate: document.querySelector('#apply-template'), applySummary: document.querySelector('#to-apply-summary'),
   applyEmpty: document.querySelector('#to-apply-empty'),
   applyLaterLabel: document.querySelector('#apply-later-label'), applyNoneLabel: document.querySelector('#apply-none-label'),
+  roleControls: document.querySelector('#role-controls'),
 };
+
+// Remembered view choices are a convenience: without storage the defaults apply.
+function savedChoice(key, allowed, fallback) {
+  try {
+    const saved = localStorage.getItem(key);
+    if (allowed.includes(saved)) return saved;
+  } catch {}
+  return fallback;
+}
+
+function saveChoice(key, value) {
+  try { localStorage.setItem(key, value); } catch {}
+}
 
 function initialLocale() {
   try {
@@ -425,7 +450,7 @@ function renderQueue(card, application) {
       time.textContent = formatDeadline(summary.deadline.at, { compact: true, zone: true });
       content.push(time);
     }
-    if (summary.deadline.status) content.push(deadlineBadge(summary.deadline.status));
+    if (summary.deadline.status) content.push(deadlineBadge(summary.deadline.status, summary.deadline.hint));
     facts.push(queueFact('queue-deadline', t('deadline'), ...content));
   }
   if (summary.location) facts.push(queueFact('queue-location', t('location'), summary.location));
@@ -503,7 +528,15 @@ function render() {
   for (const [key, value] of Object.entries(filterCounts)) document.querySelector(`[data-count="${key}"]`).textContent = value;
   renderToApply();
   renderTasks();
-  const visible = filterApplications(state.applications, { group: state.group, query: elements.search.value });
+  const roleView = hasRoleControls(state.group);
+  elements.roleControls.hidden = !roleView;
+  if (roleView) {
+    const counts = fitCounts(filterApplications(state.applications, { group: state.group, query: elements.search.value }));
+    for (const [key, value] of Object.entries(counts)) document.querySelector(`[data-fit-count="${key}"]`).textContent = value;
+    document.querySelectorAll('[data-sort]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.sort === state.sort)));
+    document.querySelectorAll('[data-fit]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.fit === state.fit)));
+  }
+  const visible = filterApplications(state.applications, { group: state.group, query: elements.search.value, sort: state.sort, fit: state.fit });
   elements.list.replaceChildren(...visible.map(renderCard));
   elements.empty.hidden = visible.length !== 0;
   elements.resultCount.textContent = t('results')(visible.length, state.applications.length);
@@ -529,6 +562,16 @@ elements.search.addEventListener('input', render);
 document.querySelectorAll('[data-filter]').forEach((button) => button.addEventListener('click', () => {
   state.group = button.dataset.filter;
   document.querySelectorAll('[data-filter]').forEach((candidate) => candidate.setAttribute('aria-pressed', String(candidate === button)));
+  render();
+}));
+document.querySelectorAll('[data-sort]').forEach((button) => button.addEventListener('click', () => {
+  state.sort = button.dataset.sort;
+  saveChoice('career-journal-role-sort', state.sort);
+  render();
+}));
+document.querySelectorAll('[data-fit]').forEach((button) => button.addEventListener('click', () => {
+  state.fit = button.dataset.fit;
+  saveChoice('career-journal-role-fit', state.fit);
   render();
 }));
 // A summary card applies its list filter exactly as the filter button does,
