@@ -16,6 +16,7 @@ All notable changes are documented here. This project follows Semantic Versionin
 ### Changed
 
 - None
+- Under the Deadline sort, roles whose deadline passed more than a day ago are listed after roles without a deadline instead of at the top
 
 ### Fixed
 
