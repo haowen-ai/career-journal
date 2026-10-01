@@ -30,6 +30,8 @@ import {
   STAT_FILTERS,
   statFilter,
   suggestedNextAction,
+  taskCardHint,
+  taskCardSummary,
   taskDeadlineLabel,
   taskDeadlineStatus,
   taskKindLabel,
@@ -182,6 +184,71 @@ test('describes deadlines in workspace calendar days with a warning under three 
   assert.equal(taskDeadlineLabel(status('2026-09-29T23:30:00-05:00'), 'zh-CN'), '今天截止');
   assert.equal(taskDeadlineLabel(status(null), 'en'), 'No deadline');
   assert.equal(taskDeadlineLabel(status(null), 'zh-CN'), '无截止时间');
+});
+
+test('counts open steps for the Assessments & interviews card, with those due within 2 workspace days', () => {
+  const now = Date.parse('2026-10-01T12:00:00-04:00');
+  const timeZone = 'America/New_York';
+  const applications = [
+    application({ id: 'acme', company: 'Example Corp', status: 'assessment', tasks: [
+      task({ id: 'later', dueAt: '2026-10-09T17:00:00-04:00' }),
+      task({ id: 'today', dueAt: '2026-10-01T23:59:00-04:00' }),
+      task({ id: 'done-tomorrow', status: 'done', dueAt: '2026-10-02T12:00:00-04:00' }),
+      task({ id: 'undated', dueAt: null }),
+    ] }),
+    application({ id: 'beta', company: 'Example Labs', status: 'interview', tasks: [
+      // Oct 3 at 22:00 in New York: two calendar days left there, three in UTC.
+      task({ id: 'edge', kind: 'interview', dueAt: '2026-10-04T02:00:00Z' }),
+      task({ id: 'three-days', dueAt: '2026-10-04T00:00:00-04:00' }),
+    ] }),
+    application({ id: 'no-tasks', status: 'applied' }),
+  ];
+  assert.deepEqual(taskCardSummary(applications, { now, timeZone }), {
+    open: 5, dueSoon: 2, overdue: 0, nextDueAt: '2026-10-01T23:59:00-04:00', urgent: true,
+  });
+  assert.deepEqual(taskCardSummary(applications, { now, timeZone: 'UTC' }),
+    { open: 5, dueSoon: 1, overdue: 0, nextDueAt: '2026-10-01T23:59:00-04:00', urgent: true });
+
+  // Past-due open steps are counted apart and never become the next deadline.
+  const pastDue = [application({ id: 'gamma', tasks: [
+    task({ id: 'missed', dueAt: '2026-09-30T09:00:00-04:00' }),
+    task({ id: 'next-week', dueAt: '2026-10-08T09:00:00-04:00' }),
+  ] })];
+  assert.deepEqual(taskCardSummary(pastDue, { now, timeZone }),
+    { open: 2, dueSoon: 0, overdue: 1, nextDueAt: '2026-10-08T09:00:00-04:00', urgent: true });
+
+  const calm = [application({ id: 'delta', tasks: [task({ id: 'b', dueAt: '2026-10-10T09:00:00-04:00' }), task({ id: 'a', dueAt: '2026-10-05T09:00:00-04:00' })] })];
+  assert.deepEqual(taskCardSummary(calm, { now, timeZone }), { open: 2, dueSoon: 0, overdue: 0, nextDueAt: '2026-10-05T09:00:00-04:00', urgent: false });
+  assert.deepEqual(taskCardSummary([application({ id: 'undated', tasks: [task({ dueAt: 'soon' })] })], { now, timeZone }),
+    { open: 1, dueSoon: 0, overdue: 0, nextDueAt: null, urgent: false });
+  const empty = { open: 0, dueSoon: 0, overdue: 0, nextDueAt: null, urgent: false };
+  assert.deepEqual(taskCardSummary([application({ id: 'done', tasks: [task({ status: 'done', dueAt: '2026-10-01T23:59:00-04:00' })] })], { now, timeZone }), empty);
+  assert.deepEqual(taskCardSummary([], { now, timeZone }), empty);
+  assert.deepEqual(taskCardSummary(undefined, { now, timeZone }), empty);
+});
+
+test('words the Assessments & interviews card hint in both languages', () => {
+  const card = (overrides) => ({ open: 3, dueSoon: 0, overdue: 0, nextDueAt: null, urgent: false, ...overrides });
+  const timeZone = 'America/New_York';
+  assert.equal(taskCardHint(card({ dueSoon: 2, urgent: true }), { locale: 'en', timeZone }), '2 due within 2 days');
+  assert.equal(taskCardHint(card({ dueSoon: 2, urgent: true }), { locale: 'zh-CN', timeZone }), '2 个两天内截止');
+  assert.equal(taskCardHint(card({ dueSoon: 1, nextDueAt: '2026-10-02T12:00:00Z', urgent: true }), { locale: 'en', timeZone }), '1 due within 2 days');
+  // Nothing due soon: the soonest deadline ahead, as a workspace calendar date.
+  assert.equal(taskCardHint(card({ nextDueAt: '2026-10-04T02:00:00Z' }), { locale: 'en', timeZone }), 'Next due Oct 3');
+  assert.equal(taskCardHint(card({ nextDueAt: '2026-10-04T02:00:00Z' }), { locale: 'zh-CN', timeZone }), '最近截止 10月3日');
+  assert.equal(taskCardHint(card({ nextDueAt: '2026-10-04T02:00:00Z' }), { locale: 'en', timeZone: 'UTC' }), 'Next due Oct 4');
+  assert.equal(taskCardHint(card({ nextDueAt: '2026-10-04T02:00:00Z' }), { locale: 'en', timeZone: 'Not/AZone' }), 'Next due Oct 4');
+  // Past-due steps lead the line.
+  assert.equal(taskCardHint(card({ overdue: 1, dueSoon: 2, urgent: true }), { locale: 'en', timeZone }), '1 overdue · 2 due within 2 days');
+  assert.equal(taskCardHint(card({ overdue: 1, dueSoon: 2, urgent: true }), { locale: 'zh-CN', timeZone }), '1 个已过期 · 2 个两天内截止');
+  assert.equal(taskCardHint(card({ overdue: 1, nextDueAt: '2026-10-08T13:00:00Z', urgent: true }), { locale: 'en', timeZone }), '1 overdue · Next due Oct 8');
+  assert.equal(taskCardHint(card({ overdue: 2, urgent: true }), { locale: 'zh-CN', timeZone }), '2 个已过期');
+  assert.equal(taskCardHint(card({}), { locale: 'en', timeZone }), 'No deadlines set');
+  assert.equal(taskCardHint(card({}), { locale: 'zh-CN', timeZone }), '暂无截止时间');
+  assert.equal(taskCardHint(card({ open: 0 }), { locale: 'en', timeZone }), 'Nothing open');
+  assert.equal(taskCardHint(card({ open: 0 }), { locale: 'zh-CN', timeZone }), '暂无待办');
+  assert.equal(taskCardHint(undefined), 'Nothing open');
+  assert.equal(taskCardHint(card({ dueSoon: 1 }), { locale: 'fr' }), '1 due within 2 days');
 });
 
 test('localizes task kinds without inventing unknown labels', () => {

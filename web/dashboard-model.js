@@ -99,6 +99,54 @@ export function taskDeadlineLabel(status, locale = 'en') {
   return status.state === 'upcoming' ? labels.upcoming(status.daysLeft) : labels[status.state];
 }
 
+// The Assessments & interviews summary card. "Due soon" is the amber badge
+// window: due within 2 workspace calendar days and not yet past. Past-due open
+// steps are counted apart, and `nextDueAt` is the soonest deadline still ahead.
+export function taskCardSummary(applications, { now = Date.now(), timeZone = 'UTC' } = {}) {
+  const { open } = taskQueue(applications);
+  const summary = { open: open.length, dueSoon: 0, overdue: 0, nextDueAt: null, urgent: false };
+  for (const task of open) {
+    const status = taskDeadlineStatus(task, { now, timeZone });
+    if (status.state === 'none') continue;
+    if (status.state === 'overdue') { summary.overdue += 1; continue; }
+    if (status.urgent) summary.dueSoon += 1;
+    summary.nextDueAt ??= task.dueAt;
+  }
+  summary.urgent = summary.dueSoon + summary.overdue > 0;
+  return summary;
+}
+
+const taskCardCopy = {
+  en: {
+    empty: 'Nothing open', undated: 'No deadlines set', overdue: (count) => `${count} overdue`,
+    soon: (count) => `${count} due within 2 days`, next: (date) => `Next due ${date}`,
+  },
+  'zh-CN': {
+    empty: '暂无待办', undated: '暂无截止时间', overdue: (count) => `${count} 个已过期`,
+    soon: (count) => `${count} 个两天内截止`, next: (date) => `最近截止 ${date}`,
+  },
+};
+
+function shortDate(value, locale, timeZone) {
+  const options = { month: 'short', day: 'numeric' };
+  try { return new Intl.DateTimeFormat(locale, { ...options, timeZone }).format(new Date(value)); }
+  catch { return new Intl.DateTimeFormat(locale, { ...options, timeZone: 'UTC' }).format(new Date(value)); }
+}
+
+// The card's hint line: past-due steps first, then how many are due within 2
+// days, or the soonest deadline ahead when none are; "Nothing open" without
+// open steps and "No deadlines set" when no open step has a deadline.
+export function taskCardHint(summary, { locale = 'en', timeZone = 'UTC' } = {}) {
+  const language = locale === 'zh-CN' ? 'zh-CN' : 'en';
+  const labels = taskCardCopy[language];
+  if (!summary?.open) return labels.empty;
+  const parts = [];
+  if (summary.overdue) parts.push(labels.overdue(summary.overdue));
+  if (summary.dueSoon) parts.push(labels.soon(summary.dueSoon));
+  else if (summary.nextDueAt) parts.push(labels.next(shortDate(summary.nextDueAt, language, timeZone)));
+  return parts.length ? parts.join(' · ') : labels.undated;
+}
+
 // The apply queue is the same set `career-journal queue list` shows: leads that
 // have not been skipped.
 export function isQueued(application) {
