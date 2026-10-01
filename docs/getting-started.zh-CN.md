@@ -9,6 +9,7 @@
 - 一个真实、只读的邮箱连接。Agent 模式可以使用电脑邮件应用中已经登录的账号；独立模式可以使用 TLS IMAPS
 - 一个能够按时执行两个必需时间点的 Agent 或调度器
 - 用户明确选择哪些已识别账号用于求职，可以选择一个或多个
+- 仅代填申请需要：宿主 Agent 的浏览器能力，例如 Claude in Chrome 或 Codex 浏览器
 
 ## 一句话安装
 
@@ -25,6 +26,19 @@ Agent 会先取得最新仓库副本，再读取 [`AGENTS.md`](../AGENTS.md) 和
 ### 可选的历史投递导入
 
 技术配置通过后，Agent 会询问用户是否需要导入历史投递。用户可以选择限定范围的只读邮箱检查、文件或表格导入、简短问答，也可以跳过。Agent 会先整理候选记录，得到用户确认后再写入；不得推测缺失的日期、状态、拒绝原因或实际提交材料，也不能把旧的简历草稿当成实际提交版本。
+
+### 个人资料问答
+
+`doctor` 通过、Jev 和历史投递导入两个问题已回答或跳过之后，Agent 会用 `profile status`、`profile questions`、`profile set` 和 `profile answer` 进行一次简短的个人资料问答。每轮最多问 4 个问题，每题给出选项并加“其他”，每题都可以跳过；跳过的题在第一次用到时再问。简历里已经能读出的内容会先填好，只请用户确认。
+
+| 轮次 | 问什么 | 用途 |
+|---|---|---|
+| 1 | 实习还是全职、哪一季，主次方向，按先后排列的地点和是否接受远程，学历和毕业时间，工作身份，一定不要的岗位 | 决定扫描哪些岗位、跳过哪些 |
+| 2 | 要上传的那一份简历、可选的成绩单、LinkedIn、GitHub 和个人网站，以及从简历读出的每段学历和工作经历 | 决定上传和填写什么 |
+| 3 | 常见表单题：联系方式、自愿披露（每项都可以选“不愿透露”）、语言、到岗时间、期望薪资的写法等 | 生成用户自己的答案表 |
+| 4 | 一批投几个、每天几点扫描和怎么通知，以及固定的硬规矩 | 节奏；硬规矩只展示，不能关闭 |
+
+核心配置不依赖个人资料；第 1、2 轮完成前不能使用代填申请。从 1.x 升级时，Agent 先从已有申请、配置和简历中推断能推断的内容，请用户逐项确认，再只补问仍缺的项。
 
 ## 独立使用 CLI 或 API 配置
 
@@ -185,8 +199,50 @@ career-journal task list --home ~/job-search --status open
 career-journal email list --home ~/job-search
 career-journal automation list --home ~/job-search
 career-journal export json --home ~/job-search --output applications.json
+career-journal profile status --home ~/job-search --json
+career-journal profile answer --home ~/job-search --question "Preferred name" --answer "Alex" --source user
+career-journal scan run --home ~/job-search --dry-run
+career-journal queue list --home ~/job-search --json
 career-journal start --home ~/job-search
 ```
+
+## 个人资料、岗位扫描与代填申请
+
+### 个人资料放在哪里
+
+- `<home>/.career-journal/profile/profile.json` 保存第 1、2、4 轮的结构化答案
+- `<home>/.career-journal/profile/answers.md` 保存第 3 轮的表单答案，以及投递时新回答的每道题；新答案追加到 `## Learned while applying` 下，并注明日期和来源
+- 简历和成绩单只记录文件路径，不复制。资料文件只有用户本人可读写（文件权限 `0600`，目录 `0700`），绝不放进仓库
+
+### 岗位扫描
+
+- `career-journal scan run --home ~/job-search --dry-run` 只预览扫描结果、不写入；去掉 `--dry-run` 后，保留下来的岗位会加入为待投递线索
+- 默认来源是用户列出的公司在 Greenhouse、Lever 和 Ashby 上的官方公开岗位接口。CareerOps 门户扫描和 SimplifyJobs 列表需要用户自己开启。SimplifyJobs 没有发布许可证，所以只在用户电脑上扫描时实时读取，项目不打包、不在仓库中缓存、也不转发它的数据
+- 筛选条件全部来自个人资料。同一岗位编号、同一链接，或公司和岗位名高度相似的，视为同一个岗位，只投一次
+- Agent 会逐个阅读新岗位的官网原文，再用 `queue verify --id <application> --result ok|skip --reason <原因> [--deadline <iso>]` 记录。每个“不投”都有原因。`queue list` 按匹配度、截止日期、地点顺序和发布日期显示队列
+
+### 代填申请
+
+用户说“开始投”后，Agent 按 [`career-journal-apply`](../.agents/skills/career-journal-apply/SKILL.zh-CN.md) Skill 执行：
+
+1. 取排在最前面、已核实的 N 个岗位（`pace.batchSize`，默认 5），去掉已经投过的
+2. 每个岗位交给一个子 Agent。它自己新开一个浏览器标签页，按答案表填表，上传用户选定的简历，停在提交前
+3. 标签标题显示每个标签页需要什么：🔑待登录、🤖待验证、❓待回答、👆待点击、✅待提交。Agent 用一句话告诉用户每个标签页要做什么
+4. 答案表没有覆盖的必填题会带着选项转给用户；回答用 `profile answer` 保存，下次直接使用
+5. 用户提交后，Agent 用确认邮件或网站的“已收到”页面核对，再记录 `event add --status-after applied`。测评和面试邀请用 `task add` 记录，带 `--due-at`、`--due-note` 和 `--link`
+
+硬规矩是 Skill 中的固定文字，任何设置都不能关闭：
+
+- 不点任何写着 Submit* 的按钮
+- 不登录、不注册账号，不输入密码或验证码，不绕过 CAPTCHA
+- 不勾同意、声明或仲裁条款，不代签名
+- 不写作文，只整理用户自己说的话
+- 成绩单只在该栏必填时上传
+- 只上传用户选定的那一份简历
+- 工作描述每条一行，行首加“• ”
+- 不把个人资料写进仓库
+
+Workday、Oracle HCM、iCIMS、Greenhouse、Ashby、Lever、Yello 和 SuccessFactors 的填法要点见 [`references/ats-tips.zh-CN.md`](../.agents/skills/career-journal-apply/references/ats-tips.zh-CN.md)，交给每个子 Agent 的任务说明见 [`references/fill-brief.zh-CN.md`](../.agents/skills/career-journal-apply/references/fill-brief.zh-CN.md)。
 
 ## 申请材料与 CareerOps
 
@@ -273,7 +329,7 @@ schtasks /Delete /TN "CareerJournal-deadline-review" /F
 
 ## 数据与隐私
 
-CAREER JOURNAL 的持久数据保存在用户选择的本地目录中。`.career-journal/` 包含配置、SQLite 数据库、不可变的申请材料副本、报告、备份和生成的调度文件。导出内容不会包含密钥引用；从邮件中识别出的登录或验证链接会先脱敏。临时邮件批次应放在私有目录中，并按用户自己的保留策略清理。项目不会自动提交求职申请、发送邮件或联系招聘方。
+CAREER JOURNAL 的持久数据保存在用户选择的本地目录中。`.career-journal/` 包含配置、SQLite 数据库、不可变的申请材料副本、报告、备份和生成的调度文件。导出内容不会包含密钥引用；从邮件中识别出的登录或验证链接会先脱敏。临时邮件批次应放在私有目录中，并按用户自己的保留策略清理。项目从不提交求职申请、发送邮件或联系招聘方。代填只在用户自己的浏览器里进行，并停在提交前；个人资料和答案表保存在数据目录中，只用于填写用户本人的申请。
 
 `backup create` 会备份已经脱敏的配置、SQLite 数据库、清单和 `artifacts-index.json`。申请材料可能包含个人信息或其他敏感内容，所以默认备份只保留材料索引和哈希，不复制原文件；原件应保存在用户自己控制的安全位置。备份中还会清除邮箱验证结果、同步健康状态和调度登记证明，因此从备份恢复后，必须重新验证邮箱和两个必需任务。
 
@@ -303,7 +359,7 @@ career-journal migrate --home ~/job-search --apply
 - `src/email`、`src/providers` 和 `src/integrations` 负责邮件、外部服务和集成边界
 - `src/automation` 保存任务设置，检查调度器中实际存在的定义，运行本地处理器，并记录已验证的登记信息和匹配的执行结果
 - `src/server` 提供本地看板和 API
-- `.agents/skills` 提供 Codex 编排能力，不复制第三方工作流
+- `.agents/skills` 提供 Agent 编排能力，不复制第三方工作流：`career-journal` 负责首次配置和记录，`career-journal-apply` 负责代填申请，`careerops-materials` 负责简历和求职信
 
 ## 开发与发布
 
@@ -317,6 +373,8 @@ node scripts/check-release.mjs
 ### 项目参考文档
 
 - 仓库 Skill：[English](../.agents/skills/career-journal/SKILL.md) · [简体中文](../.agents/skills/career-journal/SKILL.zh-CN.md)
+- 代填申请 Skill：[English](../.agents/skills/career-journal-apply/SKILL.md) · [简体中文](../.agents/skills/career-journal-apply/SKILL.zh-CN.md)
+- 2.0 设计：[English](superpowers/specs/2026-10-01-career-journal-2.0-design.en.md) · [简体中文](superpowers/specs/2026-10-01-career-journal-2.0-design.md)
 - 产品需求文档：[English](superpowers/specs/2026-09-19-job-search-ops-prd-design.en.md) · [简体中文](superpowers/specs/2026-09-19-job-search-ops-prd-design.md)
 
 ## 致谢
