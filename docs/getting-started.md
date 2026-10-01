@@ -9,6 +9,7 @@
 - A real read-only mailbox connection. Agent-managed setup can use accounts already signed in to the host mail app; standalone setup can use IMAPS over TLS
 - An AI Agent or scheduler that can create the two required schedules
 - The user's choice of which discovered account or accounts are used for job search
+- For assisted applying only: a browser capability in the host Agent, such as Claude in Chrome or the Codex browser
 
 ## One-line Agent setup
 
@@ -25,6 +26,19 @@ On macOS, the Agent attempts discovery before asking any mailbox setup question.
 ### Optional history import
 
 After technical onboarding passes, the Agent asks the user whether they want to import existing applications. The user may choose a bounded read-only mailbox review, a file or spreadsheet, a short guided interview, or skip the step. The Agent prepares candidate records and asks the user to confirm them before writing. It does not infer missing dates, statuses, rejection reasons, or submitted materials, and it does not treat an old draft as the file actually submitted.
+
+### Profile interview
+
+After `doctor` passes and the Jev and history-import questions are answered or skipped, the Agent runs a short profile interview with `profile status`, `profile questions`, `profile set`, and `profile answer`. It asks at most 4 questions per round, each with options plus "Other", and every question can be skipped; a skipped question is asked the first time it is needed. Anything the resume already shows is pre-filled and only confirmed.
+
+| Round | Asks about | Used for |
+|---|---|---|
+| 1 | Job type and season, primary and secondary directions, locations in order and remote, degree and graduation date, work authorization, hard exclusions | Which roles to scan and which to skip |
+| 2 | The one resume to upload, an optional transcript, LinkedIn, GitHub, and website, and each education and work entry read from the resume | What to upload and enter |
+| 3 | Common form answers: contact details, voluntary disclosures (each may be "prefer not to say"), languages, availability, salary wording, and similar | The user's own answers sheet |
+| 4 | Batch size, daily scan time and notification, and the fixed hard rules | Pace; the hard rules are shown and cannot be turned off |
+
+Core onboarding does not depend on the profile; assisted applying stays unavailable until rounds 1 and 2 are complete. When upgrading from 1.x, the Agent first infers what it can from existing applications, configuration, and the resume, asks the user to confirm every inferred value, and then asks only what is still missing.
 
 ## Standalone CLI and API-host setup
 
@@ -191,6 +205,10 @@ career-journal task list --home ~/job-search --status open
 career-journal email list --home ~/job-search
 career-journal automation list --home ~/job-search
 career-journal export json --home ~/job-search --output applications.json
+career-journal profile status --home ~/job-search --json
+career-journal profile answer --home ~/job-search --question "Preferred name" --answer "Alex" --source user
+career-journal scan run --home ~/job-search --dry-run
+career-journal queue list --home ~/job-search --json
 career-journal start --home ~/job-search
 ```
 
@@ -215,6 +233,43 @@ career-journal profile show --home ~/job-search
 - `profile answer` writes `.career-journal/profile/answers.md` with the source (default `user`) and date. With `--key`, a common form answer from round 3 keeps one row under "Common form answers" and is updated in place; with `--question`, the row is appended under "Learned while applying".
 - `profile status` shows which rounds are complete and whether scans and applying are ready. `doctor` adds `profile` and `apply` lines as warnings: core onboarding passes without a profile, and `apply` stays `incomplete` until rounds 1 and 2 are complete and the resume file is readable.
 - Both files are owner-only (`0600`, directory `0700`), stay on your computer, and never belong in a Git repository. Blank templates are in `config/profile.template.json` and `config/answers.template.md`.
+## Profile, role scans, and assisted applying
+
+### Where the profile lives
+
+- `<home>/.career-journal/profile/profile.json` holds the structured answers from rounds 1, 2, and 4
+- `<home>/.career-journal/profile/answers.md` holds form answers from round 3 and every new question answered while applying, appended under `## Learned while applying` with the date and source
+- Resumes and transcripts are referenced by path, not copied. Profile files are private to the user (file mode `0600`, folder `0700`) and never belong in the repository
+
+### Role scans
+
+- `career-journal scan run --home ~/job-search --dry-run` previews a scan without writing; without `--dry-run`, kept roles are added as leads
+- The default sources are the official public job-board APIs of Greenhouse, Lever, and Ashby for companies the user lists. CareerOps portal scans and the SimplifyJobs list are opt-in. SimplifyJobs publishes no licence, so it is read live on the user's machine at scan time and is never bundled, cached in the repository, or redistributed
+- Filters come only from the profile. The same requisition ID, the same link, or a near-identical company and title count as one role, which is applied to once
+- The Agent reads each new lead's official posting and records `queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>]`. Every skip has a reason. `queue list` shows the queue by fit, deadline, location rank, and posted date
+
+### Assisted applying
+
+When the user says "start applying", the Agent follows the [`career-journal-apply`](../.agents/skills/career-journal-apply/SKILL.md) Skill:
+
+1. Take the top N verified roles (`pace.batchSize`, default 5) and drop any role already applied to
+2. Give each role to its own sub-agent, which opens its own browser tab, fills the form from the answers sheet, uploads the resume the user chose, and stops before submit
+3. Tab titles show what each tab needs: 🔑 sign in or code, 🤖 CAPTCHA, ❓ question, 👆 click, ✅ ready to submit. The Agent tells the user in one sentence per tab what to do
+4. A required question the answers sheet does not cover goes to the user with options; the answer is saved with `profile answer` and reused next time
+5. After the user submits, the Agent confirms from the confirmation email or the site's received page and records `event add --status-after applied`. Assessment and interview invitations become `task add` entries with `--due-at`, `--due-note`, and `--link`
+
+The hard rules are fixed text in the Skill and no setting turns them off:
+
+- Never click any button labelled Submit*
+- Never sign in, create accounts, or type passwords or verification codes, and never bypass a CAPTCHA
+- Never tick consent, attestation, or arbitration boxes, and never sign
+- Never write essays; only organise the user's own words
+- Upload the transcript only when the field is required
+- Upload the one resume the user chose
+- Enter work descriptions one bullet per line prefixed "• "
+- Never put personal data into the repository
+
+Per-site technique for Workday, Oracle HCM, iCIMS, Greenhouse, Ashby, Lever, Yello, and SuccessFactors is in [`references/ats-tips.md`](../.agents/skills/career-journal-apply/references/ats-tips.md), and the brief each sub-agent receives is in [`references/fill-brief.md`](../.agents/skills/career-journal-apply/references/fill-brief.md).
 
 ## Application Materials and CareerOps
 
@@ -295,7 +350,7 @@ Then run `career-journal automation uninstall --home ~/job-search --task deadlin
 
 ## Data and Privacy
 
-Data stays under the home you choose. `.career-journal/` contains configuration, SQLite data, immutable artifact copies, reports, backups, and prepared scheduler files. Exports omit secret references. Authentication links from imported mail are redacted. Keep temporary structured batches in a private path and delete them according to your local retention policy. The project does not submit applications, send email, or contact recruiters.
+Data stays under the home you choose. `.career-journal/` contains configuration, SQLite data, immutable artifact copies, reports, backups, and prepared scheduler files. Exports omit secret references. Authentication links from imported mail are redacted. Keep temporary structured batches in a private path and delete them according to your local retention policy. The project never submits applications, sends email, or contacts recruiters. Assisted filling runs only in the user's own browser and stops before submit; the profile and answers sheet stay in the data home and are used only to fill the user's own applications.
 
 `backup create` writes the sanitized configuration, SQLite database, manifest, and `artifacts-index.json`. It deliberately omits artifact payloads because application files can contain credentials or other private content; preserve those originals separately in storage you control. The copied state also clears mailbox verification, sync execution health, and scheduler attestations, so a restored workspace must verify its mailbox and schedules again.
 
@@ -323,7 +378,7 @@ Legacy automation rows keep their existing `jobops-*`, `io.job-search-ops.*`, an
 - `src/email`, `src/providers`, and `src/integrations` isolate host-managed services
 - `src/automation` stores schedules, probes real scheduler definitions, runs local handlers, and records verified registrations plus observed matching runs
 - `src/server` serves the loopback dashboard and API
-- `.agents/skills` provides Codex orchestration without copying third-party workflows
+- `.agents/skills` provides Agent orchestration without copying third-party workflows: `career-journal` for onboarding and tracking, `career-journal-apply` for assisted applying, and `careerops-materials` for resumes and cover letters
 
 ## Development and Releases
 
@@ -339,6 +394,8 @@ Public user documentation must ship in both English and Simplified Chinese. The 
 ### Project reference documents
 
 - Repository Skill: [English](../.agents/skills/career-journal/SKILL.md) · [简体中文](../.agents/skills/career-journal/SKILL.zh-CN.md)
+- Apply Skill: [English](../.agents/skills/career-journal-apply/SKILL.md) · [简体中文](../.agents/skills/career-journal-apply/SKILL.zh-CN.md)
+- 2.0 design: [English](superpowers/specs/2026-10-01-career-journal-2.0-design.en.md) · [简体中文](superpowers/specs/2026-10-01-career-journal-2.0-design.md)
 - Product requirements: [English](superpowers/specs/2026-09-19-job-search-ops-prd-design.en.md) · [简体中文](superpowers/specs/2026-09-19-job-search-ops-prd-design.md)
 
 ## Acknowledgements

@@ -32,3 +32,11 @@ No TypeSafe Agent Skill source code is copied into this repository. The tracker 
 - Use here: the dashboard's local arrow, clock, search, language, expand, and collapse SVG icons
 
 The selected icons are stored locally so the dashboard remains usable without a CDN connection.
+
+## Job-posting sources for role scans
+
+CAREER JOURNAL 2.0 role scans read job postings only on the user's machine, at scan time, for the user's own search. The project bundles no job-posting data, keeps none in the repository, and redistributes none.
+
+- **Official ATS job-board APIs (default):** the public job-board endpoints that Greenhouse, Lever, and Ashby publish for each employer's postings. Scans read only the boards of companies the user lists. These vendors are not affiliated with this project and do not endorse it
+- **SimplifyJobs lists (opt-in):** the public internship and new-grad lists published by [SimplifyJobs](https://github.com/SimplifyJobs). They carry no open-source licence, so the source stays off until the user enables it and configures the list URL. When enabled, the list is read live on the user's machine; nothing from it is bundled, cached in the repository, or redistributed, and only the normalised leads the user keeps are stored in the user's own database
+- **CareerOps portal scans (opt-in):** run through the existing CareerOps integration described above, under its MIT licence and attribution

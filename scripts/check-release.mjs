@@ -166,6 +166,57 @@ export async function checkRelease(root) {
     check('bilingual-core-contracts', paired && complete, 'paired Skill and PRD languages preserve mailbox, automation, CareerOps, Jev, timezone, and release contracts');
   } catch (error) { check('bilingual-core-contracts', false, error.message); }
 
+  try {
+    const applyRoot = '.agents/skills/career-journal-apply';
+    const pairs = [
+      ['SKILL.md', 'SKILL.zh-CN.md'],
+      ['references/ats-tips.md', 'references/ats-tips.zh-CN.md'],
+      ['references/fill-brief.md', 'references/fill-brief.zh-CN.md'],
+    ];
+    const missing = [];
+    for (const file of pairs.flat()) if (!(await readable(path.join(root, applyRoot, file)))) missing.push(`${applyRoot}/${file}`);
+    if (missing.length) throw new Error(`missing ${missing.join(', ')}`);
+    const texts = Object.fromEntries(await Promise.all(pairs.flat().map(async (file) => [file, await read(`${applyRoot}/${file}`)])));
+    const [orchestratorEn, orchestratorZh, agentInstructions] = await Promise.all([
+      read('.agents/skills/career-journal/SKILL.md'),
+      read('.agents/skills/career-journal/SKILL.zh-CN.md'),
+      read('AGENTS.md'),
+    ]);
+    const linked = pairs.every(([english, chinese]) => texts[english].includes(`[简体中文](${path.posix.basename(chinese)})`)
+      && texts[chinese].includes(`[English](${path.posix.basename(english)})`));
+    const discoverable = /^---\nname: career-journal-apply\ndescription: Use when [^\n]+\n---\n/.test(texts['SKILL.md']);
+    const englishRules = [
+      /Never click any button labelled Submit\*/,
+      /Never sign in, create accounts, or type passwords or verification codes/,
+      /Never tick consent, attestation, certification, or arbitration boxes, and never sign/,
+      /Never write essays[^\n]*Only organise the user's own words/,
+      /Upload the transcript only when the form makes a transcript a required field/,
+      /Upload exactly one resume, the one the user chose/,
+      /work descriptions one bullet per line, each line starting with "• "/,
+      /Never put personal data into the repository/,
+    ];
+    const chineseRules = [
+      /不点任何写着 Submit\*/,
+      /不替用户登录、注册账号，不输入密码或验证码/,
+      /不勾同意、声明、认证或仲裁条款，不代签名/,
+      /不写作文[^\n]*只整理用户自己说的话/,
+      /成绩单只在表单把成绩单设为必填项时上传/,
+      /只上传一份简历，即用户选定的那份/,
+      /工作描述每条一行，行首加“• ”/,
+      /不把个人资料写进仓库/,
+    ];
+    const hardRules = ['SKILL.md', 'references/fill-brief.md'].every((file) => englishRules.every((rule) => rule.test(texts[file])))
+      && ['SKILL.zh-CN.md', 'references/fill-brief.zh-CN.md'].every((file) => chineseRules.every((rule) => rule.test(texts[file])));
+    const tabTitles = ['SKILL.md', 'SKILL.zh-CN.md'].every((file) => ['🔑', '🤖', '❓', '👆', '✅'].every((mark) => texts[file].includes(mark)));
+    const atsCoverage = ['references/ats-tips.md', 'references/ats-tips.zh-CN.md'].every((file) => ['Workday', 'Oracle', 'iCIMS', 'Greenhouse', 'Ashby', 'Lever', 'Yello', 'SuccessFactors']
+      .every((name) => new RegExp(`^## [^\\n]*${name}`, 'm').test(texts[file])));
+    const routed = [orchestratorEn, orchestratorZh, agentInstructions].every((text) => /career-journal-apply/.test(text));
+    const examplesOnly = Object.values(texts).every((text) => !/\/Users\/|\/home\/[a-z]|[A-Z]:\\Users\\|\/private\//.test(text)
+      && [...text.matchAll(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)].every(([address]) => /@(?:example\.(?:com|org|net)|school\.edu)$/i.test(address)));
+    const problems = Object.entries({ linked, discoverable, hardRules, tabTitles, atsCoverage, routed, examplesOnly }).filter(([, ok]) => !ok).map(([name]) => name);
+    check('apply-skill', problems.length === 0, problems.length ? `failed: ${problems.join(', ')}` : 'career-journal-apply Skill and references paired in English and Simplified Chinese with fixed hard rules, tab titles, ATS tips, and routing');
+  } catch (error) { check('apply-skill', false, error.message); }
+
   const files = await candidateFiles(root);
   const textFiles = files.filter((file) => /\.(?:mjs|js|json|md|yml|yaml|txt|html|css)$/.test(file));
   let retiredOwnerFile = null;
