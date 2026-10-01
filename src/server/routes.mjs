@@ -57,8 +57,8 @@ function applicationDetail(db, id) {
   return { ...application, events, artifacts, tasks };
 }
 
-function publicTask({ id, kind, title, platform, dueAt, dueNote, status, note, createdAt, updatedAt }) {
-  return { id, kind, title, platform, dueAt, dueNote, status, note, createdAt, updatedAt };
+function publicTask({ id, kind, title, platform, link, dueAt, dueNote, status, note, createdAt, updatedAt }) {
+  return { id, kind, title, platform, link: link ?? null, dueAt, dueNote, status, note, createdAt, updatedAt };
 }
 
 const safeSourceKinds = new Set(['api', 'cli', 'email', 'import', 'manual', 'system']);

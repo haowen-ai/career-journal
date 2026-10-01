@@ -168,3 +168,17 @@ test('task done and reopen toggle status and reject unknown task ids', async () 
   assert.equal(noId.code, 1);
   assert.match(noId.io.stderr, /task-id is required/);
 }));
+
+test('task add stores an http(s) link, keeps it on re-add, and rejects other schemes', async () => fixture(async (home) => {
+  const id = await addApplication(home, 'Acme', 'Data Science Intern');
+  const base = ['task', 'add', '--home', home, '--id', id, '--task-id', 'acme-video', '--kind', 'interview', '--title', 'Video interview'];
+  const added = await cli([...base, '--link', 'https://example.com/invite/abc']);
+  assert.equal(added.code, 0, added.io.stderr);
+  assert.equal(JSON.parse(added.io.stdout).link, 'https://example.com/invite/abc');
+  const kept = await cli([...base, '--note', 'Camera on']);
+  assert.equal(kept.code, 0, kept.io.stderr);
+  assert.equal(JSON.parse(kept.io.stdout).link, 'https://example.com/invite/abc');
+  const rejected = await cli([...base, '--link', 'javascript:alert(1)']);
+  assert.notEqual(rejected.code, 0);
+  assert.match(rejected.io.stderr, /task\.link must be an http or https URL/);
+}));

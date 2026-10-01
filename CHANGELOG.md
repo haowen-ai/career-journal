@@ -12,11 +12,13 @@ All notable changes are documented here. This project follows Semantic Versionin
 - Added an Assessments & interviews dashboard section that lists every open online assessment, coding test, video interview, or other pre-interview step across applications, soonest deadline first, with the deadline in the workspace time zone, a time-left badge, the deadline note, and Mark done / Undo actions
 - Added an Assessments / interviews dashboard filter and an open-steps line on each application card
 - Added `career-journal task add|list|done|reopen` for recording these steps with an optional ISO 8601 deadline that includes a UTC offset; re-running `task add` updates the same task instead of creating a duplicate
+- Added `task add --link` to store the invitation URL for an assessment or interview step; the dashboard shows an Open link button next to the platform. Only http and https URLs are accepted
 
 ### Changed
 
 - Database schema version 3 adds the `application_tasks` table; existing workspaces must run `career-journal migrate --dry-run`, create a backup, and run `career-journal migrate --apply` before the dashboard starts
-- Dashboard and application detail API responses now include each application's `tasks`
+- Database schema version 4 adds a nullable `link` column to `application_tasks`; run the same migrate steps to upgrade
+- Dashboard and application detail API responses now include each application's `tasks`, each with its `link` or `null`
 
 ### Fixed
 

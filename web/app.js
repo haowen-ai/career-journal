@@ -39,7 +39,7 @@ const copy = {
     tasksTitle: 'Assessments & interviews', tasksBody: 'Open steps across all applications, soonest deadline first.',
     tasksEmptyTitle: 'No open assessments or interviews', tasksEmptyBody: 'Online assessments, coding tests, and interview steps with deadlines appear here.',
     filterTasks: 'Assessments / interviews', markDone: 'Mark done', undo: 'Undo', taskUpdateError: 'Could not update',
-    completedTasks: (count) => `Completed (${count})`, taskCompleted: 'Completed', platform: 'Platform', deadline: 'Deadline',
+    completedTasks: (count) => `Completed (${count})`, taskCompleted: 'Completed', platform: 'Platform', openLink: 'Open link', deadline: 'Deadline',
     openSteps: 'Open steps', cardTasks: 'Assessment and interview steps', cardTasksNote: 'Deadlines use the workspace time zone.',
   },
   'zh-CN': {
@@ -62,7 +62,7 @@ const copy = {
     tasksTitle: '测评与面试准备', tasksBody: '汇总所有申请中待完成的步骤，截止时间最近的排在前面。',
     tasksEmptyTitle: '暂无待完成的测评或面试', tasksEmptyBody: '在线测评、编程测试和面试等带截止时间的步骤会显示在这里。',
     filterTasks: '测评 / 面试', markDone: '标记完成', undo: '撤销', taskUpdateError: '更新失败',
-    completedTasks: (count) => `已完成（${count}）`, taskCompleted: '已完成', platform: '平台', deadline: '截止时间',
+    completedTasks: (count) => `已完成（${count}）`, taskCompleted: '已完成', platform: '平台', openLink: '打开链接', deadline: '截止时间',
     openSteps: '待完成步骤', cardTasks: '测评与面试步骤', cardTasksNote: '截止时间按工作区时区显示。',
   },
 };
@@ -244,6 +244,12 @@ function renderTaskRow(task) {
   const platform = row.querySelector('.task-platform');
   platform.textContent = task.platform ? `${t('platform')}: ${task.platform}` : '';
   platform.hidden = !task.platform;
+  const link = row.querySelector('.task-link');
+  const safeLink = /^https?:\/\//i.test(task.link ?? '') ? task.link : '';
+  link.textContent = safeLink ? t('openLink') : '';
+  if (safeLink) link.href = safeLink; else link.removeAttribute('href');
+  link.setAttribute('aria-label', safeLink ? `${t('openLink')}: ${task.title}` : '');
+  link.hidden = !safeLink;
   const dueNote = row.querySelector('.task-due-note');
   dueNote.textContent = task.dueNote ?? '';
   dueNote.hidden = !task.dueNote;

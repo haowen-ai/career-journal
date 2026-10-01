@@ -180,7 +180,7 @@ career-journal email import-eml --home ~/job-search --account "manual-eml:$JOB_E
 ```sh
 career-journal application add --home ~/job-search --company "Example" --role "Engineer"
 career-journal event add --home ~/job-search --id example-engineer --type application_submitted --title "Application submitted" --status-after applied
-career-journal task add --home ~/job-search --id example-engineer --kind assessment --title "Online assessment" --platform "HackerRank" --due-at 2026-10-01T23:59:00-07:00
+career-journal task add --home ~/job-search --id example-engineer --kind assessment --title "Online assessment" --platform "HackerRank" --due-at 2026-10-01T23:59:00-07:00 --link https://example.com/invite
 career-journal task list --home ~/job-search --status open
 career-journal email list --home ~/job-search
 career-journal automation list --home ~/job-search

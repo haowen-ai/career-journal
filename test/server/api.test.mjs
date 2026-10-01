@@ -171,7 +171,7 @@ async function seedTasks(baseUrl, db) {
   const application = await (await fetch(`${baseUrl}/api/applications`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ company: 'Acme', role: 'SWE Intern' }),
   })).json();
-  const later = upsertTask(db, { id: 'task-later', applicationId: application.id, kind: 'interview', title: 'Video interview', platform: 'HireVue', dueAt: '2026-10-03T17:00:00Z', dueNote: 'Deadline computed as received time + 7 days', source: { kind: 'email', messageId: 'private-message-id' } }, '2026-09-20T00:00:00Z');
+  const later = upsertTask(db, { id: 'task-later', applicationId: application.id, kind: 'interview', title: 'Video interview', platform: 'HireVue', link: 'https://example.com/invite/abc', dueAt: '2026-10-03T17:00:00Z', dueNote: 'Deadline computed as received time + 7 days', source: { kind: 'email', messageId: 'private-message-id' } }, '2026-09-20T00:00:00Z');
   const none = upsertTask(db, { id: 'task-none', applicationId: application.id, kind: 'other', title: 'Portfolio upload', dueNote: 'Email gives no deadline' }, '2026-09-20T00:00:00Z');
   const soon = upsertTask(db, { id: 'task-soon', applicationId: application.id, kind: 'assessment', title: 'Coding test', platform: 'CodeSignal', dueAt: '2026-10-01T09:00:00-07:00', note: 'Use Python' }, '2026-09-20T00:00:00Z');
   return { application, later, none, soon };
@@ -184,11 +184,12 @@ test('dashboard includes each application task in camelCase deadline order witho
   assert.equal(item.id, application.id);
   assert.deepEqual(item.tasks.map((task) => task.id), ['task-soon', 'task-later', 'task-none']);
   assert.deepEqual(item.tasks[1], {
-    id: 'task-later', kind: 'interview', title: 'Video interview', platform: 'HireVue', dueAt: '2026-10-03T17:00:00Z',
+    id: 'task-later', kind: 'interview', title: 'Video interview', platform: 'HireVue', link: 'https://example.com/invite/abc', dueAt: '2026-10-03T17:00:00Z',
     dueNote: 'Deadline computed as received time + 7 days', status: 'open', note: '', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z',
   });
   assert.equal(item.tasks[2].dueAt, null);
   assert.equal(item.tasks[2].platform, null);
+  assert.equal(item.tasks[2].link, null);
   assert.doesNotMatch(JSON.stringify(dashboard), /private-message-id|source_json|applicationId/);
   const detail = await (await fetch(`${baseUrl}/api/applications/${application.id}`)).json();
   assert.deepEqual(detail.tasks.map((task) => task.id), ['task-soon', 'task-later', 'task-none']);
@@ -204,7 +205,7 @@ test('task status route marks a task done and reopens it', async () => withServe
   assert.equal(body.ok, true);
   assert.equal(body.task.id, 'task-soon');
   assert.equal(body.task.status, 'done');
-  assert.deepEqual(Object.keys(body.task), ['id', 'kind', 'title', 'platform', 'dueAt', 'dueNote', 'status', 'note', 'createdAt', 'updatedAt']);
+  assert.deepEqual(Object.keys(body.task), ['id', 'kind', 'title', 'platform', 'link', 'dueAt', 'dueNote', 'status', 'note', 'createdAt', 'updatedAt']);
   assert.equal(getTask(db, 'task-soon').status, 'done');
   const dashboard = await (await fetch(`${baseUrl}/api/dashboard`)).json();
   assert.equal(dashboard.applications[0].tasks.find((task) => task.id === 'task-soon').status, 'done');

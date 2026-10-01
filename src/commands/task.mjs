@@ -20,6 +20,7 @@ export async function taskCommand(parsed, io) {
         kind: parsed.options.kind,
         title: parsed.options.title,
         platform: parsed.options.platform,
+        link: parsed.options.link,
         dueAt: parsed.options['due-at'],
         dueNote: parsed.options['due-note'],
         status: parsed.options.status,
