@@ -8,6 +8,24 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Added
 
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- None
+
+### Security
+
+- None
+
+## [1.1.0] - 2026-10-01
+
+### Added
+
 - Added the `claude-code` scheduler driver: one shared Claude Code desktop scheduled task can carry both required daily tasks, `register-external` prints `claudeCodeCommandLine`, and `automation verify` and `doctor` check the task file, enabled state, daily cron, time zone, and both commands
 - Added an Assessments & interviews dashboard section that lists every open online assessment, coding test, video interview, or other pre-interview step across applications, soonest deadline first, with the deadline in the workspace time zone, a time-left badge, the deadline note, and Mark done / Undo actions
 - Added an Assessments / interviews dashboard filter and an open-steps line on each application card
