@@ -8,6 +8,24 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Added
 
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- None
+
+### Security
+
+- None
+
+## [2.0.0] - 2026-10-01
+
+### Added
+
 - `career-journal profile show|questions|set|answer|skip|status` for the 2.0 first-run profile interview. `profile questions --json` returns the four rounds (search target, materials, common form answers, scan sources and pace) as data, with English and Simplified Chinese prompts, options, an Other allowance, required flags, the profile field or answers-sheet row each answer fills, and the fixed hard rules; `--round N` narrows to one round and `--missing` lists only unanswered required items
 - A local profile at `.career-journal/profile/profile.json` (`.jobops/profile/` in a legacy workspace), created by the first `profile set`. Every write is validated: job type, direction, degree, and authorization values; graduation as `YYYY-MM`; batch size 1–10; scan time `HH:MM`; readable resume and transcript paths; and job-board entries with an optional company name
 - A private answers sheet at `.career-journal/profile/answers.md`. `profile answer --question` appends a row under "Learned while applying" with its source and date in the workspace time zone; `profile answer --key` keeps one row per common form answer under "Common form answers"
