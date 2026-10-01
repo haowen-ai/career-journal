@@ -12,6 +12,8 @@ All notable changes are documented here. This project follows Semantic Versionin
 - Added a local profile at `.career-journal/profile/profile.json`, created by the first `profile set`. Writes are validated (job type, directions, degree, and authorization enums; graduation as `YYYY-MM`; batch size 1–10; scan time `HH:MM`; readable resume and transcript paths) and `profile status` reports which rounds are complete and whether scans and assisted applying are ready
 - Added a private answers sheet at `.career-journal/profile/answers.md`. `profile answer --question` appends a row under "Learned while applying" with its source and date in the workspace time zone; `profile answer --key` keeps one row per common form answer under "Common form answers"
 - Added blank templates `config/profile.template.json` and `config/answers.template.md`
+- Dashboard cards for roles being prepared show a fit badge (High, Medium, or Low fit), the deadline in the workspace time zone with a days-left hint, the location, the source board, and whether the posting has been verified. A lead skipped after its posting check shows the skip reason on its withdrawn card
+- Added a Queue dashboard filter that lists leads without a skip reason in the same order as `queue list`: fit, then deadline, then posting date. The location-rank tiebreak needs the search profile, which the dashboard does not load, so the browser skips it
 
 ### Changed
 
@@ -37,6 +39,8 @@ All notable changes are documented here. This project follows Semantic Versionin
 ### Changed
 
 - Database schema version 5 adds nullable `source`, `source_id`, `location`, `posted_at`, `deadline_at`, `fit`, `fit_confidence`, `fit_note`, `verified_at`, and `skip_reason` columns to `applications`, with an index on `(source, source_id)`. Run `career-journal migrate --dry-run`, create a backup, then run `career-journal migrate --apply`
+- `/api/dashboard` and `GET /api/applications/:id` now return `source`, `location`, `postedAt`, `deadlineAt`, `fit`, `fitConfidence`, `fitNote`, `verifiedAt`, and `skipReason` for each application. They do not return source ids, posting text, or decision traces
+- Dashboard timelines label role-scan and posting-check events by their source instead of Other
 
 ### Fixed
 

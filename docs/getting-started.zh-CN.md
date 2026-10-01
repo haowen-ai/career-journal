@@ -280,6 +280,7 @@ career-journal queue verify --home ~/job-search --id <application> --result skip
 - **去重：** 来源 ID 相同、链接中的职位编号相同、链接相同，或同一公司的职位名称几乎一致，都算同一个职位。已经投递或已跳过的职位不会再次进入队列；名称相近的职位会进入队列并标注“可能重复”
 - **匹配度：** 先由 Jev 给出 `high`、`medium` 或 `low`，再交给已配置的大语言模型。两者都没有时，用本地规则判断：职位名称含主要方向为 `high`，含次要方向为 `medium`，并在备注中写明是规则判断。`--dry-run` 不写入任何内容，也不调用任何模型
 - **队列：** `queue list` 列出尚未跳过的线索，按匹配度、截止时间、地点排序和发布时间排列。`queue verify --result skip` 会把线索改为 `withdrawn`，并记录一条带原因的事件
+- **看板：** 线索卡片显示匹配度、按工作区时区显示的截止时间和剩余天数、地点、来源，以及岗位原文是否已核实。**投递队列**筛选列出的岗位与 `queue list` 相同、顺序一致，只是浏览器中不按地点顺序排。被跳过的岗位显示在**已结束**中，并附跳过原因
 - **可选来源：** `sources.careerOps` 为 `true` 且检测到其桥接文件时使用 CareerOps。只有当你开启 `sources.simplify.enabled` 并自己填写 `sources.simplify.url` 时才读取 SimplifyJobs；它的列表没有许可证，因此只在你的电脑上实时读取，不会被打包或再分发
 - **可选定时任务：** `automation configure --task role-scan --enabled` 默认使用档案中的 `pace.scanTime`。新用户配置时不会创建它，`doctor` 也不要求它；需要时请为它单独创建一个定时任务
 
