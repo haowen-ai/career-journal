@@ -18,6 +18,8 @@
 - 新增可选的 `role-scan` 自动任务，在资料中的 `pace.scanTime` 运行。它在第 4 轮询问，用户同意后才创建，而且总是单独的定时任务，因为承载 `mail-sync` 和 `deadline-review` 的共享任务不接受其他任务；`doctor` 不要求它
 - 职位匹配度成为新的判断类型：先由 Jev 判断，再交给已配置的大语言模型，最后用职位名称规则兜底（主要方向为 high，次要方向为 medium，其余为 low），并记录为规则判断
 - CareerOps 桥接契约新增只读的 `scan` 操作
+- 看板中准备阶段的申请卡片显示匹配度标签（高匹配、中匹配或低匹配）、按工作区时区显示的截止时间和剩余天数、地点、来源职位板，以及岗位原文是否已核实。核对后被跳过的线索会在已撤回的卡片上显示跳过原因
+- 看板新增“投递队列”筛选，列出没有跳过原因的线索，顺序与 `queue list` 一致：先按匹配度，再按截止时间，再按发布时间。地点顺序需要求职档案，而看板不读取档案，所以浏览器中不按地点排序
 - 新增中英文 `career-journal-apply` Skill，用于代填申请。它从队列中取 N 个已核实的岗位（`pace.batchSize`，默认 5），先查重、查资格，再把每个岗位交给一个子 Agent；子 Agent 只打开并使用自己的浏览器标签页。表单按用户自己的答案表填写，只上传用户选定的那一份简历；成绩单只在该栏必填时上传，工作描述每条一行、行首加“• ”。标签标题（🔑待登录、🤖待验证、❓待回答、👆待点击、✅待提交）显示哪个标签页需要用户；遇到新题时边投边问，并用 `profile answer` 保存；浏览器断开或标签组被关时，从网站保存的草稿继续
 - 代填流程新增投后核对：只有拿到确认邮件或网站“已收到”页面等证据，才通过 `event add --status-after applied` 把申请改为已投递；测评或面试邀请用 `task add --due-at --due-note --link` 记录
 - 新增中英文 `references/ats-tips.md`，介绍 Workday、Oracle HCM、iCIMS、Greenhouse、Ashby、Lever、Yello 和 SAP SuccessFactors 的通用填法；新增中英文 `references/fill-brief.md`，即交给每个填表子 Agent 的任务说明模板
@@ -31,6 +33,8 @@
 - PRD 0.24 把非目标从“不自动批量投递”改为“不自动提交”：代填只在用户自己的浏览器里进行，登录、同意、签名和提交都由用户本人完成；并链接 2.0 设计
 - 第三方声明把所有岗位扫描来源合并在一节中说明：默认使用 Greenhouse、Lever 和 Ashby 的官方职位板接口；没有许可证的 SimplifyJobs 列表只作为用户自选开启的来源，在用户电脑上实时读取、不再分发；CareerOps 门户扫描也需用户自选开启
 - `scripts/check-release.mjs` 新增 `apply-skill` 检查：Skill 和两份参考文档必须同时有英文和简体中文版本，并具备语言链接、发现用的 frontmatter、全部硬规矩、全部五种标签标题、每个招聘系统的章节，以及 `career-journal` Skill 和 `AGENTS.md` 中的路由
+- `/api/dashboard` 和 `GET /api/applications/:id` 现在为每条申请返回 `source`、`location`、`postedAt`、`deadlineAt`、`fit`、`fitConfidence`、`fitNote`、`verifiedAt` 和 `skipReason`；不返回来源 ID、岗位原文或判断记录
+- 看板时间线中的岗位扫描和岗位核对事件会显示对应来源，不再显示为“其他”
 
 ### 修复
 

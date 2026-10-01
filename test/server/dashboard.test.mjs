@@ -37,6 +37,12 @@ test('serves the bilingual career-journal dashboard shell and rejects path trave
     assert.match(html, /data-testid="filter-tasks"/);
     assert.match(html, /data-testid="card-tasks"/);
     assert.match(html, /data-testid="card-task-list"/);
+    assert.match(html, /data-testid="filter-queue" data-filter="queue"/);
+    assert.match(html, /data-i18n="filterQueue"/);
+    assert.match(html, /class="card-queue" role="group" data-testid="card-queue"/);
+    assert.match(html, /data-testid="card-skip"/);
+    assert.ok(html.indexOf('data-testid="filter-preparing"') < html.indexOf('data-testid="filter-queue"'));
+    assert.ok(html.indexOf('data-testid="card-queue"') < html.indexOf('class="card-facts"'));
     assert.ok(html.indexOf('class="stats"') < html.indexOf('data-testid="tasks-section"'));
     assert.ok(html.indexOf('data-testid="tasks-section"') < html.indexOf('id="applications-heading"'));
     assert.equal((await fetch(`${baseUrl}/dashboard-model.js`)).status, 200);

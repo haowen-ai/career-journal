@@ -111,6 +111,7 @@
             <button data-testid="filter-interview" data-filter="interview" type="button" aria-pressed="false"><span data-i18n="filterInterview">Interview / Offer</span><b data-count="interview">0</b></button>
             <button data-testid="filter-closed" data-filter="closed" type="button" aria-pressed="false"><span data-i18n="filterClosed">Closed</span><b data-count="closed">0</b></button>
             <button data-testid="filter-preparing" data-filter="preparing" type="button" aria-pressed="false"><span data-i18n="filterPreparing">Preparing</span><b data-count="preparing">0</b></button>
+            <button data-testid="filter-queue" data-filter="queue" type="button" aria-pressed="false"><span data-i18n="filterQueue">Queue</span><b data-count="queue">0</b></button>
             <button data-testid="filter-tasks" data-filter="tasks" type="button" aria-pressed="false"><span data-i18n="filterTasks">Assessments / interviews</span><b data-count="tasks">0</b></button>
           </div>
           <span class="result-count" id="result-count" aria-live="polite">0 of 0</span>
@@ -145,6 +146,16 @@
           <h2 class="role"></h2>
         </div>
         <span class="status"></span>
+      </div>
+
+      <div class="card-queue" role="group" data-testid="card-queue" hidden>
+        <span class="fit-badge"></span>
+        <ul class="card-queue-facts"></ul>
+      </div>
+
+      <div class="card-skip" data-testid="card-skip" hidden>
+        <span class="card-skip-label"></span>
+        <p class="card-skip-reason"></p>
       </div>
 
       <div class="card-facts">
