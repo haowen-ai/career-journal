@@ -11,18 +11,27 @@ import {
   fitLevel,
   hasOpenTask,
   isQueued,
+  isWaitingToApply,
   latestEvent,
   materialKindLabel,
   openTasks,
   postingCheckLabel,
   queueApplications,
   queueSummary,
+  safeHttpUrl,
   sourceName,
   suggestedNextAction,
   taskDeadlineLabel,
   taskDeadlineStatus,
   taskKindLabel,
   taskQueue,
+  TO_APPLY_GROUPS,
+  compareToApply,
+  toApplyDeadlineLabel,
+  toApplyGroup,
+  toApplyQueue,
+  toApplyRow,
+  toApplySummaryLine,
   verificationLabel,
 } from '../../web/dashboard-model.js';
 import { compareQueueItems } from '../../src/commands/queue.mjs';
@@ -282,4 +291,139 @@ test('summarizes queue facts for preparing cards and skip reasons for withdrawn 
   assert.equal(queueSummary(lead('applied', { status: 'applied', fit: 'high' }), { now, timeZone }), null);
   assert.equal(queueSummary(lead('withdrawn-by-user', { status: 'withdrawn' }), { now, timeZone }), null);
   assert.equal(queueSummary(lead('bad-deadline', { deadlineAt: 'soon' }), { now, timeZone }).deadline.at, null);
+});
+
+test('lists leads and prepared roles without a skip reason as waiting to apply', () => {
+  assert.equal(isWaitingToApply(lead('lead')), true);
+  assert.equal(isWaitingToApply(lead('prepared', { status: 'prepared' })), true);
+  assert.equal(isWaitingToApply(lead('upper', { status: 'LEAD' })), true);
+  assert.equal(isWaitingToApply(lead('skip-reason-but-still-lead', { skipReason: 'Requires clearance' })), false);
+  assert.equal(isWaitingToApply(lead('prepared-skipped', { status: 'prepared', skipReason: 'Closed early' })), false);
+  assert.equal(isWaitingToApply(lead('skipped', { status: 'withdrawn', skipReason: 'PhD students only' })), false);
+  assert.equal(isWaitingToApply(lead('applied', { status: 'applied' })), false);
+  assert.equal(isWaitingToApply(lead('interview', { status: 'interview' })), false);
+  assert.equal(isWaitingToApply(null), false);
+});
+
+test('groups roles to apply by workspace calendar days left, keeping deadlines passed by up to a day', () => {
+  const now = Date.parse('2026-10-01T12:00:00-04:00');
+  const timeZone = 'America/New_York';
+  const group = (deadlineAt) => toApplyGroup(lead('role', { deadlineAt }), { now, timeZone });
+  assert.deepEqual(TO_APPLY_GROUPS, ['today', 'week', 'later', 'none']);
+  assert.equal(group(null), 'none');
+  assert.equal(group('soon'), 'none');
+  assert.equal(group('2026-09-30T11:59:00-04:00'), null, 'passed by more than 24 hours');
+  assert.equal(group('2026-09-30T12:00:00-04:00'), 'today', 'passed by exactly 24 hours');
+  assert.equal(group('2026-10-01T11:00:00-04:00'), 'today', 'passed an hour ago');
+  assert.equal(group('2026-10-01T12:00:00-04:00'), 'today', 'due now');
+  assert.equal(group('2026-10-01T23:59:00-04:00'), 'today', 'due later today');
+  assert.equal(group('2026-10-02T23:59:00-04:00'), 'today', 'due tomorrow');
+  assert.equal(group('2026-10-03T23:59:00-04:00'), 'today', 'two days left');
+  assert.equal(group('2026-10-04T00:00:00-04:00'), 'week', 'three days left');
+  assert.equal(group('2026-10-08T23:59:00-04:00'), 'week', 'seven days left');
+  assert.equal(group('2026-10-09T00:00:00-04:00'), 'later', 'eight days left');
+  // The calendar day comes from the workspace time zone, not UTC.
+  assert.equal(group('2026-10-04T02:00:00Z'), 'today', 'Oct 3 at 22:00 in New York is two days left');
+  assert.equal(toApplyGroup(lead('role', { deadlineAt: '2026-10-04T02:00:00Z' }), { now, timeZone: 'UTC' }), 'week');
+  assert.equal(toApplyGroup(lead('role', { deadlineAt: '2026-10-01T11:00:00-04:00' }), { now: '2026-10-01T16:00:00Z', timeZone }), 'today');
+});
+
+const applyFixture = () => [
+  lead('no-deadline-low', { fit: 'low', postedAt: '2026-09-29T00:00:00Z' }),
+  lead('no-deadline-high-old', { fit: 'high', postedAt: '2026-09-10T00:00:00Z' }),
+  lead('no-deadline-high-new', { fit: 'high', postedAt: '2026-09-28T00:00:00Z' }),
+  lead('no-deadline-unrated', { fit: null }),
+  lead('no-deadline-medium', { fit: 'medium' }),
+  lead('later', { fit: 'low', deadlineAt: '2026-10-20T23:59:00-04:00' }),
+  lead('week-medium', { fit: 'medium', deadlineAt: '2026-10-06T23:59:00-04:00' }),
+  lead('week-high-same-deadline', { fit: 'high', deadlineAt: '2026-10-06T23:59:00-04:00' }),
+  lead('week-low-sooner', { fit: 'low', deadlineAt: '2026-10-04T09:00:00-04:00' }),
+  lead('tomorrow-unrated', { fit: null, deadlineAt: '2026-10-02T23:59:00-04:00' }),
+  lead('today-passed', { fit: 'medium', deadlineAt: '2026-10-01T09:00:00-04:00' }),
+  lead('prepared-today', { status: 'prepared', fit: 'high', deadlineAt: '2026-10-01T23:59:00-04:00' }),
+  lead('long-past', { fit: 'high', deadlineAt: '2026-09-28T23:59:00-04:00' }),
+  lead('skipped', { status: 'withdrawn', fit: 'high', skipReason: 'PhD students only', deadlineAt: '2026-10-02T23:59:00-04:00' }),
+  lead('applied', { status: 'applied', fit: 'high', appliedAt: '2026-09-30', deadlineAt: '2026-10-02T23:59:00-04:00' }),
+];
+
+test('orders roles to apply by soonest deadline, then queue order, inside each urgency group', () => {
+  const now = Date.parse('2026-10-01T12:00:00-04:00');
+  const groups = toApplyQueue(applyFixture(), { now, timeZone: 'America/New_York' });
+  const ids = Object.fromEntries(Object.entries(groups).map(([key, items]) => [key, items.map((item) => item.id)]));
+  assert.deepEqual(ids, {
+    today: ['today-passed', 'prepared-today', 'tomorrow-unrated'],
+    week: ['week-low-sooner', 'week-high-same-deadline', 'week-medium'],
+    later: ['later'],
+    none: ['no-deadline-high-new', 'no-deadline-high-old', 'no-deadline-medium', 'no-deadline-low', 'no-deadline-unrated'],
+  });
+  const flat = applyFixture().filter(isWaitingToApply).sort(compareToApply).map((item) => item.id);
+  assert.deepEqual(flat.slice(0, 2), ['long-past', 'today-passed']);
+  assert.deepEqual(flat.slice(-5), ids.none);
+  assert.deepEqual(toApplyQueue([], { now }), { today: [], week: [], later: [], none: [] });
+  assert.deepEqual(toApplyQueue(undefined, { now }), { today: [], week: [], later: [], none: [] });
+  // The Queue filter keeps its own order and its lead-only set.
+  assert.deepEqual(queueApplications(applyFixture()).map((item) => item.id).slice(0, 3), ['long-past', 'week-high-same-deadline', 'no-deadline-high-new']);
+  assert.equal(queueApplications(applyFixture()).some((item) => item.id === 'prepared-today'), false);
+});
+
+test('summarizes roles to apply in one line in both languages', () => {
+  const now = Date.parse('2026-10-01T12:00:00-04:00');
+  const groups = toApplyQueue(applyFixture(), { now, timeZone: 'America/New_York' });
+  assert.equal(toApplySummaryLine(groups, 'en'), '3 to apply today · 3 this week · 6 more');
+  assert.equal(toApplySummaryLine(groups, 'zh-CN'), '今天要投 3 个 · 本周截止 3 个 · 其余 6 个');
+  const urgentOnly = { today: [lead('a')], week: [], later: [], none: [] };
+  assert.equal(toApplySummaryLine(urgentOnly, 'en'), '1 to apply today · 0 this week');
+  assert.equal(toApplySummaryLine(urgentOnly, 'zh-CN'), '今天要投 1 个 · 本周截止 0 个');
+  assert.equal(toApplySummaryLine({ today: [], week: [], later: [], none: [lead('b')] }, 'en'), '0 to apply today · 0 this week · 1 more');
+  assert.equal(toApplySummaryLine({ today: [], week: [], later: [], none: [] }, 'en'), '');
+  assert.equal(toApplySummaryLine(undefined, 'zh-CN'), '');
+});
+
+test('describes each role to apply with fit, location, deadline badge, posting check, and a safe link', () => {
+  const now = Date.parse('2026-10-01T12:00:00-04:00');
+  const timeZone = 'America/New_York';
+  const row = toApplyRow(lead('verified', {
+    company: 'Example Corp', role: 'Data Science Intern', fit: 'high', fitNote: 'Rule-based fit', location: 'New York, NY',
+    deadlineAt: '2026-10-02T23:59:00-04:00', verifiedAt: '2026-10-01T09:00:00Z', jobUrl: 'https://careers.example.com/jobs/1',
+  }), { locale: 'en', now, timeZone });
+  assert.deepEqual(row, {
+    id: 'verified',
+    company: 'Example Corp',
+    role: 'Data Science Intern',
+    fit: { level: 'high', label: 'High fit', note: 'Rule-based fit' },
+    location: 'New York, NY',
+    deadline: { at: '2026-10-02T23:59:00-04:00', status: { state: 'upcoming', daysLeft: 1, urgent: true }, label: '1 day left' },
+    check: { state: 'verified', label: 'Verified' },
+    jobUrl: 'https://careers.example.com/jobs/1',
+  });
+
+  const passed = toApplyRow(lead('passed', { fit: 'medium', deadlineAt: '2026-10-01T09:00:00-04:00', jobUrl: 'javascript:alert(1)' }), { locale: 'zh-CN', now, timeZone });
+  assert.deepEqual(passed.deadline.status, { state: 'overdue', daysLeft: null, urgent: true });
+  assert.equal(passed.deadline.label, '已过截止');
+  assert.equal(passed.fit.label, '中匹配');
+  assert.deepEqual(passed.check, { state: 'unverified', label: '尚未核实' });
+  assert.equal(passed.jobUrl, null);
+  assert.equal(passed.location, null);
+
+  const undated = toApplyRow(lead('undated', { deadlineAt: 'soon', jobUrl: 'ftp://example.com/role' }), { locale: 'en', now, timeZone });
+  assert.deepEqual(undated.deadline, { at: null, status: { state: 'none', daysLeft: null, urgent: false }, label: null });
+  assert.equal(undated.fit.label, 'Fit not rated');
+  assert.equal(undated.jobUrl, null);
+
+  assert.equal(toApplyDeadlineLabel({ state: 'overdue', daysLeft: null, urgent: true }, 'en'), 'Deadline passed');
+  assert.equal(toApplyDeadlineLabel({ state: 'overdue', daysLeft: null, urgent: true }, 'zh-CN'), '已过截止');
+  assert.equal(toApplyDeadlineLabel({ state: 'today', daysLeft: 0, urgent: true }, 'zh-CN'), '今天截止');
+  assert.equal(toApplyDeadlineLabel({ state: 'upcoming', daysLeft: 5, urgent: false }, 'en'), '5 days left');
+});
+
+test('accepts only http and https posting links', () => {
+  assert.equal(safeHttpUrl('https://careers.example.com/jobs/1?src=scan'), 'https://careers.example.com/jobs/1?src=scan');
+  assert.equal(safeHttpUrl('HTTP://example.com/role'), 'http://example.com/role');
+  assert.equal(safeHttpUrl('  https://example.com/role  '), 'https://example.com/role');
+  assert.equal(safeHttpUrl('javascript:alert(1)'), null);
+  assert.equal(safeHttpUrl('data:text/html,hi'), null);
+  assert.equal(safeHttpUrl('//example.com/role'), null);
+  assert.equal(safeHttpUrl('https://'), null);
+  assert.equal(safeHttpUrl(null), null);
+  assert.equal(safeHttpUrl(42), null);
 });

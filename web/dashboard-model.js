@@ -210,6 +210,103 @@ export function queueSummary(application, { locale = 'en', now = Date.now(), tim
   };
 }
 
+// The "To apply" section: every role still waiting for the user to apply, which
+// is a lead or a prepared application that was not skipped. It is the Queue
+// filter's set plus prepared roles.
+export function isWaitingToApply(application) {
+  return preparingStatuses.has(String(application?.status ?? '').toLowerCase()) && application?.skipReason == null;
+}
+
+// Soonest deadline first; roles without a deadline go last, and any tie falls
+// back to queue order (fit, then the most recently posted role).
+export function compareToApply(left, right) {
+  return lastIfMissing(timeOrNull(left.deadlineAt)) - lastIfMissing(timeOrNull(right.deadlineAt))
+    || compareQueueApplications(left, right);
+}
+
+export const TO_APPLY_GROUPS = Object.freeze(['today', 'week', 'later', 'none']);
+const APPLY_TODAY_DAYS = 2;
+const APPLY_WEEK_DAYS = 7;
+const PAST_DEADLINE_GRACE_MS = 86_400_000;
+
+// Days are workspace calendar days, the same count as the deadline badge.
+// "today": due within 2 days, or past the deadline by at most 24 hours;
+// "week": 3-7 days; "later": more than 7 days; "none": no valid deadline.
+// A deadline more than 24 hours past returns null and the role is not listed.
+export function toApplyGroup(application, { now = Date.now(), timeZone = 'UTC' } = {}) {
+  const status = taskDeadlineStatus({ dueAt: application?.deadlineAt }, { now, timeZone });
+  if (status.state === 'none') return 'none';
+  if (status.state === 'overdue') {
+    const current = typeof now === 'number' ? now : Date.parse(now);
+    return current - timeOrNull(application.deadlineAt) <= PAST_DEADLINE_GRACE_MS ? 'today' : null;
+  }
+  if (status.daysLeft <= APPLY_TODAY_DAYS) return 'today';
+  if (status.daysLeft <= APPLY_WEEK_DAYS) return 'week';
+  return 'later';
+}
+
+export function toApplyQueue(applications, { now = Date.now(), timeZone = 'UTC' } = {}) {
+  const groups = { today: [], week: [], later: [], none: [] };
+  for (const application of (applications ?? []).filter(isWaitingToApply).sort(compareToApply)) {
+    const group = toApplyGroup(application, { now, timeZone });
+    if (group) groups[group].push(application);
+  }
+  return groups;
+}
+
+const toApplyCopy = {
+  en: {
+    passed: 'Deadline passed',
+    summary: (today, week, more) => [`${today} to apply today`, `${week} this week`, more ? `${more} more` : null],
+  },
+  'zh-CN': {
+    passed: '已过截止',
+    summary: (today, week, more) => [`今天要投 ${today} 个`, `本周截止 ${week} 个`, more ? `其余 ${more} 个` : null],
+  },
+};
+
+function toApplyLanguage(locale) {
+  return toApplyCopy[locale === 'zh-CN' ? 'zh-CN' : 'en'];
+}
+
+export function toApplyDeadlineLabel(status, locale = 'en') {
+  return status.state === 'overdue' ? toApplyLanguage(locale).passed : taskDeadlineLabel(status, locale);
+}
+
+// "2 to apply today · 5 this week · 140 more"; the last part is left out when
+// nothing is due later, and the whole line is empty when nothing is waiting.
+export function toApplySummaryLine(groups, locale = 'en') {
+  const count = (key) => groups?.[key]?.length ?? 0;
+  const more = count('later') + count('none');
+  if (count('today') + count('week') + more === 0) return '';
+  return toApplyLanguage(locale).summary(count('today'), count('week'), more).filter(Boolean).join(' · ');
+}
+
+export function safeHttpUrl(value) {
+  if (typeof value !== 'string' || !/^https?:\/\//i.test(value.trim())) return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+  } catch { return null; }
+}
+
+// What one "To apply" row shows, as data so it can be tested without a DOM.
+export function toApplyRow(application, { locale = 'en', now = Date.now(), timeZone = 'UTC' } = {}) {
+  const level = fitLevel(application.fit);
+  const deadlineAt = timeOrNull(application.deadlineAt) === null ? null : application.deadlineAt;
+  const status = taskDeadlineStatus({ dueAt: deadlineAt }, { now, timeZone });
+  return {
+    id: application.id,
+    company: application.company,
+    role: application.role,
+    fit: { level, label: fitLabel(level, locale), note: application.fitNote || null },
+    location: application.location || null,
+    deadline: { at: deadlineAt, status, label: deadlineAt ? toApplyDeadlineLabel(status, locale) : null },
+    check: { state: application.verifiedAt ? 'verified' : 'unverified', label: postingCheckLabel(application, locale) },
+    jobUrl: safeHttpUrl(application.jobUrl),
+  };
+}
+
 export function compareEventsNewestFirst(left, right) {
   const leftTime = Date.parse(left.recordedAt ?? left.observedAt ?? left.occurredAt ?? 0) || 0;
   const rightTime = Date.parse(right.recordedAt ?? right.observedAt ?? right.occurredAt ?? 0) || 0;
