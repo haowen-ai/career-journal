@@ -8,6 +8,8 @@ export const EMAIL_CLASSIFICATIONS = Object.freeze([
   'unknown',
 ]);
 
+export const ROLE_FIT_CHOICES = Object.freeze(['high', 'medium', 'low']);
+
 export function classifyEmailWithRules(text) {
   const normalized = String(text ?? '').toLowerCase();
   const rules = [

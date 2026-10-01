@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-01T00:00:00Z",
+  "search": {
+    "jobType": "internship",
+    "season": "Summer 2027",
+    "directions": { "primary": ["ai-ml", "data-science", "data-analytics"], "secondary": ["quant"] },
+    "locations": [
+      { "label": "New York, NY", "match": ["new york", "nyc", "manhattan"] },
+      { "label": "Seattle, WA", "match": ["seattle"] }
+    ],
+    "remoteOk": true,
+    "exclusions": ["no-return-offer"]
+  },
+  "candidate": {
+    "degree": { "level": "masters", "major": "Data Science", "graduation": "2027-12" },
+    "authorization": { "status": "permanent-resident", "needsSponsorship": false }
+  },
+  "materials": {
+    "resumePath": null,
+    "transcriptPath": null,
+    "transcriptPolicy": "required-only",
+    "links": { "linkedin": null, "github": null, "website": null },
+    "experienceConfirmed": false
+  },
+  "pace": { "batchSize": 5, "scanTime": "08:30", "notify": "desktop" },
+  "sources": {
+    "atsBoards": [
+      { "ats": "greenhouse", "board": "examplecorp" },
+      { "ats": "lever", "board": "examplelabs", "company": "Example Labs" },
+      { "ats": "ashby", "board": "examplequant", "company": "Example Quant" }
+    ],
+    "careerOps": false,
+    "simplify": { "enabled": false, "url": null }
+  },
+  "interview": { "roundsCompleted": [], "skipped": [] }
+}

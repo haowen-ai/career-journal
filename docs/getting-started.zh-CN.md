@@ -264,6 +264,24 @@ career-journal profile show --home ~/job-search
 - 不把个人资料写进仓库
 
 Workday、Oracle HCM、iCIMS、Greenhouse、Ashby、Lever、Yello 和 SuccessFactors 的填法要点见 [`references/ats-tips.zh-CN.md`](../.agents/skills/career-journal-apply/references/ats-tips.zh-CN.md)，交给每个子 Agent 的任务说明见 [`references/fill-brief.zh-CN.md`](../.agents/skills/career-journal-apply/references/fill-brief.zh-CN.md)。
+### 职位扫描与待投队列
+
+`scan run` 读取 `<home>/.career-journal/profile/profile.json` 中的求职档案（也可用 `--profile <path>` 指定）。它只读地调用官方公开的 Greenhouse、Lever 和 Ashby 职位板接口，抓取 `sources.atsBoards` 中列出的公司职位，按档案筛选、去重、评估匹配度，再把剩下的职位记为 `lead` 状态的申请。
+
+```sh
+career-journal scan run --home ~/job-search --dry-run
+career-journal scan run --home ~/job-search --json
+career-journal queue list --home ~/job-search
+career-journal queue verify --home ~/job-search --id <application> --result ok --reason "Official posting checked" --deadline 2026-10-15T23:59:00-04:00
+career-journal queue verify --home ~/job-search --id <application> --result skip --reason "PhD students only"
+```
+
+- **筛选：** 季度与职位类型、方向关键词、学历（只招博士或只招本科生的写法；只是提到本科学位不会被排除）、公民身份、安全许可、出口管制或签证担保要求、明确写出不提供转正机会的职位，以及按 `search.locations` 顺序和 `remoteOk` 计算的地点排序。每个被排除的职位都在 `--json` 输出中写明原因
+- **去重：** 来源 ID 相同、链接中的职位编号相同、链接相同，或同一公司的职位名称几乎一致，都算同一个职位。已经投递或已跳过的职位不会再次进入队列；名称相近的职位会进入队列并标注“可能重复”
+- **匹配度：** 先由 Jev 给出 `high`、`medium` 或 `low`，再交给已配置的大语言模型。两者都没有时，用本地规则判断：职位名称含主要方向为 `high`，含次要方向为 `medium`，并在备注中写明是规则判断。`--dry-run` 不写入任何内容，也不调用任何模型
+- **队列：** `queue list` 列出尚未跳过的线索，按匹配度、截止时间、地点排序和发布时间排列。`queue verify --result skip` 会把线索改为 `withdrawn`，并记录一条带原因的事件
+- **可选来源：** `sources.careerOps` 为 `true` 且检测到其桥接文件时使用 CareerOps。只有当你开启 `sources.simplify.enabled` 并自己填写 `sources.simplify.url` 时才读取 SimplifyJobs；它的列表没有许可证，因此只在你的电脑上实时读取，不会被打包或再分发
+- **可选定时任务：** `automation configure --task role-scan --enabled` 默认使用档案中的 `pace.scanTime`。新用户配置时不会创建它，`doctor` 也不要求它；需要时请为它单独创建一个定时任务
 
 ## 申请材料与 CareerOps
 

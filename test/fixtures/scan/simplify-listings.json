@@ -1,0 +1,83 @@
+[
+  {
+    "id": "f0000001-0000-4000-8000-000000000001",
+    "company_name": "Example Corp",
+    "title": "Machine Learning Intern, Summer 2027",
+    "url": "https://job-boards.greenhouse.io/examplecorp/jobs/4000001?utm_source=Simplify&ref=Simplify",
+    "locations": ["New York, NY"],
+    "terms": ["Summer 2027"],
+    "sponsorship": "Other",
+    "active": true,
+    "is_visible": true,
+    "date_posted": 1790611200
+  },
+  {
+    "id": "f0000002-0000-4000-8000-000000000002",
+    "company_name": "Example Analytics",
+    "title": "Data Science Intern",
+    "url": "https://careers.example.com/jobs/123?utm_source=Simplify",
+    "locations": ["Seattle, WA"],
+    "terms": ["Summer 2027"],
+    "sponsorship": "Offers Sponsorship",
+    "category": "Data Science, AI & Machine Learning",
+    "active": true,
+    "is_visible": true,
+    "date_posted": 1790697600
+  },
+  {
+    "id": "f0000003-0000-4000-8000-000000000003",
+    "company_name": "Example Analytics",
+    "title": "Data Science Intern - Fall",
+    "url": "https://careers.example.com/jobs/124",
+    "locations": ["Seattle, WA"],
+    "terms": ["Fall 2026"],
+    "active": true,
+    "is_visible": true,
+    "date_posted": 1790697600
+  },
+  {
+    "id": "f0000004-0000-4000-8000-000000000004",
+    "company_name": "Example Closed",
+    "title": "Machine Learning Intern",
+    "url": "https://careers.example.com/jobs/125",
+    "locations": ["New York, NY"],
+    "terms": ["Summer 2027"],
+    "active": false,
+    "is_visible": true,
+    "date_posted": 1790697600
+  },
+  {
+    "id": "f0000005-0000-4000-8000-000000000005",
+    "company_name": "Example Defense",
+    "title": "AI Intern",
+    "url": "https://careers.example.com/defense/ai-intern",
+    "locations": ["New York, NY"],
+    "terms": ["Summer 2027"],
+    "sponsorship": "U.S. Citizenship is Required",
+    "active": true,
+    "is_visible": true,
+    "date_posted": 1790697600
+  },
+  {
+    "id": "f0000006-0000-4000-8000-000000000006",
+    "company_name": "Example Corp",
+    "title": "Machine Learning Intern - Summer 2027",
+    "url": "https://careers.example.com/examplecorp/ml-intern",
+    "locations": ["New York, NY"],
+    "terms": ["Summer 2027"],
+    "active": true,
+    "is_visible": true,
+    "date_posted": 1790697600
+  },
+  {
+    "id": "f0000007-0000-4000-8000-000000000007",
+    "company_name": "Example Corp",
+    "title": "Machine Learning Intern, Summer 2027 - NLP",
+    "url": "https://careers.example.com/examplecorp/ml-intern-nlp",
+    "locations": ["New York, NY"],
+    "terms": ["Summer 2027"],
+    "active": true,
+    "is_visible": true,
+    "date_posted": 1790784000
+  }
+]

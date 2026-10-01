@@ -28,6 +28,15 @@ All notable changes are documented here. This project follows Semantic Versionin
 - `AGENTS.md`, both READMEs, and both Getting Started guides now describe the profile interview, role scans, assisted applying, the fixed hard rules, and where the profile lives (`<home>/.career-journal/profile/`, never the repository)
 - PRD 0.24 changes the non-goal from no automatic bulk applying to no automatic submission: assisted filling happens only in the user's own browser, and the user signs in, consents, signs, and submits. It links the 2.0 design
 - `scripts/check-release.mjs` adds an `apply-skill` check: the Skill and both references must exist in English and Simplified Chinese with language links, discovery frontmatter, every hard rule, all five tab titles, every ATS section, and routing from the `career-journal` Skill and `AGENTS.md`
+- Added `career-journal scan run [--dry-run] [--json] [--profile <path>]`. It reads the search profile, fetches roles read-only from the official Greenhouse, Lever, and Ashby public job-board APIs for the boards the user lists (plus CareerOps when enabled and detected, and SimplifyJobs only when the user opts in with a URL), filters them by season, direction, degree, work authorization, explicit no-return-offer wording, and location, removes duplicates, rates fit high, medium, or low, and queues new roles as leads. Every dropped role has a reason; `--dry-run` writes nothing and calls no model
+- Added `career-journal queue list [--json]`, ordered by fit, deadline, location rank, and posting date, and `queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>]`, which records the check; `skip` moves the lead to withdrawn with an event that carries the reason
+- Added an optional `role-scan` automation task that defaults to the profile's `pace.scanTime`; onboarding does not create it and `doctor` does not require it
+- Role fit is a new decision kind: Jev first, then the configured structured LLM, then a title rule (primary direction high, secondary medium, otherwise low) that is recorded as rule-based
+- The CareerOps bridge contract gains a read-only `scan` action
+
+### Changed
+
+- Database schema version 5 adds nullable `source`, `source_id`, `location`, `posted_at`, `deadline_at`, `fit`, `fit_confidence`, `fit_note`, `verified_at`, and `skip_reason` columns to `applications`, with an index on `(source, source_id)`. Run `career-journal migrate --dry-run`, create a backup, then run `career-journal migrate --apply`
 
 ### Fixed
 

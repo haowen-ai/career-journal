@@ -14,6 +14,7 @@ import {
   isCurrentTaskRegistration,
   verifyTaskRegistration,
   taskEmailAccountIds,
+  REQUIRED_TASK_TYPES,
 } from '../../src/automation/registry.mjs';
 import { runDeadlineReview, runDailyConsolidation } from '../../src/automation/tasks.mjs';
 import { automationCommand } from '../../src/commands/automation.mjs';
@@ -34,8 +35,10 @@ async function createLegacyHome(home) {
   await writeFile(path.join(directory, 'config.json'), `${JSON.stringify(config)}\n`);
 }
 
-test('defines four built-in tasks and requires explicit enabled state', () => {
-  assert.deepEqual(Object.keys(BUILT_IN_TASKS), ['mail-sync', 'deadline-review', 'daily-consolidation', 'local-backup']);
+test('defines five built-in tasks, only two required, and requires explicit enabled state', () => {
+  assert.deepEqual(Object.keys(BUILT_IN_TASKS), ['mail-sync', 'deadline-review', 'daily-consolidation', 'local-backup', 'role-scan']);
+  assert.deepEqual(REQUIRED_TASK_TYPES, ['mail-sync', 'deadline-review']);
+  assert.equal(BUILT_IN_TASKS['role-scan'].optional, true);
   assert.doesNotMatch(BUILT_IN_TASKS['deadline-review'].description, /deadline/i);
   const db = openDatabase(':memory:'); migrate(db);
   assert.throws(() => upsertTask(db, { type: 'mail-sync', timezone: 'UTC', time: '20:00' }), /enabled must be true or false/);
