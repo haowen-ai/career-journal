@@ -8,7 +8,7 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Added
 
-- None
+- `career-journal queue score [--all] [--limit <n>] [--dry-run] [--json]` rates queued roles that have no fit yet, such as leads recorded before 2.0 or added by hand, through the same Jev, structured LLM, and rule chain as a scan, and records a decision trace for each; `--all` rates every queued role again
 
 ### Changed
 

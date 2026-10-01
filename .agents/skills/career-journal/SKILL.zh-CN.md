@@ -50,7 +50,7 @@
 
 - Application、事件、截止日期、状态或 Dashboard：使用 CLI
 - 在线测评、编程测试或面试邀请：用 `task add` 记录，带上邮件里的截止时间（`--due-at`，须含时区偏移；`--due-note` 写明如何推算）和邀请链接（`--link`）；完成后用 `task done` 标记
-- 找岗位、看新岗位或每日岗位扫描：运行 `scan run`（加 `--dry-run` 只预览、不写入），逐个阅读新岗位的官网原文，再用 `queue verify --id <application> --result ok|skip --reason <原因> [--deadline <iso>]` 记录；每个“不投”都要写原因。`queue list` 按顺序显示队列。默认来源是用户关注的公司在官方招聘系统上的公开岗位接口；SimplifyJobs 和 CareerOps 来源需用户自己开启。`profile status --json` 报告没有扫描来源时，先按“扫描来源”把用户的公司对应到职位板
+- 找岗位、看新岗位或每日岗位扫描：运行 `scan run`（加 `--dry-run` 只预览、不写入），逐个阅读新岗位的官网原文，再用 `queue verify --id <application> --result ok|skip --reason <原因> [--deadline <iso>]` 记录；每个“不投”都要写原因。`queue list` 按顺序显示队列；队列里还有没评匹配度的岗位时，运行 `queue score` 补评。默认来源是用户关注的公司在官方招聘系统上的公开岗位接口；SimplifyJobs 和 CareerOps 来源需用户自己开启。`profile status --json` 报告没有扫描来源时，先按“扫描来源”把用户的公司对应到职位板
 - 投递、开始投、填申请表：读取 `career-journal-apply` Skill。它要求个人资料第 1、2 轮已完成，只在用户自己的浏览器里填表，并在每次提交前停下
 - 个人资料、偏好或表单答案：使用 `profile show|questions|set|answer|skip|status`。资料文件放在 `<home>/.career-journal/profile/`（`profile.json`、`answers.md`），不进仓库
 - Resume 或 Cover Letter：读取 `careerops-materials`；经验证的生成流程需要 CareerOps、内置规则和个人规则
