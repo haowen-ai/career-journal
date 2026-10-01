@@ -8,46 +8,40 @@
 
 ### 新增
 
-- 新增 `career-journal profile show|questions|set|answer|status`，用于 2.0 首次使用时的求职资料问答。`profile questions --json` 以数据形式返回四轮问题（求职目标、申请材料、常用表单答案、节奏），每个问题都有英文和简体中文提问、选项、“其他”自由填写、是否必填，以及答案写入的资料字段或答案表；`--round N` 只看某一轮，`--missing` 只列出仍未回答的必填项
-- 新增本地求职资料 `.career-journal/profile/profile.json`，在第一次运行 `profile set` 时创建。每次写入都会校验（职位类型、方向、学位和工作许可的取值；毕业时间为 `YYYY-MM`；每批数量 1–10；扫描时间为 `HH:MM`；简历和成绩单路径必须可读取）；`profile status` 显示哪几轮已完成，以及扫描和辅助填表是否就绪
+- 新增 `career-journal profile show|questions|set|answer|status`，用于 2.0 首次使用时的个人资料问答。`profile questions --json` 以数据形式返回四轮问题（求职目标、申请材料、常用表单答案、扫描来源与节奏），每个问题都有英文和简体中文提问、选项、“其他”自由填写、是否必填，以及答案写入的资料字段或答案表，并附上固定的硬规矩；`--round N` 只看某一轮，`--missing` 只列出仍未回答的必填项
+- 新增本地个人资料 `.career-journal/profile/profile.json`（旧版工作区为 `.jobops/profile/`），在第一次运行 `profile set` 时创建。每次写入都会校验：职位类型、方向、学位和工作许可的取值；毕业时间为 `YYYY-MM`；每批数量 1–10；扫描时间为 `HH:MM`；简历和成绩单路径必须可读取；职位板条目可附公司名
 - 新增私密答案表 `.career-journal/profile/answers.md`。`profile answer --question` 在“Learned while applying”下追加一行，并按工作区时区记录来源和日期；`profile answer --key` 让每个常用表单答案在“Common form answers”下只保留一行
 - 新增空白模板 `config/profile.template.json` 和 `config/answers.template.md`
-
-### 变更
-
-- `doctor` 新增 `profile` 和 `apply` 两行，只作为警告，因此没有求职资料也能通过核心配置；在问答第 1、2 轮完成且简历文件可读取之前，`apply` 显示 `incomplete`
+- 问答第 4 轮询问要关注哪些公司：Agent 从每家公司招聘页上的链接找到它在 Greenhouse、Lever 或 Ashby 上的职位板标识，写入 `sources.atsBoards`。同时询问是否开启 CareerOps 和 SimplifyJobs 两个需用户自选的来源；SimplifyJobs 一题会说明这份列表没有许可证、只实时读取、绝不再分发
+- 新增 `career-journal scan run [--dry-run] [--json] [--profile <path>]`。它只读地调用官方公开的 Greenhouse、Lever 和 Ashby 职位板接口，抓取用户关注的公司职位（启用并检测到 CareerOps 时也会使用它；只有用户主动开启并填写地址时才读取 SimplifyJobs），按季度、方向、学历、工作身份、明确不提供转正机会的写法和地点筛选，去重，把匹配度评为 high、medium 或 low，再把新职位记为线索。每个被排除的职位都有原因；`--dry-run` 不写入任何内容，也不调用任何模型
+- 新增 `career-journal queue list [--json]`，按匹配度、截止时间、地点排序和发布时间排列；新增 `queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>]` 记录核对结果，`skip` 会把线索改为已撤回，并记录一条带原因的事件
+- 新增可选的 `role-scan` 自动任务，在资料中的 `pace.scanTime` 运行。它在第 4 轮询问，用户同意后才创建，而且总是单独的定时任务，因为承载 `mail-sync` 和 `deadline-review` 的共享任务不接受其他任务；`doctor` 不要求它
+- 职位匹配度成为新的判断类型：先由 Jev 判断，再交给已配置的大语言模型，最后用职位名称规则兜底（主要方向为 high，次要方向为 medium，其余为 low），并记录为规则判断
+- CareerOps 桥接契约新增只读的 `scan` 操作
 - 新增中英文 `career-journal-apply` Skill，用于代填申请。它从队列中取 N 个已核实的岗位（`pace.batchSize`，默认 5），先查重、查资格，再把每个岗位交给一个子 Agent；子 Agent 只打开并使用自己的浏览器标签页。表单按用户自己的答案表填写，只上传用户选定的那一份简历；成绩单只在该栏必填时上传，工作描述每条一行、行首加“• ”。标签标题（🔑待登录、🤖待验证、❓待回答、👆待点击、✅待提交）显示哪个标签页需要用户；遇到新题时边投边问，并用 `profile answer` 保存；浏览器断开或标签组被关时，从网站保存的草稿继续
 - 代填流程新增投后核对：只有拿到确认邮件或网站“已收到”页面等证据，才通过 `event add --status-after applied` 把申请改为已投递；测评或面试邀请用 `task add --due-at --due-note --link` 记录
 - 新增中英文 `references/ats-tips.md`，介绍 Workday、Oracle HCM、iCIMS、Greenhouse、Ashby、Lever、Yello 和 SAP SuccessFactors 的通用填法；新增中英文 `references/fill-brief.md`，即交给每个填表子 Agent 的任务说明模板
-- 首次配置契约新增个人资料问答：核心配置通过 `doctor` 后，Agent 每轮最多问 4 个问题，每题给出选项并加“其他”，每题都可以跳过。从 1.x 升级时，先从已有申请、配置和简历推断，请用户确认后才补问新的内容
-- `career-journal` Skill 新增路由：“找岗位”（`scan run`、`queue verify`、`queue list`）、“投递”（新 Skill）和“个人资料”（`profile show|questions|set|answer|status`）
-- 第三方声明新增岗位扫描来源：默认使用 Greenhouse、Lever 和 Ashby 的官方招聘页接口；没有许可证的 SimplifyJobs 列表只作为用户自选开启的来源，在用户电脑上实时读取，不转发
 
 ### 变更
 
-- `AGENTS.md`、两份 README 和两份使用指南新增个人资料问答、岗位扫描、代填申请、固定硬规矩，以及个人资料的存放位置（`<home>/.career-journal/profile/`，不进仓库）
-- PRD 0.24 把非目标从“不自动批量投递”改为“不自动提交”：代填只在用户自己的浏览器里进行，登录、同意、签名和提交都由用户本人完成；并链接 2.0 设计
-- `scripts/check-release.mjs` 新增 `apply-skill` 检查：Skill 和两份参考文档必须同时有英文和简体中文版本，并具备语言链接、发现用的 frontmatter、全部硬规矩、全部五种标签标题、每个招聘系统的章节，以及 `career-journal` Skill 和 `AGENTS.md` 中的路由
-- 新增 `career-journal scan run [--dry-run] [--json] [--profile <path>]`。它读取求职档案，只读地调用官方公开的 Greenhouse、Lever 和 Ashby 职位板接口抓取用户列出的公司职位（启用并检测到 CareerOps 时也会使用它；只有用户主动开启并填写地址时才读取 SimplifyJobs），按季度、方向、学历、工作身份、明确不提供转正机会的写法和地点筛选，去重，把匹配度评为 high、medium 或 low，再把新职位记为线索。每个被排除的职位都有原因；`--dry-run` 不写入任何内容，也不调用任何模型
-- 新增 `career-journal queue list [--json]`，按匹配度、截止时间、地点排序和发布时间排列；新增 `queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>]` 记录核对结果，`skip` 会把线索改为已撤回，并记录一条带原因的事件
-- 新增可选的 `role-scan` 自动任务，默认使用档案中的 `pace.scanTime`；新用户配置时不会创建它，`doctor` 也不要求它
-- 职位匹配度成为新的判断类型：先由 Jev 判断，再交给已配置的大语言模型，最后用职位名称规则兜底（主要方向为 high，次要方向为 medium，其余为 low），并记录为规则判断
-- CareerOps 桥接契约新增只读的 `scan` 操作
-
-### 变更
-
+- `AGENTS.md` 和 `career-journal` Skill 中的首次配置契约新增个人资料问答：核心配置通过 `doctor` 后，Agent 每轮最多问 4 个问题，每题给出选项并加“其他”，每题都可以跳过。从 1.x 升级时，先从已有申请、配置和简历推断，请用户确认后才补问新的内容。Skill 新增路由：“找岗位”（`scan run`、`queue verify`、`queue list`）、“投递”（新 Skill）和“个人资料”（`profile show|questions|set|answer|status`），并说明扫描来源和单独的岗位扫描定时任务
+- `doctor` 新增 `profile` 和 `apply` 两行，只作为警告，因此没有个人资料也能通过核心配置；在问答第 1、2 轮完成且简历文件可读取之前，`apply` 显示 `incomplete`。在第 1 轮完成且至少设置一个扫描来源之前，`profile status` 把岗位扫描显示为 `incomplete`
 - 数据库结构版本 5 为 `applications` 新增可为空的 `source`、`source_id`、`location`、`posted_at`、`deadline_at`、`fit`、`fit_confidence`、`fit_note`、`verified_at` 和 `skip_reason` 列，并为 `(source, source_id)` 建立索引。升级时先运行 `career-journal migrate --dry-run`、创建备份，再运行 `career-journal migrate --apply`
+- 两份 README 和两份使用指南新增个人资料问答、岗位扫描及其来源、代填申请、固定硬规矩，以及个人资料的存放位置（`<home>/.career-journal/profile/`，不进仓库）
+- PRD 0.24 把非目标从“不自动批量投递”改为“不自动提交”：代填只在用户自己的浏览器里进行，登录、同意、签名和提交都由用户本人完成；并链接 2.0 设计
+- 第三方声明把所有岗位扫描来源合并在一节中说明：默认使用 Greenhouse、Lever 和 Ashby 的官方职位板接口；没有许可证的 SimplifyJobs 列表只作为用户自选开启的来源，在用户电脑上实时读取、不再分发；CareerOps 门户扫描也需用户自选开启
+- `scripts/check-release.mjs` 新增 `apply-skill` 检查：Skill 和两份参考文档必须同时有英文和简体中文版本，并具备语言链接、发现用的 frontmatter、全部硬规矩、全部五种标签标题、每个招聘系统的章节，以及 `career-journal` Skill 和 `AGENTS.md` 中的路由
 
 ### 修复
 
-- 无
+- `automation install` 和共享 heartbeat 的登记失败时，现在会撤销这次调度登记。之前回滚判断读取的是 `node:sqlite` 并不提供的 `inTransaction`，而不是 `isTransaction`，共享登记失败时事务会一直开着
 
 ### 安全
 
-- 求职资料文件以原子方式写入，只有本人可读写（文件 `0600`，目录 `0700`）；并发写入会排队，不会丢失答案；资料相关命令从不访问网络
+- 个人资料文件以原子方式写入，只有本人可读写（文件 `0600`，目录 `0700`）；并发写入会排队，不会丢失答案；资料相关命令从不访问网络
 - Git 现在忽略 `.career-journal/`，即使把工作区建在代码仓库里，也不会把个人资料提交进去
-- 代填 Skill 的硬规矩是固定文字，任何资料项或设置都不能关闭：不点任何写着 Submit* 的按钮；不登录、不注册账号、不输入密码或验证码；不勾同意、声明或仲裁条款，不代签名；不写作文；成绩单只在必填时上传；只用用户选定的那一份简历；不把个人资料写进仓库。任一语言缺少或改动任何一条，发布检查都会失败
-- 代填 Skill 及其参考文档中出现本机用户路径，或出现示例域名以外的邮箱地址时，发布检查也会失败
+- 代填 Skill 的硬规矩是固定文字，任何资料项或设置都不能关闭：不点任何写着 Submit* 的按钮；不登录、不注册账号、不输入密码或验证码；不勾同意、声明或仲裁条款，不代签名；不写作文；成绩单只在必填时上传；只用用户选定的那一份简历；工作描述每条一行；不把个人资料写进仓库。`profile questions` 逐字展示同样的八条规矩；任一语言缺少或改动任何一条，发布检查都会失败
+- 新增 `personal-data` 发布检查：任何被跟踪的文本文件中出现示例域名以外的邮箱地址、555-01xx 以外的美国电话号码，或个人的 `/Users/<name>/`、`/home/<name>/`、`C:\Users\<name>\` 路径时，检查都会失败，报告中的值会做遮挡处理。代填 Skill 及其参考文档同样只能使用示例域名和路径
 
 ## [1.1.0] - 2026-10-01
 
