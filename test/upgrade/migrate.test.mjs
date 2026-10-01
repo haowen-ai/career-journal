@@ -55,7 +55,7 @@ test('dry-run inspects an existing database without changing its journal mode', 
 
 test('migration apply is idempotent', async () => withHome(async (home) => {
   await setup(home, { timezone: 'UTC', email: { mode: 'skip' } });
-  assert.deepEqual((await migrateHome(home)).applied, [1, 2, 3]);
+  assert.deepEqual((await migrateHome(home)).applied, [1, 2, 3, 4]);
   assert.deepEqual((await migrateHome(home)).applied, []);
 }));
 
@@ -69,7 +69,7 @@ test('migration upgrades and preserves an alpha.5 legacy database in place', asy
   const report = await migrateHome(home);
 
   assert.equal(report.database, database);
-  assert.deepEqual(report.applied, [2, 3]);
+  assert.deepEqual(report.applied, [2, 3, 4]);
   const reopened = openDatabase(database);
   assert.equal(reopened.prepare("SELECT company FROM applications WHERE id = 'legacy'").get().company, 'Legacy Co');
   assert.ok(reopened.prepare('PRAGMA table_info(email_accounts)').all().some((column) => column.name === 'config_json'));

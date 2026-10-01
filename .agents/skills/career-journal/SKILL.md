@@ -31,6 +31,7 @@ Manual EML is a one-off fallback. It does not replace daily access or satisfy se
 ## Route the request
 
 - Application, event, deadline, status, or dashboard: use the CLI
+- Online assessment, coding test, or interview invitation: record it with `task add`, including the deadline from the message (`--due-at` with a UTC offset, `--due-note` for how it was computed) and the invitation URL (`--link`); mark it with `task done` once completed
 - Resume or cover letter: read `careerops-materials`; verified generation requires CareerOps plus built-in and personal rules
 - Rendered PDF inspection: use the host PDF capability when available
 - DOCX work: use the host Documents capability when available

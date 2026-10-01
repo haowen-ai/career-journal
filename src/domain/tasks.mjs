@@ -4,9 +4,9 @@ export const taskKinds = Object.freeze(['assessment', 'interview', 'other']);
 export const taskStatuses = Object.freeze(['open', 'done']);
 
 const isoWithOffset = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(Z|[+-](\d{2}):(\d{2}))$/;
-const comparedFields = ['kind', 'title', 'platform', 'dueAt', 'dueNote', 'status', 'note'];
+const comparedFields = ['kind', 'title', 'platform', 'link', 'dueAt', 'dueNote', 'status', 'note'];
 
-const taskSelect = `SELECT t.id, t.application_id applicationId, a.company, a.role, t.kind, t.title, t.platform,
+const taskSelect = `SELECT t.id, t.application_id applicationId, a.company, a.role, t.kind, t.title, t.platform, t.link,
   t.due_at dueAt, t.due_note dueNote, t.status, t.note, t.source_json source, t.created_at createdAt, t.updated_at updatedAt
   FROM application_tasks t JOIN applications a ON a.id = t.application_id`;
 
@@ -22,6 +22,17 @@ function text(value, name) {
 
 function optionalText(value, name) {
   return value === null ? null : text(value, name) || null;
+}
+
+export function normalizeLink(value) {
+  if (value == null) return null;
+  if (typeof value !== 'string') throw new Error('task.link must be text');
+  const candidate = value.trim();
+  if (!candidate) return null;
+  let url;
+  try { url = new URL(candidate); } catch { throw new Error('task.link must be an http or https URL'); }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('task.link must be an http or https URL');
+  return url.href;
 }
 
 function canonical(value) {
@@ -113,6 +124,7 @@ export function upsertTask(db, input, now = new Date().toISOString()) {
     kind,
     title,
     platform: input.platform === undefined ? (existing?.platform ?? null) : optionalText(input.platform, 'task.platform'),
+    link: input.link === undefined ? (existing?.link ?? null) : normalizeLink(input.link),
     dueAt: input.dueAt === undefined ? (existing?.dueAt ?? null) : normalizeDueAt(input.dueAt),
     dueNote: input.dueNote === undefined ? (existing?.dueNote ?? '') : text(input.dueNote, 'task.dueNote'),
     status: input.status === undefined ? (existing?.status ?? 'open') : taskStatus(input.status),
@@ -123,14 +135,14 @@ export function upsertTask(db, input, now = new Date().toISOString()) {
     const unchanged = comparedFields.every((field) => existing[field] === next[field])
       && JSON.stringify(canonical(existing.source)) === JSON.stringify(next.source);
     if (unchanged) return existing;
-    db.prepare(`UPDATE application_tasks SET kind = ?, title = ?, platform = ?, due_at = ?, due_note = ?, status = ?,
+    db.prepare(`UPDATE application_tasks SET kind = ?, title = ?, platform = ?, link = ?, due_at = ?, due_note = ?, status = ?,
       note = ?, source_json = ?, updated_at = ? WHERE id = ?`)
-      .run(next.kind, next.title, next.platform, next.dueAt, next.dueNote, next.status, next.note, JSON.stringify(next.source), now, id);
+      .run(next.kind, next.title, next.platform, next.link, next.dueAt, next.dueNote, next.status, next.note, JSON.stringify(next.source), now, id);
   } else {
     db.prepare(`INSERT INTO application_tasks
-      (id, application_id, kind, title, platform, due_at, due_note, status, note, source_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, applicationId, next.kind, next.title, next.platform, next.dueAt, next.dueNote, next.status, next.note, JSON.stringify(next.source), now, now);
+      (id, application_id, kind, title, platform, link, due_at, due_note, status, note, source_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, applicationId, next.kind, next.title, next.platform, next.link, next.dueAt, next.dueNote, next.status, next.note, JSON.stringify(next.source), now, now);
   }
   return getTask(db, id);
 }

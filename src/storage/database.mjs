@@ -4,8 +4,9 @@ import path from 'node:path';
 import { migration001 } from './migrations/001-initial.mjs';
 import { migration002 } from './migrations/002-email-account-settings.mjs';
 import { migration003 } from './migrations/003-application-tasks.mjs';
+import { migration004 } from './migrations/004-task-links.mjs';
 
-export const schemaMigrations = [migration001, migration002, migration003];
+export const schemaMigrations = [migration001, migration002, migration003, migration004];
 
 export function openDatabase(file) {
   const resolved = file === ':memory:' ? file : path.resolve(file);

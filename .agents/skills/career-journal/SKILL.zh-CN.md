@@ -26,6 +26,7 @@
 ## 请求路由
 
 - Application、事件、截止日期、状态或 Dashboard：使用 CLI
+- 在线测评、编程测试或面试邀请：用 `task add` 记录，带上邮件里的截止时间（`--due-at`，须含时区偏移；`--due-note` 写明如何推算）和邀请链接（`--link`）；完成后用 `task done` 标记
 - Resume 或 Cover Letter：读取 `careerops-materials`；经验证的生成流程需要 CareerOps、内置规则和个人规则
 - 渲染后的 PDF 检查：宿主支持时使用 PDF 能力
 - DOCX 工作：宿主支持时使用 Documents 能力
