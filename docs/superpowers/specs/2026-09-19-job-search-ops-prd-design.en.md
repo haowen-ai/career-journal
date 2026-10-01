@@ -3,12 +3,14 @@
 [English](2026-09-19-job-search-ops-prd-design.en.md) | [简体中文](2026-09-19-job-search-ops-prd-design.md)
 
 **Status:** Review Draft
-**Version:** 0.23
-**Date:** 2026-09-19
+**Version:** 0.24
+**Date:** 2026-10-01
 **Product:** CAREER JOURNAL
 **Delivery:** Open-source GitHub project with an Agent-managed edition and a provider-neutral LLM API edition
 
-**Revision focus:** Agent-managed onboarding first refreshes or safely replaces a stale local checkout, then discovers mail accounts already signed in on the computer and asks only which one or more are used for job search. If no account is available, the user signs in to a mail app and the Agent resumes. Jev never blocks core onboarding: an existing configured capability is reused, otherwise the current Agent reviews ambiguous candidates without a model Base URL or another API key. After core onboarding passes `doctor`, the Agent makes one optional Jev offer. A user who declines, skips it, or has no access stays on `host-agent`; credentials never enter chat or an Agent prompt. macOS Agent installations can store Jev keys in Keychain and retain only a `keychain:SERVICE:ACCOUNT` reference. Standalone CLI/API mode continues to support IMAPS and OpenAI-compatible services.
+**Revision focus:** Version 0.24 aligns this PRD with the [CAREER JOURNAL 2.0 design](2026-10-01-career-journal-2.0-design.en.md). After core onboarding passes `doctor`, the Agent runs a short profile interview (at most 4 questions per round, each with options, every question skippable); upgrades infer from existing data first and ask the user to confirm. Profile-driven role scans fill a verified queue, and the `career-journal-apply` Skill fills application forms in the user's own browser and stops before submit. The non-goal changes from no automatic bulk applying to no automatic submission: assisted filling happens only in the user's own browser, and the user signs in, consents, signs, and submits.
+
+**Previous revision (0.23):** Agent-managed onboarding first refreshes or safely replaces a stale local checkout, then discovers mail accounts already signed in on the computer and asks only which one or more are used for job search. If no account is available, the user signs in to a mail app and the Agent resumes. Jev never blocks core onboarding: an existing configured capability is reused, otherwise the current Agent reviews ambiguous candidates without a model Base URL or another API key. After core onboarding passes `doctor`, the Agent makes one optional Jev offer. A user who declines, skips it, or has no access stays on `host-agent`; credentials never enter chat or an Agent prompt. macOS Agent installations can store Jev keys in Keychain and retain only a `keychain:SERVICE:ACCOUNT` reference. Standalone CLI/API mode continues to support IMAPS and OpenAI-compatible services.
 
 ## 1. Product overview
 
@@ -49,9 +51,10 @@ Job seekers commonly split their work across documents, email, recruiting sites,
 - Compose CareerOps, PDF, Documents, email, Wiki, and other capabilities through independent Skills or adapters
 - Keep primary data local and credentials separate from job-search records
 
-### 3.2 Non-goals for the first release
+### 3.2 Non-goals
 
-- Bulk auto-application or bypassing recruiting-site workflows
+- Automatic submission or bypassing recruiting-site workflows. Assisted filling happens only in the user's own browser, on the user's behalf; the user signs in, enters verification codes, ticks consent boxes, signs, and clicks submit, and no CAPTCHA is bypassed
+- Writing essays, cover-letter prose, or why-us answers for the user instead of organising the user's own words
 - Sending email or contacting recruiters without explicit user authorization
 - Completing assessments, conducting interviews, or supplying real-time hiring answers
 - Inferring rejection from prolonged silence
@@ -198,6 +201,7 @@ After clone, the user may ask Codex to initialize CAREER JOURNAL. The system mus
 12. Trigger each job with its matching ID; the mail task reads every selected account and advances each cursor only after the local transaction commits
 13. Run `career-journal doctor`; any missing mailbox proof, successful sync, scheduler probe, or matching run leaves setup incomplete
 14. Create or import the first application
+15. Run the profile interview from the [2.0 design](2026-10-01-career-journal-2.0-design.en.md): at most 4 questions per round, each with options plus "Other", every question skippable, and resume facts pre-filled for confirmation. When upgrading a workspace without a profile, infer from existing applications, configuration, and the resume first, confirm every inferred value, and ask only what is missing. The profile stays in the user's data home, never in the repository
 
 ### 9.2 API edition
 
@@ -312,6 +316,13 @@ The CLI and local dashboard expose filters, timelines, evidence, next actions, a
 - Release validation includes a remote GitHub fresh-clone smoke test and an upgrade test from the previous stable version
 - Schema and configuration changes have versioned, idempotent migrations, a true read-only dry run, backup, and rollback behavior
 - Standard Issue templates cover install, configuration, automation, materials, and upgrade problems
+
+### 11.8 Profile, role scans, and assisted applying
+
+- The profile (`profile.json`) and answers sheet (`answers.md`) live in `<home>/.career-journal/profile/`; resumes and transcripts are referenced by path. The repository ships only blank templates and the question list
+- Role scans read official public job-board APIs by default; other sources are opt-in. Filters come only from the profile, duplicates are applied to once, and every skipped role records a reason
+- The `career-journal-apply` Skill fills one role per sub-agent in its own browser tab, from the answers sheet and the one resume the user chose, and stops before submit. Its hard rules are fixed text: never click any Submit*-labelled button; never sign in, create accounts, or type passwords or codes; never tick consent, attestation, or arbitration boxes or sign; never write essays; upload a transcript only when the field is required; enter work descriptions one bullet per line prefixed "• "; never put personal data into the repository
+- An application moves to `applied` only with evidence such as a confirmation email or the site's received page; invitations become tasks with a deadline and link
 
 ## 12. Data model
 
@@ -470,3 +481,4 @@ The following do not block review: first production model adapters, order of add
 - TypeSafe Jev launch and early-access pricing: <https://typesafe.ai/blog/introducing-system-one-models-and-jev>
 - Semantic Versioning 2.0.0: <https://semver.org/>
 - Keep a Changelog: <https://keepachangelog.com/>
+- CAREER JOURNAL 2.0 design: [2026-10-01-career-journal-2.0-design.en.md](2026-10-01-career-journal-2.0-design.en.md)

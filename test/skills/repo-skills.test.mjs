@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 const files = [
   '.agents/skills/career-journal/SKILL.md',
   '.agents/skills/careerops-materials/SKILL.md',
+  '.agents/skills/career-journal-apply/SKILL.md',
 ];
 
 test('repo skills have portable discovery frontmatter', async () => {
@@ -107,4 +108,89 @@ test('example config represents pending live IMAPS onboarding without mailbox cr
   assert.equal(config.email.accounts[0].readOnly, true);
   assert.equal(config.automation.setupState, 'pending-registration');
   assert.equal(JSON.stringify(config.email).includes('secret'), false);
+});
+
+test('apply skill keeps fixed hard rules, own-tab batches, and evidence-gated status in both languages', async () => {
+  const root = '.agents/skills/career-journal-apply';
+  const [english, chinese, briefEn, briefZh, tipsEn, tipsZh] = await Promise.all([
+    'SKILL.md', 'SKILL.zh-CN.md', 'references/fill-brief.md', 'references/fill-brief.zh-CN.md', 'references/ats-tips.md', 'references/ats-tips.zh-CN.md',
+  ].map((file) => readFile(`${root}/${file}`, 'utf8')));
+
+  assert.match(english, /^---\nname: career-journal-apply\n/);
+  assert.match(english, /\[简体中文\]\(SKILL\.zh-CN\.md\)/);
+  assert.match(chinese, /\[English\]\(SKILL\.md\)/);
+  for (const text of [english, briefEn]) {
+    assert.match(text, /Never click any button labelled Submit\*/);
+    assert.match(text, /Never sign in, create accounts, or type passwords or verification codes/);
+    assert.match(text, /Never tick consent, attestation, certification, or arbitration boxes, and never sign/);
+    assert.match(text, /Never write essays[^\n]*Only organise the user's own words/);
+    assert.match(text, /transcript only when the form makes a transcript a required field/);
+    assert.match(text, /Upload exactly one resume/);
+    assert.match(text, /one bullet per line, each line starting with "• "/);
+    assert.match(text, /Never put personal data into the repository/);
+  }
+  for (const text of [chinese, briefZh]) {
+    assert.match(text, /不点任何写着 Submit\*/);
+    assert.match(text, /不替用户登录、注册账号，不输入密码或验证码/);
+    assert.match(text, /不勾同意、声明、认证或仲裁条款，不代签名/);
+    assert.match(text, /不写作文[^\n]*只整理用户自己说的话/);
+    assert.match(text, /成绩单只在表单把成绩单设为必填项时上传/);
+    assert.match(text, /只上传一份简历/);
+    assert.match(text, /每条一行，行首加“• ”/);
+    assert.match(text, /不把个人资料写进仓库/);
+  }
+  for (const text of [english, chinese]) {
+    assert.match(text, /profile status --json/);
+    assert.match(text, /pace\.batchSize/);
+    assert.match(text, /queue verify --id <application> --result ok\|skip --reason/);
+    assert.match(text, /application list --json/);
+    assert.match(text, /profile answer --question/);
+    assert.match(text, /event add [^\n]*--status-after applied/);
+    assert.match(text, /task add [^\n]*--due-at[^\n]*--due-note[^\n]*--link/);
+    for (const mark of ['🔑', '🤖', '❓', '👆', '✅']) assert.ok(text.includes(mark), `missing tab title ${mark}`);
+  }
+  assert.match(english, /own new tab and uses only that tab/);
+  assert.match(chinese, /自己新开一个标签页，只用这一个标签页/);
+  assert.match(english, /at most 4 at a time/);
+  assert.match(chinese, /每次最多问用户 4 个/);
+  assert.match(english, /Never reload a half-filled page/);
+  assert.match(chinese, /不得为了解决问题而刷新填了一半的页面/);
+
+  for (const tips of [tipsEn, tipsZh]) {
+    for (const name of ['Workday', 'Oracle HCM', 'iCIMS', 'Greenhouse', 'Ashby', 'Lever', 'Yello', 'SuccessFactors']) {
+      assert.match(tips, new RegExp(`^## [^\\n]*${name}`, 'm'), `missing ${name}`);
+    }
+    assert.match(tips, /button\[aria-haspopup\][^\n]*\[role=option\]/);
+    assert.match(tips, /MessageChannel/);
+    assert.match(tips, /root\.stateNode\.current !== root/);
+    assert.match(tips, /iframe/);
+  }
+  for (const text of [english, chinese, briefEn, briefZh, tipsEn, tipsZh]) {
+    assert.equal(text.includes('/Users/'), false);
+    assert.equal(/[A-Z0-9._%+-]+@(?!example\.com)[A-Z0-9.-]+\.[A-Z]{2,}/i.test(text), false);
+  }
+});
+
+test('orchestrator runs the profile interview after doctor and routes roles, apply, and profile requests', async () => {
+  const [english, chinese, agentInstructions] = await Promise.all([
+    readFile('.agents/skills/career-journal/SKILL.md', 'utf8'),
+    readFile('.agents/skills/career-journal/SKILL.zh-CN.md', 'utf8'),
+    readFile('AGENTS.md', 'utf8'),
+  ]);
+  for (const text of [english, agentInstructions]) {
+    assert.match(text, /profile interview[^\n]*(?:after|passes) [^\n]*doctor|after core onboarding passes `doctor`[^\n]*profile interview/i);
+    assert.match(text, /at most 4 questions per round/i);
+    assert.match(text, /options plus "Other"/);
+    assert.match(text, /infer[^\n]*(?:first|existing)[^\n]*confirm/i);
+    assert.match(text, /career-journal-apply/);
+  }
+  assert.match(english, /Find roles[^\n]*`scan run`[^\n]*`queue verify/);
+  assert.match(english, /Apply, start applying[^\n]*career-journal-apply/);
+  assert.match(english, /Profile, preferences, or form answers[^\n]*profile show\|questions\|set\|answer\|status/);
+  assert.match(chinese, /`doctor`[^\n]*个人资料问答/);
+  assert.match(chinese, /每轮最多问 4 个问题/);
+  assert.match(chinese, /先推断，再确认/);
+  assert.match(chinese, /找岗位[^\n]*`scan run`[^\n]*`queue verify/);
+  assert.match(chinese, /投递、开始投[^\n]*career-journal-apply/);
+  assert.match(chinese, /个人资料、偏好或表单答案[^\n]*profile show\|questions\|set\|answer\|status/);
 });

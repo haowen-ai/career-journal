@@ -16,6 +16,18 @@
 ### 变更
 
 - `doctor` 新增 `profile` 和 `apply` 两行，只作为警告，因此没有求职资料也能通过核心配置；在问答第 1、2 轮完成且简历文件可读取之前，`apply` 显示 `incomplete`
+- 新增中英文 `career-journal-apply` Skill，用于代填申请。它从队列中取 N 个已核实的岗位（`pace.batchSize`，默认 5），先查重、查资格，再把每个岗位交给一个子 Agent；子 Agent 只打开并使用自己的浏览器标签页。表单按用户自己的答案表填写，只上传用户选定的那一份简历；成绩单只在该栏必填时上传，工作描述每条一行、行首加“• ”。标签标题（🔑待登录、🤖待验证、❓待回答、👆待点击、✅待提交）显示哪个标签页需要用户；遇到新题时边投边问，并用 `profile answer` 保存；浏览器断开或标签组被关时，从网站保存的草稿继续
+- 代填流程新增投后核对：只有拿到确认邮件或网站“已收到”页面等证据，才通过 `event add --status-after applied` 把申请改为已投递；测评或面试邀请用 `task add --due-at --due-note --link` 记录
+- 新增中英文 `references/ats-tips.md`，介绍 Workday、Oracle HCM、iCIMS、Greenhouse、Ashby、Lever、Yello 和 SAP SuccessFactors 的通用填法；新增中英文 `references/fill-brief.md`，即交给每个填表子 Agent 的任务说明模板
+- 首次配置契约新增个人资料问答：核心配置通过 `doctor` 后，Agent 每轮最多问 4 个问题，每题给出选项并加“其他”，每题都可以跳过。从 1.x 升级时，先从已有申请、配置和简历推断，请用户确认后才补问新的内容
+- `career-journal` Skill 新增路由：“找岗位”（`scan run`、`queue verify`、`queue list`）、“投递”（新 Skill）和“个人资料”（`profile show|questions|set|answer|status`）
+- 第三方声明新增岗位扫描来源：默认使用 Greenhouse、Lever 和 Ashby 的官方招聘页接口；没有许可证的 SimplifyJobs 列表只作为用户自选开启的来源，在用户电脑上实时读取，不转发
+
+### 变更
+
+- `AGENTS.md`、两份 README 和两份使用指南新增个人资料问答、岗位扫描、代填申请、固定硬规矩，以及个人资料的存放位置（`<home>/.career-journal/profile/`，不进仓库）
+- PRD 0.24 把非目标从“不自动批量投递”改为“不自动提交”：代填只在用户自己的浏览器里进行，登录、同意、签名和提交都由用户本人完成；并链接 2.0 设计
+- `scripts/check-release.mjs` 新增 `apply-skill` 检查：Skill 和两份参考文档必须同时有英文和简体中文版本，并具备语言链接、发现用的 frontmatter、全部硬规矩、全部五种标签标题、每个招聘系统的章节，以及 `career-journal` Skill 和 `AGENTS.md` 中的路由
 
 ### 修复
 
@@ -25,6 +37,8 @@
 
 - 求职资料文件以原子方式写入，只有本人可读写（文件 `0600`，目录 `0700`）；并发写入会排队，不会丢失答案；资料相关命令从不访问网络
 - Git 现在忽略 `.career-journal/`，即使把工作区建在代码仓库里，也不会把个人资料提交进去
+- 代填 Skill 的硬规矩是固定文字，任何资料项或设置都不能关闭：不点任何写着 Submit* 的按钮；不登录、不注册账号、不输入密码或验证码；不勾同意、声明或仲裁条款，不代签名；不写作文；成绩单只在必填时上传；只用用户选定的那一份简历；不把个人资料写进仓库。任一语言缺少或改动任何一条，发布检查都会失败
+- 代填 Skill 及其参考文档中出现本机用户路径，或出现示例域名以外的邮箱地址时，发布检查也会失败
 
 ## [1.1.0] - 2026-10-01
 
