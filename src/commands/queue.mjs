@@ -1,12 +1,14 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { recordEvent } from '../domain/events.mjs';
 import { normalizeDueAt } from '../domain/tasks.mjs';
 import { openHomeDatabase } from '../runtime/home.mjs';
 import { rankLocation } from '../scan/filter.mjs';
+import { scoreFit } from '../scan/fit.mjs';
 import { loadScanProfile } from '../scan/profile-input.mjs';
+import { configuredDecisionAdapters } from './email.mjs';
 import { profileOption } from './scan.mjs';
 
-const usage = 'Usage: career-journal queue list [--json] [--profile <path>] | queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>]';
+const usage = 'Usage: career-journal queue list [--json] [--profile <path>] | queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>] | queue score [--all] [--limit <n>] [--dry-run] [--json] [--profile <path>]';
 const FIT_ORDER = Object.freeze({ high: 0, medium: 1, low: 2 });
 
 const queueSelect = `SELECT id, company, role, job_url jobUrl, status, source, source_id sourceId, location,
@@ -88,6 +90,62 @@ export function verifyQueuedRole(db, input, now = new Date().toISOString()) {
   return db.prepare(`${queueSelect} WHERE id = ?`).get(id);
 }
 
+function positiveLimit(value) {
+  if (value === undefined) return null;
+  const limit = Number(value);
+  if (typeof value !== 'string' || !Number.isInteger(limit) || limit < 1 || value.trim() !== String(limit)) throw new Error('--limit must be a positive whole number');
+  return limit;
+}
+
+// Scores fit for queued roles that have none, such as leads recorded before 2.0 or added by hand, with the
+// same Jev → structured LLM → rule chain as a scan. --all rescores every queued role. A dry run uses the
+// local rule only and writes nothing.
+export async function scoreQueuedRoles(db, profile, adapters = {}, { all = false, limit = null, dryRun = false, now = new Date().toISOString() } = {}) {
+  const rows = db.prepare(`${queueSelect} WHERE status IN ('lead', 'prepared') AND skip_reason IS NULL${all ? '' : ' AND fit IS NULL'}
+    ORDER BY created_at, id`).all();
+  const selected = limit ? rows.slice(0, limit) : rows;
+  const results = [];
+  for (const row of selected) {
+    const role = {
+      source: row.source ?? 'journal',
+      sourceId: row.sourceId ?? row.id,
+      company: row.company,
+      title: row.role,
+      locations: row.location ? row.location.split('; ') : [],
+      url: row.jobUrl,
+      categories: [],
+      description: '',
+    };
+    const fit = await scoreFit(role, profile, adapters, { rulesOnly: dryRun });
+    if (!dryRun) {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        db.prepare('UPDATE applications SET fit = ?, fit_confidence = ?, fit_note = ?, updated_at = ? WHERE id = ?')
+          .run(fit.fit, fit.confidence, fit.note, now, row.id);
+        const traceId = `fit-score-${createHash('sha256').update(`${row.id}\0${now}`).digest('hex').slice(0, 16)}`;
+        db.prepare(`INSERT OR REPLACE INTO decision_traces
+          (id, application_id, engine, mode, decision_json, confidence, applied, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(traceId, row.id, fit.engine, 'role-fit', JSON.stringify({
+            fit: fit.fit,
+            confidence: fit.confidence,
+            ruleBased: fit.ruleBased,
+            note: fit.note,
+            jevAttempted: fit.jevAttempted ?? false,
+            jevOutcome: fit.jevOutcome ?? 'not-enabled',
+            rescored: true,
+          }), fit.confidence, fit.applied ? 1 : 0, now);
+        db.exec('COMMIT');
+      } catch (error) {
+        if (db.isTransaction) db.exec('ROLLBACK');
+        throw error;
+      }
+    }
+    results.push({ id: row.id, company: row.company, role: row.role, previousFit: row.fit ?? null, fit: fit.fit, fitConfidence: fit.confidence, fitNote: fit.note });
+  }
+  return { dryRun, remaining: rows.length - selected.length, scored: results.length, results };
+}
+
 async function queueProfile(home, parsed) {
   const explicit = profileOption(parsed);
   try { return await loadScanProfile(home, { path: explicit }); }
@@ -97,12 +155,25 @@ async function queueProfile(home, parsed) {
   }
 }
 
-export async function queueCommand(parsed, io) {
-  if (!['list', 'verify'].includes(parsed.subcommand)) throw new Error(usage);
+export async function queueCommand(parsed, io, runtime = {}) {
+  if (!['list', 'verify', 'score'].includes(parsed.subcommand)) throw new Error(usage);
   const home = parsed.options.home ?? process.cwd();
-  const profile = parsed.subcommand === 'list' ? await queueProfile(home, parsed) : null;
+  const profile = parsed.subcommand === 'verify' ? null : await queueProfile(home, parsed);
+  if (parsed.subcommand === 'score' && !profile) throw new Error('queue score needs the search profile; complete the profile interview first, or pass --profile <path>.');
+  const limit = parsed.subcommand === 'score' ? positiveLimit(parsed.options.limit) : null;
   const context = await openHomeDatabase(home);
   try {
+    if (parsed.subcommand === 'score') {
+      const dryRun = Boolean(parsed.options['dry-run']);
+      const adapters = dryRun ? {} : configuredDecisionAdapters(context.config, runtime.fetch ?? globalThis.fetch);
+      const summary = await scoreQueuedRoles(context.db, profile, adapters, { all: Boolean(parsed.options.all), limit, dryRun });
+      if (parsed.options.json) io.out(JSON.stringify(summary, null, 2));
+      else {
+        for (const item of summary.results) io.out([item.fit ?? '-', item.company, item.role, item.fitNote].join('\t'));
+        io.out(`scored ${summary.scored}${summary.remaining ? `; ${summary.remaining} left (raise --limit or run again)` : ''}${summary.dryRun ? ' (dry run, nothing written)' : ''}`);
+      }
+      return 0;
+    }
     if (parsed.subcommand === 'list') {
       const items = listQueue(context.db, profile);
       if (parsed.options.json) io.out(JSON.stringify(items, null, 2));
