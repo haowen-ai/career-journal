@@ -49,6 +49,19 @@ test('serves the bilingual career-journal dashboard shell and rejects path trave
       assert.match(html, new RegExp(`data-testid="filter-${filter}" data-filter="${filter}"`));
     }
     assert.doesNotMatch(html, /<article class="stat-card/);
+    // The sixth card counts open assessment and interview steps. It has no list
+    // filter: it scrolls to its section and focuses the heading.
+    assert.equal(html.match(/<button class="stat-card/g).length, 6);
+    const tasksCard = html.match(/<button class="stat-card stat-tasks" type="button" data-scroll-target="tasks-heading" data-testid="stat-card-tasks" aria-label="[^"]+">/);
+    assert.ok(tasksCard, 'tasks card button');
+    assert.doesNotMatch(tasksCard[0], /data-stat=/);
+    assert.match(html, /<span class="semantic-dot dot-tasks" aria-hidden="true"><\/span><span data-i18n="statTasks">/);
+    assert.match(html, /<strong id="stat-tasks" data-testid="stat-tasks">/);
+    assert.match(html, /<span class="stat-note" id="stat-tasks-hint" data-testid="stat-tasks-hint">/);
+    assert.match(html, /<h2 id="tasks-heading" tabindex="-1" data-i18n="tasksTitle">/);
+    for (const [, target] of html.matchAll(/data-scroll-target="([^"]+)"/g)) assert.match(html, new RegExp(`id="${target}"`));
+    assert.ok(html.indexOf('data-testid="stat-card-preparing"') < html.indexOf('data-testid="stat-card-tasks"'));
+    assert.ok(html.indexOf('data-testid="stat-card-tasks"') < html.indexOf('data-testid="to-apply-section"'));
     assert.match(html, /data-i18n="filterSent"/);
     assert.ok(html.indexOf('data-testid="filter-all"') < html.indexOf('data-testid="filter-sent"'));
     assert.ok(html.indexOf('data-testid="filter-sent"') < html.indexOf('data-testid="filter-waiting"'));
@@ -84,6 +97,15 @@ test('serves the bilingual career-journal dashboard shell and rejects path trave
     assert.ok(html.indexOf('class="stats"') < html.indexOf('data-testid="tasks-section"'));
     assert.ok(html.indexOf('data-testid="tasks-section"') < html.indexOf('id="applications-heading"'));
     assert.equal((await fetch(`${baseUrl}/dashboard-model.js`)).status, 200);
+    // Both copy tables carry the tasks card text, and every model helper the
+    // page imports exists.
+    const app = await (await fetch(`${baseUrl}/app.js`)).text();
+    assert.match(app, /statTasks: 'Assessments & interviews', statTasksLabel: \(count, hint\) =>/);
+    assert.match(app, /statTasks: '测评与面试准备', statTasksLabel: \(count, hint\) =>/);
+    const model = await import('../../web/dashboard-model.js');
+    const imported = app.match(/import \{([^}]+)\} from '\.\/dashboard-model\.js'/)[1].split(',').map((name) => name.trim()).filter(Boolean);
+    assert.ok(imported.includes('taskCardSummary') && imported.includes('taskCardHint'));
+    for (const name of imported) assert.ok(name in model, `dashboard-model.js exports ${name}`);
     const icon = await fetch(`${baseUrl}/icons/search.svg`);
     assert.equal(icon.status, 200);
     assert.match(icon.headers.get('content-type'), /image\/svg\+xml/);
