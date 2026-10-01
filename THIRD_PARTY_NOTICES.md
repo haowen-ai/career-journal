@@ -23,19 +23,27 @@ No career-ops source code is copied into this repository. Users install it separ
 
 No TypeSafe Agent Skill source code is copied into this repository. The tracker continues to work without Jev. When Jev is enabled, it evaluates every recruiting email first; configured language models, local rules, and manual review provide the fallback path.
 
-## SimplifyJobs listings
+## Job-posting sources for role scans
 
-- Project: [SimplifyJobs](https://github.com/SimplifyJobs) internship and new-grad lists
+CAREER JOURNAL 2.0 role scans read job postings only on the user's machine, at scan time, for the user's own search. The project bundles no job-posting data, keeps none in the repository, and redistributes none. Only the normalised leads the user keeps are stored, in the user's own local database.
+
+### Greenhouse, Lever, and Ashby public job-board APIs (default)
+
+- Endpoints: the public job-board APIs at `boards-api.greenhouse.io`, `api.lever.co`, and `api.ashbyhq.com`
+- Use here: read-only, unauthenticated requests for the boards of the companies the user lists in their profile. Nothing is submitted to these services and no job data is redistributed
+- Trademarks: Greenhouse, Lever, and Ashby are trademarks of their owners and are named only to describe compatibility. These vendors are not affiliated with this project and do not endorse it
+
+### SimplifyJobs lists (opt-in)
+
+- Project: the public internship and new-grad lists published by [SimplifyJobs](https://github.com/SimplifyJobs)
 - License: none published
-- Use here: an opt-in role-scan source only. It is off by default; the user turns it on and supplies the list URL in their own profile, and the list is fetched live on the user's machine at scan time
+- Use here: an opt-in role-scan source only. It is off by default; the user turns it on and supplies the list URL in their own profile, and the list is read live on the user's machine at scan time
 
-No SimplifyJobs data is bundled, cached in this repository, mirrored, or redistributed. Only the normalised leads the user keeps are stored, in the user's own local database.
+No SimplifyJobs data is bundled, cached in this repository, mirrored, or redistributed.
 
-## Greenhouse, Lever, and Ashby public job-board APIs
+### CareerOps portal scans (opt-in)
 
-- Endpoints: `boards-api.greenhouse.io`, `api.lever.co`, and `api.ashbyhq.com` public job-board APIs
-- Use here: read-only, unauthenticated requests for the company boards the user lists in their profile. Nothing is submitted to these services and no job data is redistributed
-- Trademarks: Greenhouse, Lever, and Ashby are trademarks of their owners and are named only to describe compatibility
+CareerOps portal scans run through the career-ops integration described above, under its MIT licence and attribution, only when the user turns them on and CareerOps is installed.
 
 ## Tabler Icons
 
@@ -46,11 +54,3 @@ No SimplifyJobs data is bundled, cached in this repository, mirrored, or redistr
 - Use here: the dashboard's local arrow, clock, search, language, expand, and collapse SVG icons
 
 The selected icons are stored locally so the dashboard remains usable without a CDN connection.
-
-## Job-posting sources for role scans
-
-CAREER JOURNAL 2.0 role scans read job postings only on the user's machine, at scan time, for the user's own search. The project bundles no job-posting data, keeps none in the repository, and redistributes none.
-
-- **Official ATS job-board APIs (default):** the public job-board endpoints that Greenhouse, Lever, and Ashby publish for each employer's postings. Scans read only the boards of companies the user lists. These vendors are not affiliated with this project and do not endorse it
-- **SimplifyJobs lists (opt-in):** the public internship and new-grad lists published by [SimplifyJobs](https://github.com/SimplifyJobs). They carry no open-source licence, so the source stays off until the user enables it and configures the list URL. When enabled, the list is read live on the user's machine; nothing from it is bundled, cached in the repository, or redistributed, and only the normalised leads the user keeps are stored in the user's own database
-- **CareerOps portal scans (opt-in):** run through the existing CareerOps integration described above, under its MIT licence and attribution

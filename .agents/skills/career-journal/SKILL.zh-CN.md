@@ -16,7 +16,7 @@
 7. 将同一个 Codex automation ID，或用 `--driver claude-code` 将同一个 Claude Code 任务 ID，分别登记到 CAREER JOURNAL 的两个任务，把两条返回的 `codexCommandLine` 或 `claudeCodeCommandLine` 原样分行写入同一个共享 prompt，再分别验证并各触发一次。Claude Code 的验证读取 `~/.claude/scheduled-tasks/<任务 ID>/SKILL.md` 和桌面 App 的定时记录，要求任务已启用、cron 覆盖两个时间点、时区和两条命令都匹配。运行邮件命令前，Agent 必须检查全部选中邮箱，写入并通过 `email sync-host` 导入每个邮箱的只读同步批次，成功后才能调用 `automation run`。
 8. 运行 `node ./bin/career-journal.mjs doctor --home <absolute-home>`。只有每个选中邮箱和两个自动任务都在 36 小时健康窗口内通过，才能结束配置。
 9. 询问用户是否需要导入历史投递。用户可以选择限定范围的只读邮箱检查、文件或表格、简短问答，也可以跳过。先整理候选记录，得到用户确认后再写入；存在外部申请编号时优先按编号去重，否则按公司和岗位去重。不得推测缺失的投递日期、状态、拒绝原因或实际提交材料。
-10. 核心配置通过 `doctor`、Jev 和历史投递导入两个问题已回答或跳过之后，进行个人资料问答。先读取 `profile status --json`，再用 `profile questions --round <1-4> --missing --json` 取出问题。每轮最多问 4 个问题，每题给出选项并加“其他”；一轮里待问的题超过 4 个时，在下一条消息里继续问。每题都可以跳过，跳过的题在第一次用到时再问。简历里已经能读出的内容（学历、每段工作经历、链接）先读出来，只请用户确认。结构化内容用 `profile set --key <点分路径> --value <JSON 或文本>` 保存，表单答案用 `profile answer --question <题目> --answer <回答> --source user` 保存。第 4 轮向用户展示 `career-journal-apply` Skill 的固定硬规矩（不能关闭），并询问是否需要在 `pace.scanTime` 每天扫描岗位；用户同意后才创建这个定时任务。核心配置不依赖个人资料，但第 1、2 轮完成前不能使用代填申请。
+10. 核心配置通过 `doctor`、Jev 和历史投递导入两个问题已回答或跳过之后，进行个人资料问答。先读取 `profile status --json`，再用 `profile questions --round <1-4> --missing --json` 取出问题。每轮最多问 4 个问题，每题给出选项并加“其他”；一轮里待问的题超过 4 个时，在下一条消息里继续问。每题都可以跳过，跳过的题在第一次用到时再问。简历里已经能读出的内容（学历、每段工作经历、链接）先读出来，只请用户确认。结构化内容用 `profile set --key <点分路径> --value <JSON 或文本>` 保存，表单答案用 `profile answer --question <题目> --answer <回答> --source user` 保存。第 4 轮把 `sources` 组的三个问题放在一起问（关注哪些公司，以及需要用户自己开启的 CareerOps 和 SimplifyJobs 来源；见下面的“扫描来源”），向用户展示 `career-journal-apply` Skill 的固定硬规矩（不能关闭），并询问是否需要在 `pace.scanTime` 每天扫描岗位。用户同意后才创建这个定时任务，而且要单独创建（见下面的“岗位扫描定时任务”）。核心配置不依赖个人资料，但第 1、2 轮完成前不能使用代填申请；第 1 轮完成且至少设置了一个扫描来源之前，不能扫描岗位。
 
 从 1.x 升级：还没有 `profile.json` 时，先推断，再确认。读取已有的申请、事件、配置、简历和已配置的材料规则，把推断出的资料项放在一条消息里请用户确认或修改。只写入用户确认过的值；之后 `profile status --json` 只列出仍缺的项，也只补问这些。数据库仍按原步骤升级：`migrate --dry-run`、备份、`migrate --apply`。
 
@@ -26,11 +26,31 @@
 
 手动 EML 只是一次性备用方式，不能替代每日访问或满足 setup。不得在配置、批次、记录、日志、导出或 prompt 中保存邮箱凭据或字面 secret。
 
+## 扫描来源
+
+- **关注的公司。** 用户说出公司名，由 Agent 把每家公司对应到它的官方职位板标识（token）。打开公司自己的招聘页（不要用招聘信息聚合网站），顺着职位或 Apply 链接找到它使用的招聘系统。标识是域名后的第一段路径：`boards.greenhouse.io/<token>` 或 `job-boards.greenhouse.io/<token>`（嵌入式职位板显示为 `boards.greenhouse.io/embed/job_board?for=<token>`）对应 `greenhouse`，`jobs.lever.co/<token>` 对应 `lever`，`jobs.ashbyhq.com/<token>` 对应 `ashby`。标识后面的职位编号和查询参数都不要。
+- 一次写入完整列表：`profile set --key sources.atsBoards --value '[{"ats":"greenhouse","board":"<token>","company":"<公司名>"}]'`。这条命令会替换整个列表，所以先用 `profile show --json` 读出当前列表，加上新公司后整体写回。
+- 用 `scan run --dry-run` 检查结果：每个职位板的来源一行都必须显示 `ok`。HTTP 404 说明标识不对，改正或删掉这一项。不得猜测标识。
+- 招聘页使用其他招聘系统（Workday、iCIMS、Oracle、SuccessFactors 等）的公司，无法通过这些公开职位板接口扫描。告诉用户是哪几家，不要加入列表。
+- **CareerOps（用户自选开启）。** 只有用户同意时才运行 `profile set --key sources.careerOps --value true`。只有安装并检测到 CareerOps 时才会运行。
+- **SimplifyJobs（用户自选开启）。** 默认关闭，只有用户主动开启才使用。询问时要告诉用户：这份列表没有许可证，只在扫描时在这台电脑上实时读取，项目从不打包、缓存或再分发其中内容。用户同意后，用用户确认过的链接保存 `profile set --key sources.simplify --value '{"enabled":true,"url":"<列表 JSON 的 https 链接>"}'`。
+- 第 1 轮完成且至少设置了上面一种来源之前，`profile status --json` 会把扫描就绪状态报告为 incomplete。
+
+## 岗位扫描定时任务
+
+每日岗位扫描是可选的，只有用户在第 4 轮同意后才创建。它不能和 `mail-sync`、`deadline-review` 共用一个任务：那个共享的 Codex heartbeat 或 Claude Code 定时任务固定在 20:00 和 20:15 运行，`register-external` 也会拒绝把其他任务登记到它的 ID 上。要为 `role-scan` 单独创建一个定时任务，按检测到的时区在 `pace.scanTime` 运行：
+
+1. 运行 `automation configure --task role-scan --enabled`；时间取自 `pace.scanTime`
+2. 另建一个每日任务：在 Codex 中再建一个 heartbeat，例如 `FREQ=DAILY;BYHOUR=8;BYMINUTE=0;BYSECOND=0`；在 Claude Code 桌面版中再建一个定时任务，使用自己的任务 ID（例如 `career-journal-role-scan`），cron 按本地时间写成 `0 8 * * *`
+3. 用 `automation register-external --task role-scan --driver codex|claude-code --external-id <它自己的 ID>` 登记这个任务的 ID，把返回的命令原样单独放在该任务 prompt 的一行中并写明时区，运行 `automation verify --task role-scan`，再触发一次
+
+`doctor` 从不要求 `role-scan`；用户不需要时，核心配置依然完整。
+
 ## 请求路由
 
 - Application、事件、截止日期、状态或 Dashboard：使用 CLI
 - 在线测评、编程测试或面试邀请：用 `task add` 记录，带上邮件里的截止时间（`--due-at`，须含时区偏移；`--due-note` 写明如何推算）和邀请链接（`--link`）；完成后用 `task done` 标记
-- 找岗位、看新岗位或每日岗位扫描：运行 `scan run`（加 `--dry-run` 只预览、不写入），逐个阅读新岗位的官网原文，再用 `queue verify --id <application> --result ok|skip --reason <原因> [--deadline <iso>]` 记录；每个“不投”都要写原因。`queue list` 按顺序显示队列。默认来源是官方招聘系统的公开岗位接口；SimplifyJobs 和 CareerOps 来源需用户自己开启
+- 找岗位、看新岗位或每日岗位扫描：运行 `scan run`（加 `--dry-run` 只预览、不写入），逐个阅读新岗位的官网原文，再用 `queue verify --id <application> --result ok|skip --reason <原因> [--deadline <iso>]` 记录；每个“不投”都要写原因。`queue list` 按顺序显示队列。默认来源是用户关注的公司在官方招聘系统上的公开岗位接口；SimplifyJobs 和 CareerOps 来源需用户自己开启。`profile status --json` 报告没有扫描来源时，先按“扫描来源”把用户的公司对应到职位板
 - 投递、开始投、填申请表：读取 `career-journal-apply` Skill。它要求个人资料第 1、2 轮已完成，只在用户自己的浏览器里填表，并在每次提交前停下
 - 个人资料、偏好或表单答案：使用 `profile show|questions|set|answer|status`。资料文件放在 `<home>/.career-journal/profile/`（`profile.json`、`answers.md`），不进仓库
 - Resume 或 Cover Letter：读取 `careerops-materials`；经验证的生成流程需要 CareerOps、内置规则和个人规则
