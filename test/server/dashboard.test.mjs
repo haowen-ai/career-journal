@@ -6,6 +6,7 @@ import path from 'node:path';
 import { setup } from '../../src/commands/setup.mjs';
 import { openHomeDatabase } from '../../src/runtime/home.mjs';
 import { createServer } from '../../src/server/app.mjs';
+import { STAT_FILTERS } from '../../web/dashboard-model.js';
 
 test('serves the bilingual career-journal dashboard shell and rejects path traversal', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'jobops-dashboard-'));
@@ -43,6 +44,14 @@ test('serves the bilingual career-journal dashboard shell and rejects path trave
     assert.match(html, /data-testid="card-skip"/);
     assert.ok(html.indexOf('data-testid="filter-preparing"') < html.indexOf('data-testid="filter-queue"'));
     assert.ok(html.indexOf('data-testid="card-queue"') < html.indexOf('class="card-facts"'));
+    for (const [stat, filter] of Object.entries(STAT_FILTERS)) {
+      assert.match(html, new RegExp(`<button class="stat-card[^"]*" type="button" data-stat="${stat}" data-testid="stat-card-${stat}" aria-label="[^"]+">`));
+      assert.match(html, new RegExp(`data-testid="filter-${filter}" data-filter="${filter}"`));
+    }
+    assert.doesNotMatch(html, /<article class="stat-card/);
+    assert.match(html, /data-i18n="filterSent"/);
+    assert.ok(html.indexOf('data-testid="filter-all"') < html.indexOf('data-testid="filter-sent"'));
+    assert.ok(html.indexOf('data-testid="filter-sent"') < html.indexOf('data-testid="filter-waiting"'));
     assert.match(html, /data-testid="to-apply-section"/);
     assert.match(html, /data-i18n="toApplyTitle"/);
     assert.match(html, /data-i18n="toApplyBody"/);
