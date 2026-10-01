@@ -16,7 +16,7 @@
 7. 将同一个 Codex automation ID，或用 `--driver claude-code` 将同一个 Claude Code 任务 ID，分别登记到 CAREER JOURNAL 的两个任务，把两条返回的 `codexCommandLine` 或 `claudeCodeCommandLine` 原样分行写入同一个共享 prompt，再分别验证并各触发一次。Claude Code 的验证读取 `~/.claude/scheduled-tasks/<任务 ID>/SKILL.md` 和桌面 App 的定时记录，要求任务已启用、cron 覆盖两个时间点、时区和两条命令都匹配。运行邮件命令前，Agent 必须检查全部选中邮箱，写入并通过 `email sync-host` 导入每个邮箱的只读同步批次，成功后才能调用 `automation run`。
 8. 运行 `node ./bin/career-journal.mjs doctor --home <absolute-home>`。只有每个选中邮箱和两个自动任务都在 36 小时健康窗口内通过，才能结束配置。
 9. 询问用户是否需要导入历史投递。用户可以选择限定范围的只读邮箱检查、文件或表格、简短问答，也可以跳过。先整理候选记录，得到用户确认后再写入；存在外部申请编号时优先按编号去重，否则按公司和岗位去重。不得推测缺失的投递日期、状态、拒绝原因或实际提交材料。
-10. 核心配置通过 `doctor`、Jev 和历史投递导入两个问题已回答或跳过之后，进行个人资料问答。先读取 `profile status --json`，再用 `profile questions --round <1-4> --missing --json` 取出问题。每轮最多问 4 个问题，每题给出选项并加“其他”；一轮里待问的题超过 4 个时，在下一条消息里继续问。每题都可以跳过，跳过的题在第一次用到时再问。简历里已经能读出的内容（学历、每段工作经历、链接）先读出来，只请用户确认。结构化内容用 `profile set --key <点分路径> --value <JSON 或文本>` 保存，表单答案用 `profile answer --question <题目> --answer <回答> --source user` 保存。第 4 轮把 `sources` 组的三个问题放在一起问（关注哪些公司，以及需要用户自己开启的 CareerOps 和 SimplifyJobs 来源；见下面的“扫描来源”），向用户展示 `career-journal-apply` Skill 的固定硬规矩（不能关闭），并询问是否需要在 `pace.scanTime` 每天扫描岗位。用户同意后才创建这个定时任务，而且要单独创建（见下面的“岗位扫描定时任务”）。核心配置不依赖个人资料，但第 1、2 轮完成前不能使用代填申请；第 1 轮完成且至少设置了一个扫描来源之前，不能扫描岗位。
+10. 核心配置通过 `doctor`、Jev 和历史投递导入两个问题已回答或跳过之后，进行个人资料问答。先读取 `profile status --json`，再用 `profile questions --round <1-4> --unasked --json` 取出还没回答、也没跳过的全部问题（必答和选答都在内）。每轮最多问 4 个问题，每题给出选项并加“其他”；一轮里待问的题超过 4 个时，在下一条消息里继续问。每题都可以跳过，用 `profile skip --key <问题标识>` 记下；跳过的必答题在第一次用到时再问，`profile questions --missing --json` 会列出这些题。简历里已经能读出的内容（学历、每段工作经历、链接）先读出来，只请用户确认。结构化内容用 `profile set --key <点分路径> --value <JSON 或文本>` 保存，表单答案用 `profile answer --question <题目> --answer <回答> --source user` 保存。第 4 轮把 `sources` 组的三个问题放在一起问（关注哪些公司，以及需要用户自己开启的 CareerOps 和 SimplifyJobs 来源；见下面的“扫描来源”），向用户展示 `career-journal-apply` Skill 的固定硬规矩（不能关闭），并询问是否需要在 `pace.scanTime` 每天扫描岗位。用户同意后才创建这个定时任务，而且要单独创建（见下面的“岗位扫描定时任务”）。核心配置不依赖个人资料，但第 1、2 轮完成前不能使用代填申请；第 1 轮完成且至少设置了一个扫描来源之前，不能扫描岗位。
 
 从 1.x 升级：还没有 `profile.json` 时，先推断，再确认。读取已有的申请、事件、配置、简历和已配置的材料规则，把推断出的资料项放在一条消息里请用户确认或修改。只写入用户确认过的值；之后 `profile status --json` 只列出仍缺的项，也只补问这些。数据库仍按原步骤升级：`migrate --dry-run`、备份、`migrate --apply`。
 
@@ -52,7 +52,7 @@
 - 在线测评、编程测试或面试邀请：用 `task add` 记录，带上邮件里的截止时间（`--due-at`，须含时区偏移；`--due-note` 写明如何推算）和邀请链接（`--link`）；完成后用 `task done` 标记
 - 找岗位、看新岗位或每日岗位扫描：运行 `scan run`（加 `--dry-run` 只预览、不写入），逐个阅读新岗位的官网原文，再用 `queue verify --id <application> --result ok|skip --reason <原因> [--deadline <iso>]` 记录；每个“不投”都要写原因。`queue list` 按顺序显示队列。默认来源是用户关注的公司在官方招聘系统上的公开岗位接口；SimplifyJobs 和 CareerOps 来源需用户自己开启。`profile status --json` 报告没有扫描来源时，先按“扫描来源”把用户的公司对应到职位板
 - 投递、开始投、填申请表：读取 `career-journal-apply` Skill。它要求个人资料第 1、2 轮已完成，只在用户自己的浏览器里填表，并在每次提交前停下
-- 个人资料、偏好或表单答案：使用 `profile show|questions|set|answer|status`。资料文件放在 `<home>/.career-journal/profile/`（`profile.json`、`answers.md`），不进仓库
+- 个人资料、偏好或表单答案：使用 `profile show|questions|set|answer|skip|status`。资料文件放在 `<home>/.career-journal/profile/`（`profile.json`、`answers.md`），不进仓库
 - Resume 或 Cover Letter：读取 `careerops-materials`；经验证的生成流程需要 CareerOps、内置规则和个人规则
 - 渲染后的 PDF 检查：宿主支持时使用 PDF 能力
 - DOCX 工作：宿主支持时使用 Documents 能力

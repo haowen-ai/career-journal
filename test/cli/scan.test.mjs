@@ -347,3 +347,13 @@ test('default onboarding does not create the role-scan task', async () => {
   const setupSource = await readFile(new URL('../../src/commands/setup.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(setupSource, /role-scan/);
 });
+
+test('an enabled Simplify source without a URL does not count as a scan source', async () => fixture(async (home) => {
+  await writeProfile(home, (profile) => ({
+    ...profile,
+    sources: { atsBoards: [], careerOps: false, simplify: { enabled: true, url: null } },
+  }));
+  const result = await cli(['scan', 'run', '--home', home, '--dry-run']);
+  assert.notEqual(result.code, 0);
+  assert.match(result.io.stderr, /The profile has no scan sources/);
+}));

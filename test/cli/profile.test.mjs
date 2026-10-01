@@ -249,7 +249,7 @@ test('profile rejects unknown subcommands with usage', async () => fixture(async
   for (const sub of [null, 'interview', 'toString']) {
     const result = await cli(['profile', ...(sub ? [sub] : []), '--home', home]);
     assert.equal(result.code, 1, String(sub));
-    assert.match(result.io.stderr, /Usage: career-journal profile show\|questions\|set\|answer\|status/);
+    assert.match(result.io.stderr, /Usage: career-journal profile show\|questions\|set\|answer\|skip\|status/);
   }
 }));
 
@@ -272,3 +272,31 @@ test('profile commands never use the network', async () => {
   } finally { globalThis.fetch = originalFetch; }
   assert.equal(calls, 0);
 });
+
+test('profile questions --unasked lists required and optional questions until each is answered or skipped', async () => fixture(async (home) => {
+  const roundOne = profileQuestions.filter((item) => item.round === 1).map((item) => item.key);
+  const unasked = async (round) => (await json(['profile', 'questions', '--home', home, '--round', String(round), '--unasked', '--json'])).questions.map((item) => item.key);
+  assert.deepEqual(await unasked(1), roundOne);
+  assert.ok(roundOne.includes('exclusions') && roundOne.includes('directions-secondary'));
+
+  await ok(['profile', 'set', '--home', home, '--key', 'season', '--value', 'Summer 2027']);
+  await ok(['profile', 'set', '--home', home, '--key', 'search.jobType', '--value', 'internship']);
+  const skipped = await json(['profile', 'skip', '--home', home, '--key', 'exclusions']);
+  assert.deepEqual(skipped, { key: 'exclusions', skipped: ['exclusions'] });
+  assert.deepEqual(await unasked(1), roundOne.filter((key) => !['season', 'job-type', 'exclusions'].includes(key)));
+
+  assert.ok((await unasked(4)).includes('batch-size'), 'a question with a default is still asked once');
+  await ok(['profile', 'set', '--home', home, '--key', 'batch-size', '--value', '5']);
+  assert.ok(!(await unasked(4)).includes('batch-size'));
+
+  await ok(['profile', 'answer', '--home', home, '--key', 'legal-name', '--answer', 'Alex Example']);
+  assert.ok(!(await unasked(3)).includes('legal-name'));
+
+  const show = await json(['profile', 'show', '--home', home, '--json']);
+  assert.deepEqual([...show.profile.interview.asked].sort(), ['batch-size', 'job-type', 'season']);
+  assert.deepEqual(show.profile.interview.skipped, ['exclusions']);
+
+  const unknown = await cli(['profile', 'skip', '--home', home, '--key', 'not-a-question']);
+  assert.notEqual(unknown.code, 0);
+  assert.match(unknown.io.stderr, /profile skip needs --key with an interview question key/);
+}));

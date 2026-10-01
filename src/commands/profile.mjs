@@ -2,11 +2,11 @@ import path from 'node:path';
 import { loadConfig } from '../config/store.mjs';
 import {
   answersPath, appendAnswer, getProfileValue, missingItems, parseProfileValue, profileFields, profilePath,
-  profileStatus, readAnswers, readProfile, updateProfile,
+  profileStatus, readAnswers, readProfile, skipQuestion, unaskedItems, updateProfile,
 } from '../domain/profile.mjs';
 import { hardRules, profileQuestions, profileRounds } from '../domain/profile-questions.mjs';
 
-const usage = 'Usage: career-journal profile show|questions|set|answer|status';
+const usage = 'Usage: career-journal profile show|questions|set|answer|skip|status';
 const setUsage = 'Usage: career-journal profile set --key <dot.path> --value <json-or-text>';
 
 async function configuredHome(parsed) {
@@ -42,6 +42,11 @@ async function questions(parsed, io) {
     const { home } = await configuredHome(parsed);
     const missing = new Map(missingItems(await readProfile(home), { answers: await readAnswers(home) }).map((item) => [item.key, item]));
     selected = selected.filter((item) => missing.has(item.key)).map((item) => ({ ...item, skipped: missing.get(item.key).skipped }));
+  }
+  if (parsed.options.unasked) {
+    const { home } = await configuredHome(parsed);
+    const unasked = new Set(unaskedItems(await readProfile(home), { answers: await readAnswers(home) }).map((item) => item.key));
+    selected = selected.filter((item) => unasked.has(item.key));
   }
   if (parsed.options.json) {
     const rounds = profileRounds.filter((item) => round === null || item.round === round);
@@ -93,6 +98,12 @@ async function answer(parsed, io) {
   return 0;
 }
 
+async function skip(parsed, io) {
+  const { home } = await configuredHome(parsed);
+  io.out(JSON.stringify(await skipQuestion(home, optionalText(parsed.options.key, 'key'))));
+  return 0;
+}
+
 async function status(parsed, io) {
   const { home } = await configuredHome(parsed);
   const state = await profileStatus(home);
@@ -107,7 +118,7 @@ async function status(parsed, io) {
   return 0;
 }
 
-const handlers = { show, questions, set, answer, status };
+const handlers = { show, questions, set, answer, skip, status };
 
 export async function profileCommand(parsed, io) {
   const handler = Object.hasOwn(handlers, parsed.subcommand ?? '') ? handlers[parsed.subcommand] : null;

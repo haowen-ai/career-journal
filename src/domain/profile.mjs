@@ -62,7 +62,7 @@ export function defaultProfile() {
       careerOps: false,
       simplify: { enabled: false, url: null },
     },
-    interview: { roundsCompleted: [], skipped: [] },
+    interview: { roundsCompleted: [], skipped: [], asked: [] },
   };
 }
 
@@ -213,6 +213,7 @@ const fieldRules = Object.freeze({
   'sources.simplify.url': nullable(webUrl({ httpsOnly: true })),
   'interview.roundsCompleted': list(integer(1, 4)),
   'interview.skipped': list(questionKey),
+  'interview.asked': list(questionKey),
 });
 
 const textFields = new Set([
@@ -223,6 +224,7 @@ const textFields = new Set([
 ]);
 const materialFileFields = Object.freeze(['materials.resumePath', 'materials.transcriptPath']);
 const managedFields = new Set(['schemaVersion', 'updatedAt']);
+const optionalFields = new Set(['interview.asked']);
 
 export const profileFields = Object.freeze(Object.keys(fieldRules).filter((field) => !managedFields.has(field)));
 
@@ -259,6 +261,8 @@ export function validateProfile(profile) {
     for (const key of children) {
       const field = join(prefix, key);
       if (!Object.hasOwn(value, key)) {
+        // interview.asked arrived after the first 2.0 profiles were written; an absent list means nothing asked yet.
+        if (optionalFields.has(field)) continue;
         errors.push(`${field} is missing`);
         continue;
       }
@@ -454,7 +458,11 @@ export async function updateProfile(home, key, value, { now } = {}) {
   const field = resolveProfileKey(key);
   return withFileLock(profilePath(home), async () => {
     const current = (await readProfile(home)) ?? defaultProfile();
-    const next = normalizeProfile(setProfileValue(current, field, value));
+    let next = normalizeProfile(setProfileValue(current, field, value));
+    // Saving an interview question's answer records that the question was asked, so the interview never repeats it.
+    const asked = new Set(getPath(next, 'interview.asked') ?? []);
+    for (const question of profileQuestions) if (question.key === key.trim() || question.target === field) asked.add(question.key);
+    if (asked.size !== (getPath(next, 'interview.asked') ?? []).length) next = normalizeProfile(setProfileValue(next, 'interview.asked', [...asked]));
     assertValid(next, 'Invalid profile');
     for (const fileField of materialFileFields) {
       const file = getPath(next, fileField);
@@ -517,6 +525,32 @@ function questionAnswered(question, profile, answered) {
   if (typeof value === 'string') return value.trim() !== '';
   if (Array.isArray(value)) return value.length > 0;
   return true;
+}
+
+// Every question, required or optional, that the user has not answered yet and has not chosen to skip.
+// A profile field counts as answered only after it was saved through the interview, so defaults and inferred
+// values are still put to the user once.
+export function unaskedItems(profile, { answers = null } = {}) {
+  const current = profile ?? defaultProfile();
+  const answered = answeredKeys(answers);
+  const asked = new Set(getPath(current, 'interview.asked') ?? []);
+  const skipped = new Set(getPath(current, 'interview.skipped') ?? []);
+  return profileQuestions
+    .filter((question) => !skipped.has(question.key) && !asked.has(question.key)
+      && !(question.target === ANSWERS_TARGET && answered.has(question.key)))
+    .map((question) => ({ round: question.round, key: question.key, target: question.target, required: question.required }));
+}
+
+export async function skipQuestion(home, key, { now } = {}) {
+  const question = questionByKey(typeof key === 'string' ? key.trim() : '');
+  if (!question) throw new Error('profile skip needs --key with an interview question key; run career-journal profile questions --json to list them');
+  return withFileLock(profilePath(home), async () => {
+    const current = (await readProfile(home)) ?? defaultProfile();
+    const skipped = new Set(getPath(current, 'interview.skipped') ?? []);
+    skipped.add(question.key);
+    const profile = await writeProfile(home, normalizeProfile(setProfileValue(current, 'interview.skipped', [...skipped])), { now });
+    return { key: question.key, skipped: getPath(profile, 'interview.skipped') };
+  });
 }
 
 export function missingItems(profile, { answers = null } = {}) {

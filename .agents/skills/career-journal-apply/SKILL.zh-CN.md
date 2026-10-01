@@ -80,7 +80,7 @@
 
 ## 用到的命令
 
-- `profile show|questions|set|answer|status`
+- `profile show|questions|set|answer|skip|status`
 - `queue list|verify`；队列为空且用户要找新岗位时用 `scan run`
 - `application list --json`
 - `event add --status-after applied`

@@ -224,6 +224,8 @@ Role scans and assisted applying read a private profile that the Agent builds th
 
 ```sh
 career-journal profile questions --json
+career-journal profile questions --round 1 --unasked --json --home ~/job-search
+career-journal profile skip --home ~/job-search --key exclusions
 career-journal profile questions --missing --json --home ~/job-search
 career-journal profile set --home ~/job-search --key search.jobType --value internship
 career-journal profile set --home ~/job-search --key search.locations --value '[{"label":"New York, NY","match":["new york","nyc"]}]'
@@ -234,7 +236,7 @@ career-journal profile status --json --home ~/job-search
 career-journal profile show --home ~/job-search
 ```
 
-- `profile questions` lists the four rounds (search target, materials, common form answers, scan sources and pace) with English and Chinese prompts, options, whether each item is required, and where the answer is stored, plus the fixed hard rules. `--round N` narrows to one round; `--missing` lists only required items that are still unanswered, marking the ones you skipped
+- `profile questions` lists the four rounds (search target, materials, common form answers, scan sources and pace) with English and Chinese prompts, options, whether each item is required, and where the answer is stored, plus the fixed hard rules. `--round N` narrows to one round; `--unasked` lists every required or optional question not yet answered or skipped, which is what the interview asks; `--missing` lists only required items that are still unanswered, marking the ones you skipped. `profile skip --key <question-key>` records a skipped question
 - `profile set` writes `profile.json`, creating it on the first write. `--key` takes a dot-path such as `search.season` or a question key such as `season`; `--value` is JSON or plain text, and `--value null` clears an optional field. Every write is validated, and resume and transcript paths must be absolute (or start with `~/`) and point to a readable file
 - `profile answer` writes `answers.md` with the source (default `user`) and date. With `--key`, a common form answer from round 3 keeps one row under "Common form answers" and is updated in place; with `--question`, the row is appended under "Learned while applying"
 - `profile status` shows which rounds are complete and whether scans and applying are ready. Scans need round 1 and at least one scan source; applying needs rounds 1 and 2 and a readable resume file. `doctor` adds `profile` and `apply` lines as warnings only, so core onboarding passes without a profile

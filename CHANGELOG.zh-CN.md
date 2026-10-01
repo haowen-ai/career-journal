@@ -8,10 +8,11 @@
 
 ### 新增
 
-- 新增 `career-journal profile show|questions|set|answer|status`，用于 2.0 首次使用时的个人资料问答。`profile questions --json` 以数据形式返回四轮问题（求职目标、申请材料、常用表单答案、扫描来源与节奏），每个问题都有英文和简体中文提问、选项、“其他”自由填写、是否必填，以及答案写入的资料字段或答案表，并附上固定的硬规矩；`--round N` 只看某一轮，`--missing` 只列出仍未回答的必填项
+- 新增 `career-journal profile show|questions|set|answer|skip|status`，用于 2.0 首次使用时的个人资料问答。`profile questions --json` 以数据形式返回四轮问题（求职目标、申请材料、常用表单答案、扫描来源与节奏），每个问题都有英文和简体中文提问、选项、“其他”自由填写、是否必填，以及答案写入的资料字段或答案表，并附上固定的硬规矩；`--round N` 只看某一轮，`--missing` 只列出仍未回答的必填项
 - 新增本地个人资料 `.career-journal/profile/profile.json`（旧版工作区为 `.jobops/profile/`），在第一次运行 `profile set` 时创建。每次写入都会校验：职位类型、方向、学位和工作许可的取值；毕业时间为 `YYYY-MM`；每批数量 1–10；扫描时间为 `HH:MM`；简历和成绩单路径必须可读取；职位板条目可附公司名
 - 新增私密答案表 `.career-journal/profile/answers.md`。`profile answer --question` 在“Learned while applying”下追加一行，并按工作区时区记录来源和日期；`profile answer --key` 让每个常用表单答案在“Common form answers”下只保留一行
 - 新增空白模板 `config/profile.template.json` 和 `config/answers.template.md`
+- `profile questions --unasked` 列出还没回答、也没跳过的全部必答和选答问题，`profile skip --key <问题标识>` 记录跳过。通过问答保存的答案会把对应问题记入 `interview.asked`，因此默认值和推断出的内容也会请用户确认一次
 - 问答第 4 轮询问要关注哪些公司：Agent 从每家公司招聘页上的链接找到它在 Greenhouse、Lever 或 Ashby 上的职位板标识，写入 `sources.atsBoards`。同时询问是否开启 CareerOps 和 SimplifyJobs 两个需用户自选的来源；SimplifyJobs 一题会说明这份列表没有许可证、只实时读取、绝不再分发
 - 新增 `career-journal scan run [--dry-run] [--json] [--profile <path>]`。它只读地调用官方公开的 Greenhouse、Lever 和 Ashby 职位板接口，抓取用户关注的公司职位（启用并检测到 CareerOps 时也会使用它；只有用户主动开启并填写地址时才读取 SimplifyJobs），按季度、方向、学历、工作身份、明确不提供转正机会的写法和地点筛选，去重，把匹配度评为 high、medium 或 low，再把新职位记为线索。每个被排除的职位都有原因；`--dry-run` 不写入任何内容，也不调用任何模型
 - 新增 `career-journal queue list [--json]`，按匹配度、截止时间、地点排序和发布时间排列；新增 `queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>]` 记录核对结果，`skip` 会把线索改为已撤回，并记录一条带原因的事件
@@ -26,7 +27,7 @@
 
 ### 变更
 
-- `AGENTS.md` 和 `career-journal` Skill 中的首次配置契约新增个人资料问答：核心配置通过 `doctor` 后，Agent 每轮最多问 4 个问题，每题给出选项并加“其他”，每题都可以跳过。从 1.x 升级时，先从已有申请、配置和简历推断，请用户确认后才补问新的内容。Skill 新增路由：“找岗位”（`scan run`、`queue verify`、`queue list`）、“投递”（新 Skill）和“个人资料”（`profile show|questions|set|answer|status`），并说明扫描来源和单独的岗位扫描定时任务
+- `AGENTS.md` 和 `career-journal` Skill 中的首次配置契约新增个人资料问答：核心配置通过 `doctor` 后，Agent 每轮最多问 4 个问题，每题给出选项并加“其他”，每题都可以跳过。从 1.x 升级时，先从已有申请、配置和简历推断，请用户确认后才补问新的内容。Skill 新增路由：“找岗位”（`scan run`、`queue verify`、`queue list`）、“投递”（新 Skill）和“个人资料”（`profile show|questions|set|answer|skip|status`），并说明扫描来源和单独的岗位扫描定时任务
 - `doctor` 新增 `profile` 和 `apply` 两行，只作为警告，因此没有个人资料也能通过核心配置；在问答第 1、2 轮完成且简历文件可读取之前，`apply` 显示 `incomplete`。在第 1 轮完成且至少设置一个扫描来源之前，`profile status` 把岗位扫描显示为 `incomplete`
 - 数据库结构版本 5 为 `applications` 新增可为空的 `source`、`source_id`、`location`、`posted_at`、`deadline_at`、`fit`、`fit_confidence`、`fit_note`、`verified_at` 和 `skip_reason` 列，并为 `(source, source_id)` 建立索引。升级时先运行 `career-journal migrate --dry-run`、创建备份，再运行 `career-journal migrate --apply`
 - 两份 README 和两份使用指南新增个人资料问答、岗位扫描及其来源、代填申请、固定硬规矩，以及个人资料的存放位置（`<home>/.career-journal/profile/`，不进仓库）
