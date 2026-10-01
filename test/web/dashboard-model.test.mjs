@@ -20,6 +20,8 @@ import {
   queueSummary,
   safeHttpUrl,
   sourceName,
+  STAT_FILTERS,
+  statFilter,
   suggestedNextAction,
   taskDeadlineLabel,
   taskDeadlineStatus,
@@ -426,4 +428,30 @@ test('accepts only http and https posting links', () => {
   assert.equal(safeHttpUrl('https://'), null);
   assert.equal(safeHttpUrl(null), null);
   assert.equal(safeHttpUrl(42), null);
+});
+
+test('maps each summary card to the list filter that shows exactly the applications it counts', () => {
+  assert.deepEqual(STAT_FILTERS, { applied: 'sent', waiting: 'waiting', interview: 'interview', closed: 'closed', preparing: 'preparing' });
+  assert.equal(statFilter('applied'), 'sent');
+  assert.equal(statFilter('preparing'), 'preparing');
+  assert.equal(statFilter('unknown'), 'all');
+  const applications = [
+    application({ id: 'lead', status: 'lead' }),
+    application({ id: 'prepared', status: 'prepared' }),
+    application({ id: 'applied', status: 'applied', appliedAt: '2026-09-01' }),
+    application({ id: 'assessment', status: 'assessment' }),
+    application({ id: 'interview', status: 'interview' }),
+    application({ id: 'offer', status: 'offer' }),
+    application({ id: 'rejected', status: 'rejected' }),
+    application({ id: 'withdrawn-before-submit', status: 'withdrawn' }),
+    application({ id: 'withdrawn-after-submit', status: 'withdrawn', events: [{ type: 'application_submitted' }] }),
+    application({ id: 'lead-with-submitted-file', status: 'lead', artifacts: [{ lifecycle: 'submitted' }] }),
+  ];
+  const stats = applicationStats(applications);
+  for (const [stat, filter] of Object.entries(STAT_FILTERS)) {
+    assert.equal(filterApplications(applications, { group: filter }).length, stats[stat], `${stat} card and ${filter} filter`);
+  }
+  assert.deepEqual(filterApplications(applications, { group: 'sent' }).map((item) => item.id),
+    ['applied', 'assessment', 'interview', 'offer', 'rejected', 'withdrawn-after-submit', 'lead-with-submitted-file']);
+  assert.deepEqual(filterApplications(applications, { group: 'sent', query: 'offer' }).map((item) => item.id), ['offer']);
 });

@@ -9,6 +9,7 @@ import {
   materialKindLabel,
   openTasks,
   queueSummary,
+  statFilter,
   suggestedNextAction,
   taskDeadlineLabel,
   taskDeadlineStatus,
@@ -47,6 +48,10 @@ const copy = {
     completedTasks: (count) => `Completed (${count})`, taskCompleted: 'Completed', platform: 'Platform', openLink: 'Open link', deadline: 'Deadline',
     openSteps: 'Open steps', cardTasks: 'Assessment and interview steps', cardTasksNote: 'Deadlines use the workspace time zone.',
     filterQueue: 'Queue', queueFacts: 'Role queue details', location: 'Location', skipReason: 'Skip reason',
+    filterSent: 'Sent', statCardLabel: (stat, count) => `${{
+      applied: 'Show sent applications', waiting: 'Show Waiting applications', interview: 'Show Interview / Offer applications',
+      closed: 'Show Closed applications', preparing: 'Show Preparing applications',
+    }[stat]} (${count})`,
     toApplyTitle: 'To apply', toApplyBody: 'Roles waiting for you to apply, soonest deadline first.',
     toApplyToday: 'Apply today', toApplyWeek: 'Due this week', toApplyLater: (count) => `Later (${count})`,
     toApplyNone: (count) => `No deadline listed (${count})`, openPosting: 'Open posting',
@@ -75,6 +80,10 @@ const copy = {
     completedTasks: (count) => `已完成（${count}）`, taskCompleted: '已完成', platform: '平台', openLink: '打开链接', deadline: '截止时间',
     openSteps: '待完成步骤', cardTasks: '测评与面试步骤', cardTasksNote: '截止时间按工作区时区显示。',
     filterQueue: '投递队列', queueFacts: '待投岗位信息', location: '地点', skipReason: '跳过原因',
+    filterSent: '已投递', statCardLabel: (stat, count) => `${{
+      applied: '查看已投递的申请', waiting: '查看等待进展的申请', interview: '查看面试 / Offer 的申请',
+      closed: '查看已结束的申请', preparing: '查看准备中的申请',
+    }[stat]}（${count}）`,
     toApplyTitle: '等待我投递', toApplyBody: '等你投递的岗位，截止时间最近的排在前面。',
     toApplyToday: '今天要投', toApplyWeek: '本周截止', toApplyLater: (count) => `稍后（${count}）`,
     toApplyNone: (count) => `未写截止日期（${count}）`, openPosting: '打开官网',
@@ -483,9 +492,12 @@ function applyLocale() {
 function render() {
   applyLocale();
   const stats = applicationStats(state.applications);
-  for (const key of ['applied', 'waiting', 'interview', 'closed', 'preparing']) document.querySelector(`#stat-${key}`).textContent = stats[key];
+  for (const key of ['applied', 'waiting', 'interview', 'closed', 'preparing']) {
+    document.querySelector(`#stat-${key}`).textContent = stats[key];
+    document.querySelector(`[data-stat="${key}"]`).setAttribute('aria-label', t('statCardLabel')(key, stats[key]));
+  }
   const filterCounts = {
-    all: state.applications.length, waiting: stats.waiting, interview: stats.interview, closed: stats.closed, preparing: stats.preparing,
+    all: state.applications.length, sent: stats.applied, waiting: stats.waiting, interview: stats.interview, closed: stats.closed, preparing: stats.preparing,
     tasks: state.applications.filter(hasOpenTask).length, queue: state.applications.filter(isQueued).length,
   };
   for (const [key, value] of Object.entries(filterCounts)) document.querySelector(`[data-count="${key}"]`).textContent = value;
@@ -518,6 +530,14 @@ document.querySelectorAll('[data-filter]').forEach((button) => button.addEventLi
   state.group = button.dataset.filter;
   document.querySelectorAll('[data-filter]').forEach((candidate) => candidate.setAttribute('aria-pressed', String(candidate === button)));
   render();
+}));
+// A summary card applies its list filter exactly as the filter button does,
+// then brings the list into view.
+document.querySelectorAll('[data-stat]').forEach((card) => card.addEventListener('click', () => {
+  document.querySelector(`[data-filter="${statFilter(card.dataset.stat)}"]`).click();
+  let reduceMotion = false;
+  try { reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch {}
+  document.querySelector('.applications-section').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
 }));
 elements.languageToggle.addEventListener('click', () => {
   state.locale = state.locale === 'en' ? 'zh-CN' : 'en';

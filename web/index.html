@@ -43,31 +43,31 @@
       </section>
 
       <section class="stats" aria-label="Application summary">
-        <article class="stat-card stat-primary">
+        <button class="stat-card stat-primary" type="button" data-stat="applied" data-testid="stat-card-applied" aria-label="Show sent applications">
           <span class="stat-label"><span class="semantic-dot dot-applied" aria-hidden="true"></span><span data-i18n="statApplied">Applications sent</span></span>
           <strong id="stat-applied" data-testid="stat-applied">0</strong>
           <span class="stat-note" data-i18n="statAppliedNote">Confirmed submissions</span>
-        </article>
-        <article class="stat-card">
+        </button>
+        <button class="stat-card" type="button" data-stat="waiting" data-testid="stat-card-waiting" aria-label="Show Waiting applications">
           <span class="stat-label"><span class="semantic-dot dot-waiting" aria-hidden="true"></span><span data-i18n="statWaiting">Waiting</span></span>
           <strong id="stat-waiting" data-testid="stat-waiting">0</strong>
           <span class="stat-note" data-i18n="statWaitingNote">Submitted or in assessment</span>
-        </article>
-        <article class="stat-card">
+        </button>
+        <button class="stat-card" type="button" data-stat="interview" data-testid="stat-card-interview" aria-label="Show Interview / Offer applications">
           <span class="stat-label"><span class="semantic-dot dot-interview" aria-hidden="true"></span><span data-i18n="statInterview">Interview / Offer</span></span>
           <strong id="stat-interview" data-testid="stat-interview">0</strong>
           <span class="stat-note" data-i18n="statInterviewNote">Active interview or decision</span>
-        </article>
-        <article class="stat-card">
+        </button>
+        <button class="stat-card" type="button" data-stat="closed" data-testid="stat-card-closed" aria-label="Show Closed applications">
           <span class="stat-label"><span class="semantic-dot dot-closed" aria-hidden="true"></span><span data-i18n="statClosed">Closed</span></span>
           <strong id="stat-closed" data-testid="stat-closed">0</strong>
           <span class="stat-note" data-i18n="statClosedNote">Finished, withdrawn, or rejected</span>
-        </article>
-        <article class="stat-card">
+        </button>
+        <button class="stat-card" type="button" data-stat="preparing" data-testid="stat-card-preparing" aria-label="Show Preparing applications">
           <span class="stat-label"><span class="semantic-dot dot-preparing" aria-hidden="true"></span><span data-i18n="statPreparing">Preparing</span></span>
           <strong id="stat-preparing" data-testid="stat-preparing">0</strong>
           <span class="stat-note" data-i18n="statPreparingNote">Not yet confirmed as submitted</span>
-        </article>
+        </button>
       </section>
 
       <section class="to-apply-section" aria-labelledby="to-apply-heading" data-testid="to-apply-section">
@@ -143,6 +143,7 @@
         <div class="filter-bar">
           <div class="filters" role="group" aria-label="Application status filters">
             <button data-testid="filter-all" data-filter="all" type="button" aria-pressed="true"><span data-i18n="filterAll">All</span><b data-count="all">0</b></button>
+            <button data-testid="filter-sent" data-filter="sent" type="button" aria-pressed="false"><span data-i18n="filterSent">Sent</span><b data-count="sent">0</b></button>
             <button data-testid="filter-waiting" data-filter="waiting" type="button" aria-pressed="false"><span data-i18n="filterWaiting">Waiting</span><b data-count="waiting">0</b></button>
             <button data-testid="filter-interview" data-filter="interview" type="button" aria-pressed="false"><span data-i18n="filterInterview">Interview / Offer</span><b data-count="interview">0</b></button>
             <button data-testid="filter-closed" data-filter="closed" type="button" aria-pressed="false"><span data-i18n="filterClosed">Closed</span><b data-count="closed">0</b></button>

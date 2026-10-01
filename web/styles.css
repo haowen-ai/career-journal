@@ -33,7 +33,7 @@ img { display: block; }
 .language-toggle, .local-pill { height: 35px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid #d5e7e0; border-radius: 20px; color: var(--teal); background: #eaf3f0; font-size: 11px; font-weight: 650; }
 .language-toggle { padding: 0 11px; cursor: pointer; }
 .language-toggle:hover { background: #deece7; }
-.language-toggle:focus-visible, .filters button:focus-visible, .search-box:focus-within, summary:focus-visible, .error-state button:focus-visible, .task-action:focus-visible { outline: 3px solid #168a7830; outline-offset: 2px; }
+.language-toggle:focus-visible, .filters button:focus-visible, .search-box:focus-within, summary:focus-visible, .error-state button:focus-visible, .task-action:focus-visible, .stat-card:focus-visible { outline: 3px solid #168a7830; outline-offset: 2px; }
 .language-toggle img { width: 15px; height: 15px; opacity: .72; }
 .local-pill { padding: 0 13px; }
 .semantic-dot { width: 6px; height: 6px; display: inline-block; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
@@ -50,7 +50,9 @@ img { display: block; }
 .reminder p { margin: 7px 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.75; }
 
 .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
-.stat-card { min-height: 140px; padding: 20px 23px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); box-shadow: 0 2px 5px #18363003; }
+.stat-card { min-height: 140px; display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; margin: 0; padding: 20px 23px; border: 1px solid var(--line); border-radius: 14px; color: var(--ink); background: var(--paper); box-shadow: 0 2px 5px #18363003; cursor: pointer; font: inherit; text-align: left; transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
+.stat-card:hover { border-color: #b9d8cc; box-shadow: 0 4px 14px #193d390d; }
+.stat-primary:hover { border-color: var(--navy); background: #17404f; box-shadow: 0 4px 14px #12333f26; }
 .stat-label { display: flex; align-items: center; gap: 7px; color: #596f78; font-size: 11.5px; }
 .stat-card > strong { display: block; margin: 13px 0 6px; color: var(--navy); font-size: 37px; font-weight: 650; line-height: 1.2; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
 .stat-note { display: block; color: var(--muted); font-size: 9.5px; line-height: 1.5; }

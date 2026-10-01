@@ -134,8 +134,16 @@ export function queueApplications(applications) {
   return (applications ?? []).filter(isQueued).sort(compareQueueApplications);
 }
 
+// Each summary card opens the list filter that shows the applications it counts.
+export const STAT_FILTERS = Object.freeze({ applied: 'sent', waiting: 'waiting', interview: 'interview', closed: 'closed', preparing: 'preparing' });
+
+export function statFilter(stat) {
+  return STAT_FILTERS[stat] ?? 'all';
+}
+
 function matchesFilter(application, group) {
   if (group === 'all') return true;
+  if (group === 'sent') return wasApplied(application);
   if (group === 'tasks') return hasOpenTask(application);
   if (group === 'queue') return isQueued(application);
   return applicationGroup(application) === group;
