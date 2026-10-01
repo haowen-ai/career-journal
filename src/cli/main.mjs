@@ -11,6 +11,7 @@ Commands:
   event         Record an application event
   artifact      Add a draft or confirmed submitted artifact
   task          Track assessment and interview steps with deadlines
+  profile       Keep the search profile and form answers used for scans and applying
   export        Export local records
   start         Start the local dashboard and API
   automation    Configure and run scheduled tasks

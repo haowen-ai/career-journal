@@ -13,6 +13,7 @@ import { syncHostBatch } from '../../src/email/host-sync.mjs';
 import { syncImapEmailAccount } from '../../src/email/imap-sync.mjs';
 import { openDatabase, migrate, schemaMigrations } from '../../src/storage/database.mjs';
 import { recordTrustedHostVerification, verifyImapEmailAccount } from '../../src/email/accounts.mjs';
+import { appendAnswer, defaultProfile, profilePath, writeProfile } from '../../src/domain/profile.mjs';
 
 function rollingCoverage(fetchedAt) {
   const windowEnd = new Date(fetchedAt);
@@ -256,6 +257,8 @@ test('doctor requires fresh trusted-host evidence for every selected mailbox', a
     assert.equal(report.ok, true);
     assert.match(report.checks.find((item) => item.id === 'email').detail, /2 selected.*trusted host/i);
     assert.equal(report.checks.find((item) => item.id === 'model').severity, 'pass');
+    assert.equal(report.checks.find((item) => item.id === 'profile').severity, 'warn', 'core onboarding passes without a profile');
+    assert.match(report.checks.find((item) => item.id === 'apply').detail, /^incomplete: /);
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
@@ -432,5 +435,58 @@ test('doctor reports pending migrations without mutating an alpha.5 database', a
     assert.equal(inspect.prepare('PRAGMA table_info(email_accounts)').all().some((column) => column.name === 'config_json'), false);
     inspect.close();
     await assert.rejects(() => openHomeDatabase(home), /migrations pending/i);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test('doctor reports profile and apply readiness as warnings that never fail core onboarding', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-doctor-profile-'));
+  const run = () => doctor(home, { nodeVersion: '24.19.0', storage: async () => ({ ok: true }), careerOps: async () => ({ ok: false, detail: 'optional' }) });
+  const line = (report, id) => report.checks.find((item) => item.id === id);
+  try {
+    await setup(home, { timezone: 'UTC', email: { mode: 'skip' } });
+    const baseline = await run();
+    assert.deepEqual(line(baseline, 'profile'), {
+      id: 'profile', severity: 'warn',
+      detail: 'not created; core tracking works without it. Run the profile interview (career-journal profile questions) to enable role scans and assisted applying',
+    });
+    assert.deepEqual(line(baseline, 'apply'), { id: 'apply', severity: 'warn', detail: 'incomplete: no profile yet; complete interview rounds 1 and 2' });
+    const coreChecks = (report) => report.checks.filter((item) => !['profile', 'apply'].includes(item.id));
+
+    const resume = path.join(home, 'resume.pdf');
+    await writeFile(resume, '%PDF-1.4 synthetic resume\n');
+    const profile = defaultProfile();
+    profile.search = {
+      jobType: 'internship', season: 'Summer 2027', directions: { primary: ['data-science'], secondary: [] },
+      locations: [{ label: 'Chicago, IL', match: ['chicago'] }], remoteOk: false, exclusions: [],
+    };
+    profile.candidate = { degree: { level: 'bachelors', major: 'Statistics', graduation: '2028-05' }, authorization: { status: 'citizen', needsSponsorship: false } };
+    profile.materials.resumePath = resume;
+    await writeProfile(home, profile);
+    const roundTwoOpen = await run();
+    assert.equal(line(roundTwoOpen, 'profile').detail, 'rounds 1, 4 complete; missing round 2 (experience-confirmed); round 3 (legal-name, email, phone, address)');
+    assert.equal(line(roundTwoOpen, 'apply').detail, 'incomplete: round 2 (materials) is missing experience-confirmed');
+    assert.equal(line(roundTwoOpen, 'apply').severity, 'warn');
+
+    profile.materials.experienceConfirmed = true;
+    await writeProfile(home, profile);
+    const applyReady = await run();
+    assert.equal(line(applyReady, 'profile').severity, 'warn');
+    assert.deepEqual(line(applyReady, 'apply'), { id: 'apply', severity: 'pass', detail: 'ready: interview rounds 1 and 2 are complete and the resume file is readable' });
+
+    for (const [key, answer] of [['legal-name', 'Alex Example'], ['email', 'alex@example.com'], ['phone', '+1 555 0100'], ['address', '100 Example Street, Chicago, IL 60601']]) {
+      await appendAnswer(home, null, answer, 'user', { key });
+    }
+    const complete = await run();
+    assert.deepEqual(line(complete, 'profile'), { id: 'profile', severity: 'pass', detail: 'all four interview rounds are complete' });
+
+    await rm(resume);
+    assert.deepEqual(line(await run(), 'apply'), { id: 'apply', severity: 'warn', detail: 'incomplete: the resume file is not readable' });
+
+    await writeFile(profilePath(home), '{ not json');
+    const broken = await run();
+    assert.equal(line(broken, 'profile').severity, 'warn');
+    assert.match(line(broken, 'profile').detail, /^cannot read the profile: Profile .*profile\.json is not valid JSON/);
+    assert.match(line(broken, 'apply').detail, /^incomplete: fix or remove the profile file/);
+    for (const report of [roundTwoOpen, applyReady, complete, broken]) assert.deepEqual(coreChecks(report), coreChecks(baseline));
   } finally { await rm(home, { recursive: true, force: true }); }
 });
