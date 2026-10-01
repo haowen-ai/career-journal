@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/
 import os from 'node:os';
 import path from 'node:path';
 import {
-  answeredKeys, answerRows, answersPath, answersTemplate, appendAnswer, defaultProfile, getProfileValue, missingItems,
+  answeredKeys, answerRows, answersPath, answersTemplate, appendAnswer, defaultProfile, getProfileValue, hasScanSource, missingItems,
   normalizeProfile, parseProfileValue, profileDirectory, profilePath, profileStatus, readAnswers, readProfile,
   resolveMaterialPath, resolveProfileKey, setProfileValue, updateProfile, validateProfile, writeProfile,
 } from '../../src/domain/profile.mjs';
@@ -93,6 +93,30 @@ test('the shared contract example from the implementation plan validates', () =>
   assert.deepEqual(validateProfile(example), { ok: true, errors: [] });
 });
 
+test('the profile schema accepts every source field the role scan reads, including the optional company name', async () => {
+  const fixture = JSON.parse(await readFile('test/fixtures/scan/profile.json', 'utf8'));
+  assert.deepEqual(validateProfile(fixture), { ok: true, errors: [] });
+  assert.ok(fixture.sources.atsBoards.some((board) => board.company), 'the scan fixture names a company');
+  const profile = completeProfile();
+  profile.sources = {
+    atsBoards: [{ ats: 'greenhouse', board: 'examplecorp', company: 'ExampleCorp' }, { ats: 'ashby', board: 'example.quant_2' }],
+    careerOps: true,
+    simplify: { enabled: true, url: 'https://example.com/listings.json' },
+  };
+  assert.deepEqual(validateProfile(profile), { ok: true, errors: [] });
+});
+
+test('hasScanSource needs a job board, CareerOps, or the Simplify list together with its URL', () => {
+  const withSources = (sources) => ({ ...defaultProfile(), sources: { ...defaultProfile().sources, ...sources } });
+  assert.equal(hasScanSource(defaultProfile()), false);
+  assert.equal(hasScanSource(null), false);
+  assert.equal(hasScanSource(withSources({ atsBoards: [{ ats: 'lever', board: 'examplelabs' }] })), true);
+  assert.equal(hasScanSource(withSources({ careerOps: true })), true);
+  assert.equal(hasScanSource(withSources({ simplify: { enabled: true, url: null } })), false);
+  assert.equal(hasScanSource(withSources({ simplify: { enabled: false, url: 'https://example.com/listings.json' } })), false);
+  assert.equal(hasScanSource(withSources({ simplify: { enabled: true, url: 'https://example.com/listings.json' } })), true);
+});
+
 test('validation names the field and the rule for every invalid value', () => {
   const cases = [
     [(p) => { p.search.jobType = 'gig'; }, /^search\.jobType must be one of: internship, full-time, co-op, other$/],
@@ -131,6 +155,8 @@ test('validation names the field and the rule for every invalid value', () => {
     [(p) => { p.sources.atsBoards = [{ ats: 'workday', board: 'examplecorp' }]; }, /^sources\.atsBoards\[0\] ats must be one of: greenhouse, lever, ashby$/],
     [(p) => { p.sources.atsBoards = [{ ats: 'lever', board: '../etc' }]; }, /^sources\.atsBoards\[0\] board must be the board name/],
     [(p) => { p.sources.atsBoards = [{ ats: 'ashby', board: 'Example' }, { ats: 'ashby', board: 'example' }]; }, /^sources\.atsBoards\[1\] repeats "ashby:example"$/],
+    [(p) => { p.sources.atsBoards = [{ ats: 'lever', board: 'examplelabs', company: '  ' }]; }, /^sources\.atsBoards\[0\] company must be non-empty text/],
+    [(p) => { p.sources.atsBoards = [{ ats: 'lever', board: 'examplelabs', url: 'https://jobs.lever.co/examplelabs' }]; }, /^sources\.atsBoards\[0\] has unknown field url$/],
     [(p) => { p.sources.simplify.url = 'http://example.com/list.json'; }, /^sources\.simplify\.url must be an https URL$/],
     [(p) => { p.sources.careerOps = 'yes'; }, /^sources\.careerOps must be true or false$/],
     [(p) => { p.interview.roundsCompleted = [1, 5]; }, /^interview\.roundsCompleted\[1\] must be a whole number from 1 to 4$/],
@@ -307,24 +333,28 @@ test('missingItems lists every unanswered required item by round and key', () =>
   assert.deepEqual(initial.map((item) => `${item.round}:${item.key}`), [
     '1:job-type', '1:season', '1:directions-primary', '1:locations', '1:remote-ok', '1:degree-level', '1:major', '1:graduation',
     '1:authorization-status', '1:needs-sponsorship', '2:resume-path', '2:experience-confirmed',
-    '3:legal-name', '3:email', '3:phone', '3:address',
+    '3:legal-name', '3:email', '3:phone', '3:address', '4:watch-companies',
   ]);
   assert.deepEqual(initial[0], { round: 1, key: 'job-type', target: 'search.jobType', skipped: false });
   assert.deepEqual(missingItems(null), initial);
 
   const profile = completeProfile('/data/resume.pdf');
-  assert.deepEqual(missingItems(profile).map((item) => item.key), ['legal-name', 'email', 'phone', 'address']);
+  assert.deepEqual(missingItems(profile).map((item) => item.key), ['legal-name', 'email', 'phone', 'address', 'watch-companies']);
   profile.materials.experienceConfirmed = false;
   profile.search.remoteOk = false;
   profile.search.directions.primary = [];
-  profile.interview.skipped = ['directions-primary', 'phone'];
+  profile.interview.skipped = ['directions-primary', 'phone', 'watch-companies'];
   const answers = `${answersTemplate()}| \`legal-name\` Legal name | Alex Example (user, 2026-10-01) |\n| \`email\` Email | alex@example.com (user, 2026-10-01) |\n| \`address\` Address |  |\n`;
   assert.deepEqual(missingItems(profile, { answers }), [
     { round: 1, key: 'directions-primary', target: 'search.directions.primary', skipped: true },
     { round: 2, key: 'experience-confirmed', target: 'materials.experienceConfirmed', skipped: false },
     { round: 3, key: 'phone', target: 'answers.md', skipped: true },
     { round: 3, key: 'address', target: 'answers.md', skipped: false },
+    { round: 4, key: 'watch-companies', target: 'sources.atsBoards', skipped: true },
   ]);
+  // Companies to watch is answered once any source feeds the scan, even an opt-in one alone.
+  profile.sources.careerOps = true;
+  assert.equal(missingItems(profile, { answers }).some((item) => item.key === 'watch-companies'), false);
 });
 
 test('answers rows parse keys, escaped pipes, and the latest row for a key', () => {
@@ -397,7 +427,7 @@ test('appendAnswer keeps one row per interview key under Common form answers', a
     ['address', 'Address', '100 Example Street, New York, NY 10001 (user, 2026-10-01)'],
   ]);
   assert.deepEqual(answerRows(text).filter((row) => row.section.startsWith('Learned')).map((row) => row.question), ['Are you over 18?']);
-  assert.deepEqual(missingItems(completeProfile('/data/resume.pdf'), { answers: text }), []);
+  assert.deepEqual(missingItems(completeProfile('/data/resume.pdf'), { answers: text }).map((item) => item.key), ['watch-companies']);
 }));
 
 test('appendAnswer keeps hand-edited sheets intact', async () => withHome(async (home) => {
@@ -491,25 +521,46 @@ test('profileStatus reports round completion and scan and apply readiness', asyn
   const empty = await profileStatus(home);
   assert.equal(empty.exists, false);
   assert.equal(empty.answersExists, false);
-  assert.deepEqual(empty.rounds.map((round) => [round.round, round.id, round.complete]), [[1, 'search', false], [2, 'materials', false], [3, 'answers', false], [4, 'pace', true]]);
+  assert.deepEqual(empty.rounds.map((round) => [round.round, round.id, round.complete]), [[1, 'search', false], [2, 'materials', false], [3, 'answers', false], [4, 'pace', false]]);
   assert.deepEqual(empty.readiness.scan, { ready: false, detail: 'incomplete: no profile yet; run the profile interview' });
   assert.deepEqual(empty.readiness.apply, { ready: false, detail: 'incomplete: no profile yet; complete interview rounds 1 and 2' });
   assert.deepEqual(empty.resume, { set: false, readable: false });
   await assert.rejects(() => stat(profileDirectory(home)), { code: 'ENOENT' });
 
+  const roundOnePartial = completeProfile();
+  roundOnePartial.search.season = null;
+  await writeProfile(home, roundOnePartial);
+  assert.deepEqual((await profileStatus(home)).readiness.scan, {
+    ready: false,
+    detail: 'incomplete: round 1 (search) is missing season; no scan sources; name companies to watch or turn on an opt-in source (round 4)',
+  });
+
   const partial = completeProfile();
   await writeProfile(home, partial);
-  const roundOne = await profileStatus(home);
-  assert.equal(roundOne.readiness.scan.ready, true);
-  assert.equal(roundOne.readiness.scan.detail, 'ready: interview round 1 is complete');
-  assert.equal(roundOne.readiness.apply.detail, 'incomplete: round 2 (materials) is missing resume-path');
+  const noSources = await profileStatus(home);
+  assert.deepEqual(noSources.readiness.scan, { ready: false, detail: 'incomplete: no scan sources; name companies to watch or turn on an opt-in source (round 4)' });
+  assert.equal(noSources.readiness.apply.detail, 'incomplete: round 2 (materials) is missing resume-path');
+
+  for (const sources of [
+    { atsBoards: [{ ats: 'greenhouse', board: 'examplecorp', company: 'ExampleCorp' }] },
+    { careerOps: true },
+    { simplify: { enabled: true, url: 'https://example.com/listings.json' } },
+  ]) {
+    await writeProfile(home, { ...partial, sources: { ...partial.sources, ...sources } });
+    const roundOne = await profileStatus(home);
+    assert.deepEqual(roundOne.readiness.scan, { ready: true, detail: 'ready: interview round 1 is complete and at least one scan source is set' }, JSON.stringify(sources));
+    assert.equal(roundOne.rounds[3].complete, true, JSON.stringify(sources));
+  }
+  await writeProfile(home, { ...partial, sources: { ...partial.sources, simplify: { enabled: true, url: null } } });
+  assert.equal((await profileStatus(home)).readiness.scan.ready, false, 'Simplify without a URL cannot feed the scan');
 
   const resume = await writeResume(home);
-  await writeProfile(home, completeProfile(resume));
+  const withResume = completeProfile(resume);
+  await writeProfile(home, withResume);
   const ready = await profileStatus(home);
   assert.deepEqual(ready.resume, { set: true, readable: true });
-  assert.deepEqual(ready.readiness.apply, { ready: true, detail: 'ready: interview rounds 1 and 2 are complete and the resume file is readable' });
-  assert.deepEqual(ready.missing.map((item) => item.key), ['legal-name', 'email', 'phone', 'address']);
+  assert.deepEqual(ready.readiness.apply, { ready: true, detail: 'ready: interview rounds 1 and 2 are complete and the resume file is readable' }, 'assisted applying does not depend on scan sources');
+  assert.deepEqual(ready.missing.map((item) => item.key), ['legal-name', 'email', 'phone', 'address', 'watch-companies']);
 
   await rm(resume);
   const moved = await profileStatus(home);
@@ -517,6 +568,8 @@ test('profileStatus reports round completion and scan and apply readiness', asyn
   assert.equal(moved.readiness.apply.detail, 'incomplete: the resume file is not readable');
 
   for (const [key, answer] of roundThreeAnswers) await appendAnswer(home, null, answer, 'user', { key });
+  withResume.sources.atsBoards = [{ ats: 'ashby', board: 'examplequant' }];
+  await writeProfile(home, withResume);
   const answered = await profileStatus(home);
   assert.equal(answered.answersExists, true);
   assert.deepEqual(answered.rounds.map((round) => round.complete), [true, true, true, true]);

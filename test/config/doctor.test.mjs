@@ -463,11 +463,12 @@ test('doctor reports profile and apply readiness as warnings that never fail cor
     profile.materials.resumePath = resume;
     await writeProfile(home, profile);
     const roundTwoOpen = await run();
-    assert.equal(line(roundTwoOpen, 'profile').detail, 'rounds 1, 4 complete; missing round 2 (experience-confirmed); round 3 (legal-name, email, phone, address)');
+    assert.equal(line(roundTwoOpen, 'profile').detail, 'round 1 complete; missing round 2 (experience-confirmed); round 3 (legal-name, email, phone, address); round 4 (watch-companies)');
     assert.equal(line(roundTwoOpen, 'apply').detail, 'incomplete: round 2 (materials) is missing experience-confirmed');
     assert.equal(line(roundTwoOpen, 'apply').severity, 'warn');
 
     profile.materials.experienceConfirmed = true;
+    profile.sources.atsBoards = [{ ats: 'lever', board: 'examplelabs', company: 'Example Labs' }];
     await writeProfile(home, profile);
     const applyReady = await run();
     assert.equal(line(applyReady, 'profile').severity, 'warn');

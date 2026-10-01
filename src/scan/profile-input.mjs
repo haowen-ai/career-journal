@@ -1,21 +1,25 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import {
+  atsBoardPattern, atsProviders, authorizationStatuses, degreeLevels, directionIds, profilePath, readProfile,
+} from '../domain/profile.mjs';
 
 // Reads only the profile fields the role scan needs. The complete profile
 // contract (writing, interview rounds, answers sheet) belongs to the profile
-// domain module; this loader stays tolerant of fields it does not use.
+// domain module: the workspace profile is read through it, and an explicit
+// --profile file is read here and stays tolerant of fields the scan does not use.
 
-export const DIRECTION_IDS = Object.freeze(['ai-ml', 'data-science', 'data-analytics', 'data-engineering', 'software-engineering', 'quant', 'product', 'other']);
-export const DEGREE_LEVELS = Object.freeze(['bachelors', 'masters', 'phd', 'mba', 'other']);
-export const AUTHORIZATION_STATUSES = Object.freeze(['citizen', 'permanent-resident', 'visa', 'other']);
-export const ATS_KINDS = Object.freeze(['greenhouse', 'lever', 'ashby']);
+export const DIRECTION_IDS = directionIds;
+export const DEGREE_LEVELS = degreeLevels;
+export const AUTHORIZATION_STATUSES = authorizationStatuses;
+export const ATS_KINDS = atsProviders;
 
-const BOARD_SLUG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const MONTH = /^\d{4}-(?:0[1-9]|1[0-2])$/;
 
+// The workspace profile, under .career-journal/ or a legacy .jobops/ workspace.
 export function defaultProfilePath(home) {
-  return path.join(path.resolve(home), '.career-journal', 'profile', 'profile.json');
+  return profilePath(path.resolve(home));
 }
 
 function fail(field, message) {
@@ -80,7 +84,7 @@ function atsBoards(value) {
     const ats = enumValue(entry.ats, ATS_KINDS, `${field}.ats`);
     if (!ats) fail(`${field}.ats`, `is required (${ATS_KINDS.join(', ')})`);
     const board = optionalString(entry.board, `${field}.board`);
-    if (!board || !BOARD_SLUG.test(board)) fail(`${field}.board`, 'must be the public board name from the company job-board URL');
+    if (!board || !atsBoardPattern.test(board)) fail(`${field}.board`, 'must be the public board name from the company job-board URL');
     const company = optionalString(entry.company, `${field}.company`);
     return { ats, board, ...(company ? { company } : {}) };
   });
@@ -142,14 +146,21 @@ export function normalizeScanProfile(raw) {
   };
 }
 
-export async function loadScanProfile(home, { path: profilePath } = {}) {
-  const file = profilePath ? path.resolve(String(profilePath)) : defaultProfilePath(home);
+const missingProfile = (file) => new Error(`No search profile found at ${file}. Complete the profile interview first, or pass --profile <path>.`);
+
+export async function loadScanProfile(home, { path: explicitPath } = {}) {
+  if (!explicitPath) {
+    // The workspace profile goes through the profile module, which finds legacy .jobops/
+    // workspaces and applies the full profile validation before the scan's own checks.
+    const profile = await readProfile(path.resolve(home));
+    if (!profile) throw missingProfile(defaultProfilePath(home));
+    return normalizeScanProfile(profile);
+  }
+  const file = path.resolve(String(explicitPath));
   let text;
   try { text = await readFile(file, 'utf8'); }
   catch (error) {
-    if (error.code === 'ENOENT') {
-      throw new Error(`No search profile found at ${file}. Complete the profile interview first, or pass --profile <path>.`);
-    }
+    if (error.code === 'ENOENT') throw missingProfile(file);
     throw error;
   }
   let parsed;

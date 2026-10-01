@@ -14,6 +14,8 @@ export const authorizationStatuses = Object.freeze(['citizen', 'permanent-reside
 export const transcriptPolicies = Object.freeze(['required-only', 'never']);
 export const notifyChannels = Object.freeze(['desktop', 'none']);
 export const atsProviders = Object.freeze(['greenhouse', 'lever', 'ashby']);
+// The board token from a company's official job-board URL, such as boards.greenhouse.io/<token>.
+export const atsBoardPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 
 const COMMON_SECTION = Object.freeze({ title: 'Common form answers', heading: '## Common form answers · 常用表单答案', match: /^## Common form answers\b/ });
 const LEARNED_SECTION = Object.freeze({ title: 'Learned while applying', heading: '## Learned while applying · 申请中补充', match: /^## Learned while applying\b/ });
@@ -155,14 +157,27 @@ function location(value) {
 }
 
 function atsBoard(value) {
-  const shape = exactFields(value, ['ats', 'board'], '{"ats":"greenhouse","board":"examplecorp"}');
+  const shape = exactFields(value, ['ats', 'board', 'company'], '{"ats":"greenhouse","board":"examplecorp","company":"ExampleCorp"}');
   if (shape) return shape;
   const ats = oneOf(atsProviders)(value.ats);
   if (ats) return `ats ${ats}`;
-  if (typeof value.board !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(value.board)) {
+  if (typeof value.board !== 'string' || !atsBoardPattern.test(value.board)) {
     return 'board must be the board name from the official job-board URL (letters, digits, dot, dash, or underscore)';
   }
+  if (Object.hasOwn(value, 'company')) {
+    const company = nonEmptyText(120)(value.company);
+    if (company) return `company ${company}`;
+  }
   return null;
+}
+
+// The role scan needs at least one usable source: a company job board, CareerOps, or the
+// opt-in SimplifyJobs list together with its URL.
+export function hasScanSource(profile) {
+  const sources = isObject(profile?.sources) ? profile.sources : {};
+  return (Array.isArray(sources.atsBoards) && sources.atsBoards.length > 0)
+    || sources.careerOps === true
+    || (sources.simplify?.enabled === true && typeof sources.simplify.url === 'string' && sources.simplify.url.trim() !== '');
 }
 
 const questionKey = (value) => (typeof value === 'string' && questionByKey(value) ? null : 'must be a profile question key');
@@ -494,6 +509,8 @@ export function answeredKeys(text) {
 
 function questionAnswered(question, profile, answered) {
   if (question.target === ANSWERS_TARGET) return answered.has(question.key);
+  // Naming no companies is a complete answer when an opt-in source already feeds the scan.
+  if (question.type === 'ats-boards') return hasScanSource(profile);
   const value = getPath(profile, question.target);
   if (question.type === 'confirm') return value === true;
   if (value === null || value === undefined) return false;
@@ -601,7 +618,12 @@ export async function profileStatus(home) {
   const resumeSet = typeof profile.materials.resumePath === 'string';
   const resume = { set: resumeSet, readable: resumeSet && await isReadableFile(resolveMaterialPath(profile.materials.resumePath)) };
   const [search, materials] = rounds;
-  const scanReasons = stored ? (search.complete ? [] : [describeRound(search)]) : ['no profile yet; run the profile interview'];
+  const scanReasons = [];
+  if (!stored) scanReasons.push('no profile yet; run the profile interview');
+  else {
+    if (!search.complete) scanReasons.push(describeRound(search));
+    if (!hasScanSource(profile)) scanReasons.push('no scan sources; name companies to watch or turn on an opt-in source (round 4)');
+  }
   const applyReasons = [];
   if (!stored) applyReasons.push('no profile yet; complete interview rounds 1 and 2');
   else {
@@ -622,7 +644,7 @@ export async function profileStatus(home) {
     missing,
     resume,
     readiness: {
-      scan: readiness(scanReasons, 'interview round 1 is complete'),
+      scan: readiness(scanReasons, 'interview round 1 is complete and at least one scan source is set'),
       apply: readiness(applyReasons, 'interview rounds 1 and 2 are complete and the resume file is readable'),
     },
   };

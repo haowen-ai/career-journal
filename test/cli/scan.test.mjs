@@ -9,6 +9,7 @@ import { doctor } from '../../src/commands/doctor.mjs';
 import { runCli, HELP } from '../../src/cli/main.mjs';
 import { createRuntime } from '../../src/runtime/create-runtime.mjs';
 import { loadConfig, saveConfig } from '../../src/config/store.mjs';
+import { defaultConfig } from '../../src/config/defaults.mjs';
 import { openDatabase } from '../../src/storage/database.mjs';
 import { listTasks } from '../../src/automation/registry.mjs';
 import { memoryIO } from '../../test-utils/helpers.mjs';
@@ -264,6 +265,28 @@ test('queue verify validates its inputs before writing', async () => fixture(asy
   } finally { db.close(); }
   assert.match((await cli(['queue', 'drop', '--home', home])).io.stderr, /Usage: career-journal queue list/);
 }));
+
+test('scan, queue, and the role-scan task read the profile of a legacy .jobops workspace', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-cli-scan-legacy-'));
+  try {
+    const config = defaultConfig('2026-09-19T00:00:00Z', 'UTC');
+    config.data = { database: '.jobops/jobops.db', artifacts: '.jobops/artifacts' };
+    await mkdir(path.join(home, '.jobops'), { recursive: true });
+    await writeFile(path.join(home, '.jobops', 'config.json'), `${JSON.stringify(config)}\n`);
+    await writeProfile(home, undefined, path.join(home, '.jobops', 'profile', 'profile.json'));
+
+    const preview = await json(['scan', 'run', '--home', home, '--dry-run']);
+    assert.equal(preview.dryRun, true);
+    assert.ok(preview.counts.queued > 0);
+    const summary = await json(['scan', 'run', '--home', home]);
+    assert.equal(summary.counts.queued, preview.counts.queued);
+    assert.equal(existsSync(path.join(home, '.career-journal')), false, 'no second workspace is created');
+    assert.equal((await json(['queue', 'list', '--home', home])).length, summary.counts.queued);
+    const configured = await cli(['automation', 'configure', '--home', home, '--task', 'role-scan', '--enabled']);
+    assert.equal(configured.code, 0, configured.io.stderr);
+    assert.equal(JSON.parse(configured.io.stdout).schedule, '08:30');
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
 
 test('scan run reports a missing profile, missing sources, and total source failure', async () => fixture(async (home) => {
   const missing = await cli(['scan', 'run', '--home', home]);
