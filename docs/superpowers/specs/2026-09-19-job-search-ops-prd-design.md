@@ -3,12 +3,14 @@
 [English](2026-09-19-job-search-ops-prd-design.en.md) | [简体中文](2026-09-19-job-search-ops-prd-design.md)
 
 **状态：** Review Draft  
-**版本：** 0.23
-**日期：** 2026-09-19  
+**版本：** 0.24
+**日期：** 2026-10-01  
 **产品名称：** CAREER JOURNAL
 **交付形态：** 开源 GitHub 项目，提供 Agent 托管版本和通用 LLM API 版本
 
-**本版更新：** Agent 模式先更新已有仓库或安全地改用最新隔离副本，再识别电脑上已经登录的邮箱，只询问用户其中哪一个或多个用于求职；没有账号时再请用户登录邮件应用。Jev 不阻塞核心配置：宿主已有配置时复用，否则由当前 Agent 复核。核心配置通过 `doctor` 后，Agent 主动提供一次可选 Jev 启用选项；用户跳过、没有权限或不启用时保留 `host-agent`，凭据不得进入聊天或 Agent prompt。macOS 可以把 Jev Key 保存到系统钥匙串，配置只保留 `keychain:SERVICE:ACCOUNT` 引用。独立 CLI/API 模式继续支持 IMAPS 和 OpenAI-compatible 服务。
+**本版更新：** 0.24 版与 [CAREER JOURNAL 2.0 设计](2026-10-01-career-journal-2.0-design.md) 对齐。核心配置通过 `doctor` 后，Agent 进行简短的个人资料问答（每轮最多 4 个问题，每题有选项，都可以跳过）；老用户升级时先从已有数据推断，再请用户确认。按个人资料扫描岗位并形成已核实的队列，`career-journal-apply` Skill 在用户自己的浏览器里代填申请表，停在提交前。非目标从“不自动批量投递”改为“不自动提交”：代填只在用户自己的浏览器里进行，登录、同意、签名和提交都由用户本人完成。
+
+**上一版更新（0.23）：** Agent 模式先更新已有仓库或安全地改用最新隔离副本，再识别电脑上已经登录的邮箱，只询问用户其中哪一个或多个用于求职；没有账号时再请用户登录邮件应用。Jev 不阻塞核心配置：宿主已有配置时复用，否则由当前 Agent 复核。核心配置通过 `doctor` 后，Agent 主动提供一次可选 Jev 启用选项；用户跳过、没有权限或不启用时保留 `host-agent`，凭据不得进入聊天或 Agent prompt。macOS 可以把 Jev Key 保存到系统钥匙串，配置只保留 `keychain:SERVICE:ACCOUNT` 引用。独立 CLI/API 模式继续支持 IMAPS 和 OpenAI-compatible 服务。
 
 ## 1. 产品概述
 
@@ -53,9 +55,10 @@ Agent 托管版本优先使用当前 Agent 已具备的邮箱和推理能力。�
 
 ### 3.2 非目标
 
-首个版本不提供：
+以下内容不在产品范围内：
 
-- 自动批量投递或绕过招聘网站流程
+- 自动提交申请或绕过招聘网站流程。代填只在用户自己的浏览器里替用户进行；登录、输入验证码、勾同意框、签名和点提交都由用户本人完成，也不绕过任何 CAPTCHA
+- 替用户写作文、求职信正文或 why us 回答；只能整理用户自己说的话
 - 未经用户授权自动发送邮件或联系招聘方
 - 自动完成测评、面试或实时回答招聘问题
 - 根据长时间未回复自动推断拒绝
@@ -287,6 +290,7 @@ README 必须设置清晰可见的 “Built With / Open Source Acknowledgements�
 12. 使用匹配的 ID 分别触发两个必需任务；Agent 作为宿主邮箱连接器，先为全部选中邮箱生成并导入只读批次，再运行邮件任务并在本地事务提交后分别推进游标
 13. 运行 `career-journal doctor` 作为 onboarding 门禁；任一邮箱实时验证、成功同步、调度器探测或匹配运行缺失时，setup 保持未完成
 14. 创建或导入第一条岗位记录
+15. 按 [2.0 设计](2026-10-01-career-journal-2.0-design.md) 进行个人资料问答：每轮最多 4 个问题，每题给出选项并加“其他”，都可以跳过；简历里能读出的内容先填好，只请用户确认。升级没有个人资料的工作区时，先从已有申请、配置和简历推断，逐项请用户确认，再只补问缺的项。个人资料只保存在用户的数据目录，不进仓库
 
 ### 9.2 API 版本
 
@@ -516,6 +520,13 @@ README 首页必须以一句话安装指令开头。用户把这句话交给 Cod
 - **FR-REL-05**：数据库或配置格式变化必须提供版本化 migration、dry-run、备份和失败回滚
 - **FR-REL-06**：提供标准 Issue 模板记录安装、配置、自动化、材料生成和升级问题
 - **FR-REL-07**：用户可以通过 README 中的准确命令检查更新、拉取版本、运行迁移并验证健康状态
+
+### 11.8 个人资料、岗位扫描与代填申请
+
+- **FR-APPLY-01**：个人资料（`profile.json`）和答案表（`answers.md`）保存在 `<home>/.career-journal/profile/`；简历和成绩单只记录路径。仓库只提供空白模板和问题清单
+- **FR-APPLY-02**：岗位扫描默认读取官方招聘系统的公开岗位接口，其他来源由用户自己开启；筛选条件全部来自个人资料，重复岗位只投一次，每个“不投”都记录原因
+- **FR-APPLY-03**：`career-journal-apply` Skill 每个子 Agent 只负责一个岗位、只用自己的标签页，按答案表和用户选定的那一份简历填写，停在提交前。硬规矩是固定文字：不点任何写着 Submit* 的按钮；不登录、不注册账号、不输入密码或验证码；不勾同意、声明或仲裁条款，不代签名；不写作文；成绩单只在该栏必填时上传；工作描述每条一行、行首加“• ”；不把个人资料写进仓库
+- **FR-APPLY-04**：只有拿到确认邮件或网站“已收到”页面等证据，申请才改为 `applied`；测评和面试邀请记为带截止时间和链接的任务
 
 ## 12. 数据模型
 
@@ -812,3 +823,4 @@ career-journal doctor
 - TypeSafe Jev 发布与 early-access 价格：<https://typesafe.ai/blog/introducing-system-one-models-and-jev>
 - Semantic Versioning 2.0.0：<https://semver.org/>
 - Keep a Changelog：<https://keepachangelog.com/>
+- CAREER JOURNAL 2.0 设计：[2026-10-01-career-journal-2.0-design.md](2026-10-01-career-journal-2.0-design.md)

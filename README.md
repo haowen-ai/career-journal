@@ -14,7 +14,7 @@ Paste this one sentence into **Codex, Claude Code, Cursor, or another repository
 Get the latest version of CAREER JOURNAL from https://github.com/haowen-ai/career-journal and set it up automatically; if an existing checkout is present, fast-forward it safely or use a fresh isolated clone, then read the latest AGENTS.md and complete onboarding.
 ```
 
-The Agent handles cloning, setup, mailbox configuration, local time-zone detection, daily schedules, verification, and the first run. You only step in for an unavoidable login, authorization, or account choice. [Read the full setup guide →](docs/getting-started.md)
+The Agent handles cloning, setup, mailbox configuration, local time-zone detection, daily schedules, verification, and the first run. You only step in for an unavoidable login, authorization, or account choice. Afterwards it asks a few short rounds of questions about the roles you want, your materials, and common form answers; every question has options and can be skipped. [Read the full setup guide →](docs/getting-started.md)
 
 ## Product preview
 
@@ -25,6 +25,9 @@ The Agent handles cloning, setup, mailbox configuration, local time-zone detecti
 ## What it does
 
 - Tracks each application, status change, deadline, interview, and next action
+- Keeps your job-search profile and form answers on your computer, never in the repository
+- Scans official job boards by your own criteria, verifies each posting, and queues roles by fit
+- Fills application forms in your own browser and stops before submit: you sign in, enter codes, consent, sign, and click submit yourself
 - Imports existing applications from a bounded mailbox review, files, spreadsheets, or a guided interview after the user confirms the proposed records
 - Discovers signed-in mail accounts, then reads the one or more accounts the user selects in read-only mode
 - Keeps generated drafts, verified files, and the exact submitted resume or cover letter distinct
@@ -38,6 +41,7 @@ The repository tells a compatible Agent how to configure the workspace from end 
 
 - [Getting started and Agent setup](docs/getting-started.md)
 - [Email, automation, CLI, backup, and upgrade guide](docs/getting-started.md#email-integration)
+- [Profile, role scans, and assisted applying](docs/getting-started.md#profile-role-scans-and-assisted-applying)
 - [CareerOps bridge](docs/integrations/careerops-bridge.md)
 - [Product requirements](docs/superpowers/specs/2026-09-19-job-search-ops-prd-design.en.md)
 - [Release history](CHANGELOG.md)

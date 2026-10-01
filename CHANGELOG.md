@@ -8,11 +8,18 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Added
 
-- None
+- Added the `career-journal-apply` Skill in English and Simplified Chinese for assisted applying. It takes N verified roles from the queue (`pace.batchSize`, default 5), checks duplicates and eligibility first, and gives each role to one sub-agent that opens and uses only its own browser tab. Forms are filled from the user's own answers sheet with the one resume the user chose; the transcript is uploaded only when the field is required, and work descriptions are entered one bullet per line prefixed "• ". Tab titles (🔑 sign in, 🤖 CAPTCHA, ❓ question, 👆 click, ✅ ready to submit) show which tab needs the user, new questions are asked as they come up and saved with `profile answer`, and the Agent recovers from a disconnected browser or closed tab group by resuming from the site's saved draft
+- Added post-submit verification to the apply flow: an application moves to `applied` through `event add --status-after applied` only with evidence such as the confirmation email or the site's received page, and assessment or interview invitations are recorded with `task add --due-at --due-note --link`
+- Added `references/ats-tips.md` with generic filling technique for Workday, Oracle HCM, iCIMS, Greenhouse, Ashby, Lever, Yello, and SAP SuccessFactors, and `references/fill-brief.md`, the brief template each fill sub-agent receives, both in English and Simplified Chinese
+- Added the profile interview to the onboarding contract: after core onboarding passes `doctor`, the Agent asks at most 4 questions per round, each with options plus "Other", and every question can be skipped. Upgrades from 1.x infer from existing applications, configuration, and the resume first and ask the user to confirm before asking anything new
+- Added routing in the `career-journal` Skill for "find roles" (`scan run`, `queue verify`, `queue list`), "apply" (the new Skill), and "profile" (`profile show|questions|set|answer|status`)
+- Added third-party notices for role-scan sources: official Greenhouse, Lever, and Ashby job-board APIs by default, and the unlicensed SimplifyJobs lists only as an opt-in source read live on the user's machine and never redistributed
 
 ### Changed
 
-- None
+- `AGENTS.md`, both READMEs, and both Getting Started guides now describe the profile interview, role scans, assisted applying, the fixed hard rules, and where the profile lives (`<home>/.career-journal/profile/`, never the repository)
+- PRD 0.24 changes the non-goal from no automatic bulk applying to no automatic submission: assisted filling happens only in the user's own browser, and the user signs in, consents, signs, and submits. It links the 2.0 design
+- `scripts/check-release.mjs` adds an `apply-skill` check: the Skill and both references must exist in English and Simplified Chinese with language links, discovery frontmatter, every hard rule, all five tab titles, every ATS section, and routing from the `career-journal` Skill and `AGENTS.md`
 
 ### Fixed
 
@@ -20,7 +27,8 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Security
 
-- None
+- The apply Skill's hard rules are fixed text that no profile value or setting can turn off: never click any Submit*-labelled button; never sign in, create accounts, or type passwords or codes; never tick consent, attestation, or arbitration boxes or sign; never write essays; transcript only when required; one resume as chosen by the user; never put personal data into the repository. The release check fails if any rule is missing or altered in either language
+- The release check also fails when the apply Skill or its references contain a local user path or an email address outside the example domains
 
 ## [1.1.0] - 2026-10-01
 
