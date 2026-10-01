@@ -43,9 +43,13 @@ export async function readJson(request) {
   }
 }
 
+// Role-queue columns (schema 5) are included by name only: the source name but
+// not its source_id, and no posting text or decision trace.
 function applicationDetail(db, id) {
   const application = db.prepare(`SELECT id, company, role, external_id externalId, job_url jobUrl, status,
-    stage, applied_at appliedAt, created_at createdAt, updated_at updatedAt FROM applications WHERE id = ?`).get(id);
+    stage, applied_at appliedAt, created_at createdAt, updated_at updatedAt,
+    source, location, posted_at postedAt, deadline_at deadlineAt, fit, fit_confidence fitConfidence,
+    fit_note fitNote, verified_at verifiedAt, skip_reason skipReason FROM applications WHERE id = ?`).get(id);
   if (!application) return null;
   const events = db.prepare(`SELECT id, event_type type, occurred_at occurredAt, observed_at observedAt,
     recorded_at recordedAt, title, note, source_json source, status_after statusAfter
@@ -61,7 +65,7 @@ function publicTask({ id, kind, title, platform, link, dueAt, dueNote, status, n
   return { id, kind, title, platform, link: link ?? null, dueAt, dueNote, status, note, createdAt, updatedAt };
 }
 
-const safeSourceKinds = new Set(['api', 'cli', 'email', 'import', 'manual', 'system']);
+const safeSourceKinds = new Set(['api', 'cli', 'email', 'import', 'manual', 'system', 'role-scan', 'queue-verify']);
 
 function dashboardApplication(db, id) {
   const detail = applicationDetail(db, id);

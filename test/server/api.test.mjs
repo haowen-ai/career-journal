@@ -9,6 +9,8 @@ import { openHomeDatabase } from '../../src/runtime/home.mjs';
 import { createServer } from '../../src/server/app.mjs';
 import { archiveArtifact } from '../../src/domain/artifacts.mjs';
 import { getTask, upsertTask } from '../../src/domain/tasks.mjs';
+import { recordEvent } from '../../src/domain/events.mjs';
+import { verifyQueuedRole } from '../../src/commands/queue.mjs';
 
 async function withServer(run, serverOptions = {}) {
   const home = await mkdtemp(path.join(os.tmpdir(), 'jobops-server-'));
@@ -248,4 +250,58 @@ test('task status route rejects cross-origin, invalid-host, non-JSON, malformed,
   const putRequest = await fetch(`${baseUrl}${pathname}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body });
   assert.equal(putRequest.status, 404);
   assert.deepEqual(getTask(db, 'task-later'), before);
+}));
+
+const queueFields = ['source', 'location', 'postedAt', 'deadlineAt', 'fit', 'fitConfidence', 'fitNote', 'verifiedAt', 'skipReason'];
+
+test('dashboard and detail routes include role-queue fields without source ids, posting text, or decision traces', async () => withServer(async (baseUrl, db) => {
+  const create = async (role) => (await fetch(`${baseUrl}/api/applications`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ company: 'Example Corp', role }),
+  })).json();
+  const queued = await create('Machine Learning Intern');
+  const skipped = await create('Research Scientist Intern');
+  const manual = await create('Data Analyst Intern');
+  const update = db.prepare(`UPDATE applications SET source = ?, source_id = ?, location = ?, posted_at = ?, deadline_at = ?,
+    fit = ?, fit_confidence = ?, fit_note = ? WHERE id = ?`);
+  update.run('greenhouse', 'board-secret-4000001', 'New York, NY', '2026-09-28T18:00:00Z', null, 'high', 0.92, 'primary direction in the title', queued.id);
+  update.run('lever', 'lever-secret-0002', 'Seattle, WA', '2026-09-20T10:00:00Z', null, 'low', null, 'no primary or secondary direction', skipped.id);
+  db.prepare(`INSERT INTO decision_traces (id, application_id, engine, mode, decision_json, confidence, applied, created_at)
+    VALUES (?, ?, 'rules', 'role-fit', ?, NULL, 1, ?)`).run('trace-1', queued.id, JSON.stringify({ fit: 'high', note: 'trace-only-text' }), '2026-09-28T18:00:00Z');
+  recordEvent(db, {
+    id: 'scan-event', applicationId: queued.id, type: 'role_found', occurredAt: null, observedAt: '2026-09-28T18:00:00Z',
+    recordedAt: '2026-09-28T18:00:00Z', title: 'Found by role scan', note: '',
+    source: { kind: 'role-scan', source: 'greenhouse', sourceId: 'board-secret-4000001', url: 'https://job-boards.greenhouse.io/examplecorp/jobs/4000001' },
+  });
+  verifyQueuedRole(db, { id: queued.id, result: 'ok', reason: 'Official posting checked', deadline: '2026-10-15T23:59:00-04:00' }, '2026-09-30T12:00:00Z');
+  verifyQueuedRole(db, { id: skipped.id, result: 'skip', reason: 'PhD students only' }, '2026-09-30T12:05:00Z');
+
+  const dashboard = await (await fetch(`${baseUrl}/api/dashboard`)).json();
+  const byId = new Map(dashboard.applications.map((item) => [item.id, item]));
+  const pick = (item) => Object.fromEntries(queueFields.map((field) => [field, item[field]]));
+  assert.deepEqual(pick(byId.get(queued.id)), {
+    source: 'greenhouse', location: 'New York, NY', postedAt: '2026-09-28T18:00:00Z', deadlineAt: '2026-10-15T23:59:00-04:00',
+    fit: 'high', fitConfidence: 0.92, fitNote: 'primary direction in the title', verifiedAt: '2026-09-30T12:00:00Z', skipReason: null,
+  });
+  assert.deepEqual(pick(byId.get(skipped.id)), {
+    source: 'lever', location: 'Seattle, WA', postedAt: '2026-09-20T10:00:00Z', deadlineAt: null,
+    fit: 'low', fitConfidence: null, fitNote: 'no primary or secondary direction', verifiedAt: '2026-09-30T12:05:00Z', skipReason: 'PhD students only',
+  });
+  assert.equal(byId.get(skipped.id).status, 'withdrawn');
+  assert.deepEqual(pick(byId.get(manual.id)), Object.fromEntries(queueFields.map((field) => [field, null])));
+  for (const item of dashboard.applications) {
+    assert.equal('sourceId' in item, false);
+    assert.equal('source_id' in item, false);
+  }
+  const queuedEvents = byId.get(queued.id).events;
+  assert.equal(queuedEvents.find((event) => event.id === 'scan-event').sourceKind, 'role-scan');
+  assert.equal(queuedEvents.find((event) => event.type === 'queue_verified').sourceKind, 'queue-verify');
+  assert.doesNotMatch(JSON.stringify(dashboard), /board-secret|lever-secret|trace-only-text|decision_json|decisionTrace/);
+
+  const detail = await (await fetch(`${baseUrl}/api/applications/${queued.id}`)).json();
+  assert.deepEqual(pick(detail), pick(byId.get(queued.id)));
+  assert.equal('sourceId' in detail, false);
+  assert.equal('source_id' in detail, false);
+  assert.doesNotMatch(JSON.stringify(detail), /trace-only-text|decision_json/);
+  const list = await (await fetch(`${baseUrl}/api/applications`)).json();
+  assert.equal(list.length, 3);
 }));

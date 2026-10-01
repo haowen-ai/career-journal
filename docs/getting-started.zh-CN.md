@@ -253,6 +253,7 @@ career-journal queue verify --home ~/job-search --id <application> --result skip
 - **去重：** 来源 ID 相同、链接中的职位编号相同、链接相同，或同一公司的职位名称几乎一致，都算同一个职位，只投一次。已经投递或已跳过的职位不会再次进入队列；名称相近的职位会进入队列并标注“可能重复”
 - **匹配度：** 先由 Jev 给出 `high`、`medium` 或 `low`，再交给已配置的大语言模型。两者都没有时，用本地规则判断：职位名称含主要方向为 `high`，含次要方向为 `medium`，并在备注中写明是规则判断
 - **队列：** Agent 逐个阅读新职位的官网原文，再用 `queue verify --id <application> --result ok|skip --reason <原因> [--deadline <iso>]` 记录；每个“不投”都有原因，`skip` 会把线索改为 `withdrawn`，并记录一条带原因的事件。`queue list` 列出尚未跳过的线索，按匹配度、截止时间、地点排序和发布时间排列
+- **看板：** 线索卡片显示匹配度、按工作区时区显示的截止时间和剩余天数、地点、来源，以及岗位原文是否已核实。**投递队列**筛选列出的岗位与 `queue list` 相同、顺序一致，只是浏览器中不按地点顺序排。被跳过的岗位显示在**已结束**中，并附跳过原因
 - **每日扫描（可选）：** 只有你在第 4 轮同意后才创建，而且总是单独的定时任务：另建一个 Codex heartbeat 或 Claude Code 定时任务，在 `pace.scanTime` 运行。它不能加入运行 `mail-sync` 和 `deadline-review` 的共享任务，那个任务固定在 20:00 和 20:15 运行，也不接受其他任务。`automation configure --task role-scan --enabled` 的时间取自 `pace.scanTime`，`automation register-external --task role-scan` 登记新任务自己的 ID。新用户配置时不会创建它，`doctor` 也不要求它
 
 ### 代填申请

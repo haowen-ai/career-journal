@@ -4,9 +4,11 @@ import {
   compareEventsNewestFirst,
   filterApplications,
   hasOpenTask,
+  isQueued,
   latestEvent,
   materialKindLabel,
   openTasks,
+  queueSummary,
   suggestedNextAction,
   taskDeadlineLabel,
   taskDeadlineStatus,
@@ -41,6 +43,7 @@ const copy = {
     filterTasks: 'Assessments / interviews', markDone: 'Mark done', undo: 'Undo', taskUpdateError: 'Could not update',
     completedTasks: (count) => `Completed (${count})`, taskCompleted: 'Completed', platform: 'Platform', openLink: 'Open link', deadline: 'Deadline',
     openSteps: 'Open steps', cardTasks: 'Assessment and interview steps', cardTasksNote: 'Deadlines use the workspace time zone.',
+    filterQueue: 'Queue', queueFacts: 'Role queue details', location: 'Location', skipReason: 'Skip reason',
   },
   'zh-CN': {
     localWorkspace: '本地档案', heroEyebrow: '让每一步都有记录', heroTitle: '求职进度总览',
@@ -64,6 +67,7 @@ const copy = {
     filterTasks: '测评 / 面试', markDone: '标记完成', undo: '撤销', taskUpdateError: '更新失败',
     completedTasks: (count) => `已完成（${count}）`, taskCompleted: '已完成', platform: '平台', openLink: '打开链接', deadline: '截止时间',
     openSteps: '待完成步骤', cardTasks: '测评与面试步骤', cardTasksNote: '截止时间按工作区时区显示。',
+    filterQueue: '投递队列', queueFacts: '待投岗位信息', location: '地点', skipReason: '跳过原因',
   },
 };
 
@@ -73,8 +77,8 @@ const statusCopy = {
 };
 
 const sourceCopy = {
-  en: { api: 'API', cli: 'CLI', email: 'Email', import: 'Import', manual: 'Manual', system: 'System', other: 'Other' },
-  'zh-CN': { api: 'API', cli: '命令行', email: '邮件', import: '导入', manual: '手动记录', system: '系统', other: '其他' },
+  en: { api: 'API', cli: 'CLI', email: 'Email', import: 'Import', manual: 'Manual', system: 'System', 'role-scan': 'Role scan', 'queue-verify': 'Posting check', other: 'Other' },
+  'zh-CN': { api: 'API', cli: '命令行', email: '邮件', import: '导入', manual: '手动记录', system: '系统', 'role-scan': '岗位扫描', 'queue-verify': '岗位核对', other: '其他' },
 };
 
 const state = { applications: [], group: 'all', locale: initialLocale(), timezone: 'UTC', generatedAt: null };
@@ -111,27 +115,31 @@ function formatDate(value, { includeTime = false } = {}) {
   catch { return new Intl.DateTimeFormat(state.locale, { year: 'numeric', month: 'short', day: 'numeric' }).format(date); }
 }
 
-function formatDeadline(value, { compact = false } = {}) {
+function formatDeadline(value, { compact = false, zone = false } = {}) {
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) return String(value);
   const options = compact
-    ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
+    ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', ...(zone ? { timeZoneName: 'short' } : {}) }
     : { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' };
   try { return new Intl.DateTimeFormat(state.locale, { ...options, timeZone: state.timezone }).format(date); }
   catch { return new Intl.DateTimeFormat(state.locale, options).format(date); }
 }
 
-function taskBadge(task) {
+function deadlineBadge(deadline) {
   const badge = document.createElement('span');
+  badge.className = `task-badge is-${deadline.state}${deadline.urgent && deadline.state !== 'overdue' ? ' is-urgent' : ''}`;
+  badge.textContent = taskDeadlineLabel(deadline, state.locale);
+  return badge;
+}
+
+function taskBadge(task) {
   if (task.status === 'done') {
+    const badge = document.createElement('span');
     badge.className = 'task-badge is-done';
     badge.textContent = t('taskCompleted');
     return badge;
   }
-  const deadline = taskDeadlineStatus(task, { timeZone: state.timezone });
-  badge.className = `task-badge is-${deadline.state}${deadline.urgent && deadline.state !== 'overdue' ? ' is-urgent' : ''}`;
-  badge.textContent = taskDeadlineLabel(deadline, state.locale);
-  return badge;
+  return deadlineBadge(taskDeadlineStatus(task, { timeZone: state.timezone }));
 }
 
 const knownTaskKinds = new Set(['assessment', 'interview', 'other']);
@@ -313,6 +321,52 @@ function renderCardTasks(card, application) {
   }));
 }
 
+function queueFact(className, label, ...content) {
+  const item = document.createElement('li'); item.className = `card-queue-fact ${className}`;
+  const name = document.createElement('span'); name.className = 'card-queue-label'; name.textContent = label;
+  const value = document.createElement('span'); value.className = 'card-queue-value'; value.append(...content);
+  item.append(name, value);
+  return item;
+}
+
+function renderQueue(card, application) {
+  const summary = queueSummary(application, { locale: state.locale, timeZone: state.timezone });
+  const line = card.querySelector('.card-queue');
+  const skip = card.querySelector('.card-skip');
+  line.hidden = !summary;
+  skip.hidden = !summary?.skipReason;
+  if (!summary) return;
+  line.setAttribute('aria-label', t('queueFacts'));
+  const fit = line.querySelector('.fit-badge');
+  fit.className = `fit-badge fit-${summary.fit.level}`;
+  fit.textContent = summary.fit.label;
+  if (summary.fit.note) fit.title = summary.fit.note; else fit.removeAttribute('title');
+
+  const facts = [];
+  if (summary.deadline.at || summary.deadline.status) {
+    const content = [];
+    if (summary.deadline.at) {
+      const time = document.createElement('time'); time.dateTime = summary.deadline.at;
+      time.textContent = formatDeadline(summary.deadline.at, { compact: true, zone: true });
+      content.push(time);
+    }
+    if (summary.deadline.status) content.push(deadlineBadge(summary.deadline.status));
+    facts.push(queueFact('queue-deadline', t('deadline'), ...content));
+  }
+  if (summary.location) facts.push(queueFact('queue-location', t('location'), summary.location));
+  if (summary.source) facts.push(queueFact('queue-source', t('source'), summary.source));
+  const check = document.createElement('li');
+  check.className = `card-queue-fact queue-check is-${summary.check.state}`;
+  check.textContent = summary.check.at ? `${summary.check.label} · ${formatDate(summary.check.at)}` : summary.check.label;
+  facts.push(check);
+  line.querySelector('.card-queue-facts').replaceChildren(...facts);
+
+  if (summary.skipReason) {
+    setText(skip, '.card-skip-label', t('skipReason'));
+    setText(skip, '.card-skip-reason', summary.skipReason);
+  }
+}
+
 function renderCard(application) {
   const fragment = elements.template.content.cloneNode(true);
   const card = fragment.querySelector('.application-card');
@@ -324,6 +378,7 @@ function renderCard(application) {
   setText(card, '.job-id', application.externalId ? `#${application.externalId}` : application.id);
   setText(card, '.role', application.role);
   const status = card.querySelector('.status'); status.className = `status status-${group}`; status.textContent = statusLabel(application.status);
+  renderQueue(card, application);
   setText(card, '[data-field-label="stage"]', t('currentStage'));
   setText(card, '[data-field-label="applied"]', t('appliedDate'));
   setText(card, '[data-field-label="latest"]', t('latestUpdate'));
@@ -365,7 +420,7 @@ function render() {
   for (const key of ['applied', 'waiting', 'interview', 'closed', 'preparing']) document.querySelector(`#stat-${key}`).textContent = stats[key];
   const filterCounts = {
     all: state.applications.length, waiting: stats.waiting, interview: stats.interview, closed: stats.closed, preparing: stats.preparing,
-    tasks: state.applications.filter(hasOpenTask).length,
+    tasks: state.applications.filter(hasOpenTask).length, queue: state.applications.filter(isQueued).length,
   };
   for (const [key, value] of Object.entries(filterCounts)) document.querySelector(`[data-count="${key}"]`).textContent = value;
   renderTasks();
