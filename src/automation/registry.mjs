@@ -267,7 +267,7 @@ export function markTaskRegistration(db, id, registration) {
     db.prepare('UPDATE automations SET config_json = ? WHERE id = ?').run(JSON.stringify(config), id);
     if (startedTransaction) db.exec('COMMIT');
   } catch (error) {
-    if (startedTransaction && db.inTransaction) db.exec('ROLLBACK');
+    if (startedTransaction && db.isTransaction) db.exec('ROLLBACK');
     throw error;
   }
   return row(db.prepare('SELECT * FROM automations WHERE id = ?').get(id));
