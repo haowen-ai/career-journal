@@ -1,6 +1,6 @@
 # Two-minute apply — design
 
-Status: draft for review, 2026-10-26.
+Status: approved for screening scope, 2026-10-26.
 
 ## Intent
 
@@ -11,6 +11,14 @@ CAREER JOURNAL is open source. Each user installs it on their own Mac and runs i
 Finding roles, reading each official posting, judging eligibility and ranking happen unattended in the background on the user's chosen cadence. Filling happens **on demand**, when the user asks — never ahead of time, so forms never sit and expire. The user's time is the review and the click.
 
 Why now: the maintainer's own season showed that (a) the scan silently missed many matching roles (disabled source, stale board tags, narrow keyword and city lists, title-similarity dedupe), (b) roles reached the queue on inferred eligibility and were wrong when the posting was read, and (c) unattended runs stalled on permission prompts. Those failures, not missing features, are what stand between today's tool and the promise.
+
+## This release (decided 2026-10-26)
+
+This release upgrades **role screening only**: collect → certain exclusions → official read → escalation → rank, plus the review queue, source health, budgets, retention and the evaluation gate that keep screening correct and bounded.
+
+The apply flow stays exactly as it works today: when the user asks, the agent fills the chosen roles in the user's Chrome, one tab each, and stops before Submit. The user creates accounts and signs in themselves. **Each tab's title says what the user still has to do** (for example: ready to submit; create account / sign in first; essay to write; transcript or references needed; assessment link), so the user can work through the tabs without opening notes. No new browser machinery is built.
+
+Deferred to a later release (described below for direction, not built now): the first-run wizard (§3), configurable cadence and the controller (§4 — the existing 21:00 launchd job stays), readiness re-check tooling, and packaging for other users' search types. Goals 1, 4 and 5 belong to that later release.
 
 ## Goals
 
@@ -50,7 +58,7 @@ Why now: the maintainer's own season showed that (a) the scan silently missed ma
 - **Search scope:** internships, co-ops and full-time (new grad and experienced) are all supported; the onboarding interview collects directions, locations, terms, degree, authorization and company preferences. Nothing is hard-coded to one user's search.
 - **Cadence:** configurable; deadline-aware extra alert.
 - **Platform:** macOS only.
-- **Apply flow:** on demand — the user asks, the agent fills N, the user reviews and submits; sign-in/new-account roles go to the needs-you lane.
+- **Apply flow:** unchanged from today — the user asks, the agent fills, the user reviews and submits; tab titles state what the user must still do (sign up, essay, etc.).
 - **Accounts:** user creates/signs in with their password manager; agent continues afterwards.
 - **Jev:** removed.
 - **Privacy:** local storage; only needed fields go to the user's chosen model provider, disclosed at setup.
@@ -76,14 +84,14 @@ Why now: the maintainer's own season showed that (a) the scan silently missed ma
 
 Unclear items wait in a durable review queue that every run drains first (including zero-discovery days), with retry and a maximum wait; items needing the user are listed in the run summary.
 
-### 3. First-run wizard (one sitting)
+### 3. First-run wizard (one sitting) — later release
 
 1. Install, then `career-journal setup` walks through: Chrome + extension sign-in; Apple Mail access for the job-search inboxes; the agent's tool permissions written as a scoped allowlist (product folder, product database, read-only mail, browser reading) after the user approves once; profile interview (directions, locations, terms, degree, authorization, companies, cadence, N); resume and answer sheet.
 2. The wizard ends with a live dry run: one scan, one official-text judgment, one form filled to the ready state. Setup is "done" only when each step passed.
 3. Mechanical jobs (collect, prune, notify) run from launchd and never prompt. Agent jobs run with the pre-approved allowlist.
 4. Every run starts with `doctor`; a broken permission or expired login produces one notification naming the item and the fix, instead of a silent stall.
 
-### 4. Cadence and notifications
+### 4. Cadence and notifications — later release
 
 - One launchd-woken controller claims due work and runs it in order (mail catch-up → collect → judge → prune), so overlapping schedules cannot collide. Discovery cadence is a profile setting (daily / weekdays / weekly / custom); mail catch-up uses a durable watermark, so multi-day gaps are covered.
 - Health checks follow the chosen cadence (next due time + grace), not a fixed 36 hours.
