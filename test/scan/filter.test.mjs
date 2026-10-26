@@ -82,6 +82,10 @@ test('season matching reads the profile term from titles, listed terms, and inte
   assert.equal(checkSeason(role({ title: 'ML Intern 2026-2027' }), wanted).ok, true);
   assert.match(checkSeason(role({ title: 'ML Intern', terms: ['Fall 2026', 'Spring 2027'] }), wanted).reason, /listed for Fall 2026, Spring 2027/);
   assert.equal(checkSeason(role({ title: 'ML Intern', terms: ['Summer 2027'] }), wanted).ok, true);
+  assert.equal(checkSeason(role({ title: 'ML Intern', terms: ['Summer 2026'] }), wanted).ok, true,
+    'a same-term tag one year early is a carried-over label; the official posting decides');
+  assert.match(checkSeason(role({ title: 'ML Intern - Summer 2026', terms: ['Summer 2026'] }), wanted).reason, /title names Summer 2026/);
+  assert.match(checkSeason(role({ title: 'ML Intern', terms: ['Summer 2026', 'Fall 2026'] }), wanted).reason, /listed for Summer 2026, Fall 2026/);
   assert.match(checkSeason(role({ title: 'ML Intern', description: 'Join our Fall 2026 co-op program.' }), wanted).reason, /posting mentions only Fall 2026/);
   assert.equal(checkSeason(role({ title: 'ML Intern', description: 'Interviews take place in Fall 2026. The summer internship runs 12 weeks.' }), wanted).ok, true,
     'an interview date is not the internship term');

@@ -103,7 +103,12 @@ export function checkSeason(role, profile) {
   if (!target.term && !target.year) return { ok: true };
   const wanted = formatSeason(target);
   const listed = (role?.terms ?? []).map(parseSeason).filter((item) => item.term || item.year);
-  if (listed.length) {
+  // A board tag for the same term one year earlier (Summer 2026 on a Summer 2027 list) is usually a
+  // carried-over label, not the real term, so it does not drop the role; the title or the official
+  // posting decides instead.
+  const carriedOver = listed.length && target.year
+    && listed.every((item) => item.year === target.year - 1 && (!target.term || item.term === target.term));
+  if (listed.length && !carriedOver) {
     return listed.some((item) => seasonMatches(item, target))
       ? { ok: true }
       : { ok: false, reason: `season: listed for ${describeMentions(listed)}; profile wants ${wanted}` };

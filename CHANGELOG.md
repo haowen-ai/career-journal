@@ -22,6 +22,24 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [2.1.1] - 2026-10-26
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- A job board tag for the same term one year earlier (for example Summer 2026 on a Summer 2027 list) no longer drops a role; such tags are often carried over, so the title or the official posting decides
+
+### Security
+
+- None
+
 ## [2.1.0] - 2026-10-26
 
 ### Added
