@@ -8,6 +8,24 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Added
 
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- None
+
+### Security
+
+- None
+
+## [2.1.0] - 2026-10-26
+
+### Added
+
 - A **To apply** section on the dashboard, above Assessments & interviews, lists every lead or prepared role without a skip reason, soonest deadline first; roles without a deadline follow in queue order. Rows are grouped into Apply today (due within 2 days in the workspace time zone, or past the deadline by at most 24 hours and marked Deadline passed), Due this week (3–7 days), Later, and No deadline listed, and the last two groups are collapsed. Each row shows fit, location, the deadline with days left, whether the posting is verified, and an Open posting link; a summary line counts what is due today, this week, and later
 - The five summary cards at the top of the dashboard are now buttons: clicking one, or pressing Enter or Space, applies the matching list filter and scrolls to the list. **Applications sent** opens a new **Sent** filter that shows every application confirmed as submitted
 - A sixth summary card, **Assessments & interviews**, counts open assessment and interview steps. Its hint line shows how many are past due and how many are due within 2 days in the workspace time zone, the next deadline when none are due soon, or Nothing open, and the card turns amber when a step is due within 2 days or past due. Clicking it, or pressing Enter or Space, scrolls to the Assessments & interviews section and moves focus to its heading without changing the list filter. The six cards sit in a 3 × 2 grid on desktop and tablet; on phones the first and last cards span the full width
