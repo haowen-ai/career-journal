@@ -8,6 +8,8 @@ API 模式的 CareerOps 适配器会调用用户单独安装并锁定版本的 `
 
 配置的 CareerOps 根目录必须包含 `career-journal-adapter.mjs`。当前锁定的上游版本并未提供这个桥接，因此在用户安装兼容桥接之前，API 模式的申请材料生成不可用。Codex 原生用户仍可以直接配合 CareerOps 使用仓库内的 `careerops-materials` Skill。缺少桥接只会显示健康检查警告，不会被冒充为成功结果。
 
+岗位扫描不需要这个桥接。锁定版本的 checkout 里没有 `career-journal-adapter.mjs` 时，`career-journal scan run` 使用内置的只读桥接 `src/integrations/careerops-scan-bridge.mjs`（见下面的“只读职位扫描”）。它只支持 `scan`。
+
 显式指定 `jobops-adapter.mjs` 的 v0.1.0-alpha.5 及更早版本配置仍受支持。新配置不会发现或自动回退到该旧桥接；新集成必须暴露 `career-journal-adapter.mjs`。
 
 ## 调用方式
@@ -72,4 +74,8 @@ node <careerops-root>/career-journal-adapter.mjs scan
 }
 ```
 
-缺少公司、职位名称或 http(s) 链接的条目会被忽略。没有桥接文件时跳过这个来源；扫描失败或返回格式错误时记为该来源出错，其他来源照常运行。
+缺少公司、职位名称或 http(s) 链接的条目会被忽略。没有安装 CareerOps 或版本不符时跳过这个来源；扫描失败或返回格式错误时记为该来源出错，其他来源照常运行。
+
+### 内置扫描桥接
+
+没有 CareerOps 适配器时，扫描以 CareerOps 根目录为工作目录运行 `node <career-journal>/src/integrations/careerops-scan-bridge.mjs scan`。这个桥接运行 CareerOps 自己的 `node scan.mjs --dry-run --json`（不写入任何文件），并把 `CAREER_OPS_SCAN_HISTORY` 和 `CAREER_OPS_PIPELINE` 指向临时目录。它读取 `portals.yml`（或 `CAREER_OPS_PORTALS`）的临时副本：`title_filter` 改为保留实习和 co-op 职位名称，去掉 `location_filter`；包括 `tracked_companies` 在内的其他设置不变，也从不修改 CareerOps 的原文件。职位来自回执里的 `added_urls`，与扫描为同一批职位打印的 `+ 公司 | 职位 | 地点` 行按顺序对应，因此不带职位描述。完整扫描需要几分钟；配置里的 `careerOps.scanTimeoutMs` 可以改写 20 分钟的上限。

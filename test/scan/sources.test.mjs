@@ -6,6 +6,8 @@ import path from 'node:path';
 import { ATS_ENDPOINTS, fetchAtsBoards, parseAshby, parseGreenhouse, parseLever } from '../../src/scan/sources/ats-boards.mjs';
 import { fetchSimplify, parseSimplify } from '../../src/scan/sources/simplify.mjs';
 import { fetchCareerOpsRoles } from '../../src/scan/sources/careerops.mjs';
+import { BUILT_IN_SCAN_BRIDGE } from '../../src/integrations/careerops.mjs';
+import { parseScanOutput, scanCareerOps, widenPortals } from '../../src/integrations/careerops-scan-bridge.mjs';
 import { htmlToText } from '../../src/scan/text.mjs';
 import { ATS_URLS, SIMPLIFY_URL, fixtureFetch, scanFixtures } from '../../test-utils/scan-fixtures.mjs';
 
@@ -140,4 +142,82 @@ test('CareerOps runs only when enabled and detected, through the read-only bridg
 test('HTML job descriptions become readable text', () => {
   assert.equal(htmlToText('&lt;p&gt;One &amp;amp; two&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Three&lt;/li&gt;&lt;/ul&gt;'), 'One & two\n• Three');
   assert.equal(htmlToText('<script>alert(1)</script><b>Bold</b>&nbsp;text&#x21;'), 'Bold text!');
+});
+
+test('Simplify reads every configured list once, keeps a listing once, and reports each list', async () => {
+  const { simplify } = await scanFixtures();
+  const SECOND = 'https://example.com/simplify/off-season.json';
+  const THIRD = 'https://example.com/simplify/broken.json';
+  const extra = { ...simplify[0], id: 'off-season-1', title: 'Data Science Co-op', terms: ['Fall 2027'] };
+  const calls = [];
+  const fetchImpl = fixtureFetch({ [SIMPLIFY_URL]: simplify, [SECOND]: [simplify[0], extra], [THIRD]: 500 }, calls);
+  const result = await fetchSimplify({ enabled: true, url: SIMPLIFY_URL, urls: [SECOND, SIMPLIFY_URL, THIRD] }, fetchImpl);
+  assert.deepEqual(calls, [SIMPLIFY_URL, SECOND, THIRD], 'a repeated link is read once');
+  assert.deepEqual(result.sources.map((item) => [item.url, item.status, item.count]), [[SIMPLIFY_URL, 'ok', 6], [SECOND, 'ok', 1], [THIRD, 'error', 0]]);
+  assert.equal(result.roles.length, 7, 'a listing on two lists is kept once');
+  assert.equal(result.roles.at(-1).sourceId, 'off-season-1');
+  const onlyExtra = await fetchSimplify({ enabled: true, url: null, urls: [SECOND] }, fixtureFetch({ [SECOND]: [extra] }));
+  assert.equal(onlyExtra.roles.length, 1);
+});
+
+test('without a CareerOps adapter the scan uses the built-in read-only bridge', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'career-journal-careerops-builtin-'));
+  try {
+    await writeFile(path.join(directory, 'package.json'), JSON.stringify({ name: 'career-ops', version: '1.32.0' }));
+    let invocation;
+    const result = await fetchCareerOpsRoles(true, { root: directory, pinnedVersion: '1.32.0' }, {
+      execute: async (value) => {
+        invocation = value;
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true, roles: [{ id: 'a', company: 'Example Corp', title: 'Data Intern', url: 'https://example.com/a', location: 'Chicago, IL' }] }), stderr: '' };
+      },
+    });
+    assert.deepEqual(invocation.args, [BUILT_IN_SCAN_BRIDGE, 'scan']);
+    assert.equal(invocation.cwd, directory);
+    assert.deepEqual(result.sources[0], { source: 'careerops', status: 'ok', count: 1, detail: 'built-in read-only bridge' });
+    const wrongVersion = await fetchCareerOpsRoles(true, { root: directory, pinnedVersion: '9.9.9' });
+    assert.match(wrongVersion.sources[0].detail, /9\.9\.9 is required/, 'the pinned version is still required');
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('the built-in bridge widens the CareerOps title filter, drops its location filter, and reads the dry-run output', async () => {
+  const portals = [
+    '# comment', 'title_filter:', '  positive:', '    - "word:intern + ai"', '  negative:', '    - "manager"', '',
+    'location_filter:', '  always_allow:', '    - "New York"', '', 'search_queries: []', 'tracked_companies:', '  - name: Example Corp',
+    '    careers_url: https://job-boards.greenhouse.io/examplecorp', '',
+  ].join('\n');
+  const widened = widenPortals(portals);
+  assert.doesNotMatch(widened, /manager|always_allow|word:intern \+ ai/);
+  assert.match(widened, /tracked_companies:\n  - name: Example Corp\n    careers_url: https:\/\/job-boards\.greenhouse\.io\/examplecorp/);
+  assert.match(widened, /title_filter:\n  positive:\n    - "word:intern"\n[\s\S]*    - "co-op"\n[\s\S]*  negative: \[\]\n$/);
+
+  const stdout = `${JSON.stringify({ version: 'careerops.scan.receipt@1', date: '2026-10-26', added_urls: ['https://example.com/1', 'https://example.com/2'], errors: [{ company: 'X', error: 'HTTP 404' }] })}\n`;
+  const stderr = ['Scanning', '  + Example Corp | Product Intern | Chicago, IL [Trust: 80/100 — vague]', '  + Example Labs | Data Co-op | Chicago, IL | Remote | N/A'].join('\n');
+  const parsed = parseScanOutput(stdout, stderr);
+  assert.equal(parsed.errors, 1);
+  assert.deepEqual(parsed.roles.map((item) => [item.company, item.title, item.locations, item.url]), [
+    ['Example Corp', 'Product Intern', ['Chicago, IL'], 'https://example.com/1'],
+    ['Example Labs', 'Data Co-op', ['Chicago, IL', 'Remote'], 'https://example.com/2'],
+  ]);
+  assert.equal(parsed.roles[0].postedAt, null, 'the receipt date is the scan date, not a posting date');
+  assert.throws(() => parseScanOutput(stdout, '  + Example Corp | Product Intern | Chicago, IL'), /listed 1 offers but returned 2 links/);
+
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'career-journal-careerops-bridge-'));
+  try {
+    await writeFile(path.join(directory, 'portals.yml'), portals);
+    let call;
+    const result = await scanCareerOps(directory, {
+      env: {},
+      execute: async (command, args, options) => {
+        call = { args, options, portals: await readFile(options.env.CAREER_OPS_PORTALS, 'utf8') };
+        return { exitCode: 2, stdout, stderr };
+      },
+    });
+    assert.deepEqual(call.args, ['scan.mjs', '--dry-run', '--json'], 'CareerOps runs as a dry run');
+    assert.equal(call.options.cwd, directory);
+    assert.equal(call.portals, widened);
+    assert.notEqual(path.dirname(call.options.env.CAREER_OPS_SCAN_HISTORY), directory, 'scan history is never the CareerOps file');
+    assert.equal(result.roles.length, 2, 'exit code 2 (some boards failed) still returns the other roles');
+    assert.equal(await readFile(path.join(directory, 'portals.yml'), 'utf8'), portals, 'the CareerOps portals.yml is unchanged');
+    await assert.rejects(scanCareerOps(directory, { env: {}, execute: async () => ({ exitCode: 1, stdout: '', stderr: 'boom' }) }), /exited with 1: boom/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });

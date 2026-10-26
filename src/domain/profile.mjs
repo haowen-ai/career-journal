@@ -14,6 +14,9 @@ export const authorizationStatuses = Object.freeze(['citizen', 'permanent-reside
 export const transcriptPolicies = Object.freeze(['required-only', 'never']);
 export const notifyChannels = Object.freeze(['desktop', 'none']);
 export const atsProviders = Object.freeze(['greenhouse', 'lever', 'ashby']);
+// Kinds of term a profile location can be limited to: summer roles, or off-season roles
+// (fall, winter or spring terms, and co-ops that name no summer term).
+export const locationSeasons = Object.freeze(['summer', 'off-season']);
 // The board token from a company's official job-board URL, such as boards.greenhouse.io/<token>.
 export const atsBoardPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 
@@ -147,12 +150,18 @@ function exactFields(value, fields, example) {
 }
 
 function location(value) {
-  const shape = exactFields(value, ['label', 'match'], '{"label":"New York, NY","match":["new york","nyc"]}');
+  const shape = exactFields(value, ['label', 'match', 'seasons'], '{"label":"New York, NY","match":["new york","nyc"]}');
   if (shape) return shape;
   const label = nonEmptyText(120)(value.label);
   if (label) return `label ${label}`;
   if (!Array.isArray(value.match) || !value.match.length) return 'match must be a non-empty list of lowercase place names';
   if (value.match.some((term) => typeof term !== 'string' || !term.trim() || term.length > 80)) return 'match terms must be non-empty text of at most 80 characters';
+  // Optional: the place counts only for these kinds of term. Without it the place counts for every term.
+  if (Object.hasOwn(value, 'seasons')) {
+    if (!Array.isArray(value.seasons) || !value.seasons.length || value.seasons.some((item) => !locationSeasons.includes(item))) {
+      return `seasons must be a non-empty list of: ${locationSeasons.join(', ')}`;
+    }
+  }
   return null;
 }
 
@@ -177,7 +186,8 @@ export function hasScanSource(profile) {
   const sources = isObject(profile?.sources) ? profile.sources : {};
   return (Array.isArray(sources.atsBoards) && sources.atsBoards.length > 0)
     || sources.careerOps === true
-    || (sources.simplify?.enabled === true && typeof sources.simplify.url === 'string' && sources.simplify.url.trim() !== '');
+    || (sources.simplify?.enabled === true && [sources.simplify.url, ...(Array.isArray(sources.simplify.urls) ? sources.simplify.urls : [])]
+      .some((url) => typeof url === 'string' && url.trim() !== ''));
 }
 
 const questionKey = (value) => (typeof value === 'string' && questionByKey(value) ? null : 'must be a profile question key');
@@ -211,6 +221,8 @@ const fieldRules = Object.freeze({
   'sources.careerOps': boolean,
   'sources.simplify.enabled': boolean,
   'sources.simplify.url': nullable(webUrl({ httpsOnly: true })),
+  // More list links read after sources.simplify.url, such as a second Simplify list.
+  'sources.simplify.urls': list(webUrl({ httpsOnly: true })),
   'interview.roundsCompleted': list(integer(1, 4)),
   'interview.skipped': list(questionKey),
   'interview.asked': list(questionKey),
@@ -224,7 +236,7 @@ const textFields = new Set([
 ]);
 const materialFileFields = Object.freeze(['materials.resumePath', 'materials.transcriptPath']);
 const managedFields = new Set(['schemaVersion', 'updatedAt']);
-const optionalFields = new Set(['interview.asked']);
+const optionalFields = new Set(['interview.asked', 'sources.simplify.urls']);
 
 export const profileFields = Object.freeze(Object.keys(fieldRules).filter((field) => !managedFields.has(field)));
 

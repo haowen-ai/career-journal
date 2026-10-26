@@ -574,3 +574,21 @@ test('profileStatus reports round completion and scan and apply readiness', asyn
   assert.equal(answered.answersExists, true);
   assert.deepEqual(answered.rounds.map((round) => round.complete), [true, true, true, true]);
 }));
+
+test('the profile schema accepts extra Simplify list links and locations limited to summer or off-season roles', () => {
+  const profile = completeProfile();
+  profile.sources.simplify = { enabled: true, url: 'https://example.com/listings.json', urls: ['https://example.com/off-season.json'] };
+  profile.search.locations = [
+    { label: 'New York, NY', match: ['new york'], seasons: ['summer'] },
+    { label: 'Chicago, IL', match: ['chicago', 'evanston'] },
+  ];
+  assert.deepEqual(validateProfile(profile), { ok: true, errors: [] });
+  assert.equal(hasScanSource({ ...profile, sources: { ...profile.sources, simplify: { enabled: true, url: null, urls: ['https://example.com/a.json'] } } }), true);
+  profile.sources.simplify.urls = ['http://example.com/off-season.json'];
+  assert.match(validateProfile(profile).errors.join('; '), /sources\.simplify\.urls\[0\] must be an https URL/);
+  profile.sources.simplify.urls = [];
+  profile.search.locations[0].seasons = ['autumn'];
+  assert.match(validateProfile(profile).errors.join('; '), /search\.locations\[0\] seasons must be a non-empty list of: summer, off-season/);
+  profile.search.locations[0].seasons = [];
+  assert.equal(validateProfile(profile).ok, false, 'an empty seasons list is rejected; leave it out instead');
+});

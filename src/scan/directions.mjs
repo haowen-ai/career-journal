@@ -20,6 +20,9 @@ export const DIRECTION_KEYWORDS = Object.freeze({
   'data-engineering': Object.freeze([
     'data engineer', 'data engineering', 'analytics engineer', 'analytics engineering', 'etl', 'data platform',
     'data infrastructure', 'data pipeline', 'big data',
+    // Software engineering teams named after data work ("Software Engineer Intern - Data Platforms").
+    'data platforms', 'data infra', 'data architecture', 'data transformation', 'data transformations',
+    'data & intelligence', 'data and intelligence',
   ]),
   'software-engineering': Object.freeze([
     'software engineer', 'software engineering', 'software developer', 'software development', 'swe', 'sde',
@@ -33,6 +36,11 @@ export const DIRECTION_KEYWORDS = Object.freeze({
   product: Object.freeze([
     'product manager', 'product management', 'associate product manager', 'apm', 'product owner',
     'technical program manager', 'program manager', 'engineering program manager', 'program management',
+    // Product roles titled without "manager". Each term names the role itself, so hardware titles such as
+    // "Product Engineering Intern", "Product Development Engineer" or "Product Support Engineer" stay out.
+    'product intern', 'product interns', 'product internship', 'product co-op',
+    'product development intern', 'product development internship', 'product development co-op',
+    'product strategy', 'product strategist', 'product operations', 'product ops',
   ]),
   other: Object.freeze([]),
 });

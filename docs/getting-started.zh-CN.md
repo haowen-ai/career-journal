@@ -250,9 +250,9 @@ career-journal queue score --home ~/job-search
 ```
 
 - **关注的公司（默认来源）：** `sources.atsBoards` 中各公司在 Greenhouse、Lever 和 Ashby 上的官方公开职位板接口。你说出公司名，Agent 从公司自己招聘页上的链接找到职位板标识（`boards.greenhouse.io/<token>`、`jobs.lever.co/<token>` 或 `jobs.ashbyhq.com/<token>`），用 `profile set --key sources.atsBoards` 写入完整列表，并确认 `scan run --dry-run` 中每个职位板都显示 `ok`。使用其他招聘系统的公司无法这样扫描，Agent 会告诉你是哪几家
-- **CareerOps（用户自选开启）：** `sources.careerOps` 为 `true` 且检测到其桥接文件时使用
-- **SimplifyJobs（用户自选开启）：** 只有当你开启 `sources.simplify.enabled` 并填写 `sources.simplify.url` 时才读取。这份列表没有许可证，因此只在扫描时在你的电脑上实时读取，项目不打包、不在仓库中缓存、也不再分发；见[第三方开源声明](../THIRD_PARTY_NOTICES.zh-CN.md)
-- **筛选：** 条件全部来自个人资料：季度与职位类型、方向关键词、学历（只招博士或只招本科生的写法；只是提到本科学位不会被排除）、公民身份、安全许可、出口管制或签证担保要求、明确写出不提供转正机会的职位，以及按 `search.locations` 顺序和 `remoteOk` 计算的地点排序。每个被排除的职位都在 `--json` 输出中写明原因
+- **CareerOps（用户自选开启）：** `sources.careerOps` 为 `true` 且检测到锁定版本的 CareerOps 时使用。CareerOps 目录里有 `career-journal-adapter.mjs` 桥接时用它；没有时由内置的只读桥接运行 CareerOps 自己的 dry-run 职位板扫描，扫描其 `portals.yml` 里的公司，职位名称筛选放宽到实习和 co-op，不做地点筛选，因为下面的个人资料筛选会决定去留。完整扫描需要几分钟
+- **SimplifyJobs（用户自选开启）：** 只有当你开启 `sources.simplify.enabled` 并填写 `sources.simplify.url` 时才读取；更多列表链接可以写进 `sources.simplify.urls`，同一个职位出现在两份列表里只保留一次。这份列表没有许可证，因此只在扫描时在你的电脑上实时读取，项目不打包、不在仓库中缓存、也不再分发；见[第三方开源声明](../THIRD_PARTY_NOTICES.zh-CN.md)
+- **筛选：** 条件全部来自个人资料：季度与职位类型、方向关键词、学历（只招博士或只招本科生的写法；只是提到本科学位不会被排除）、公民身份、安全许可、出口管制或签证担保要求、明确写出不提供转正机会的职位，以及按 `search.locations` 顺序和 `remoteOk` 计算的地点排序。地点写了 `"seasons":["summer"]` 时只对暑期岗位生效，写了 `"seasons":["off-season"]` 时只对秋季、冬季、春季学期以及没写暑期的 co-op 生效；不写 `seasons` 的地点对所有学期生效。每个被排除的职位都在 `--json` 输出中写明原因
 - **去重：** 来源 ID 相同、链接中的职位编号相同、链接相同，或同一公司的职位名称几乎一致，都算同一个职位，只投一次。已经投递或已跳过的职位不会再次进入队列；名称相近的职位会进入队列并标注“可能重复”
 - **匹配度：** 先由 Jev 给出 `high`、`medium` 或 `low`，再交给已配置的大语言模型。两者都没有时，用本地规则判断：职位名称含主要方向为 `high`，含次要方向为 `medium`，并在备注中写明是规则判断
 - **队列：** Agent 逐个阅读新职位的官网原文，再用 `queue verify --id <application> --result ok|skip --reason <原因> [--deadline <iso>]` 记录；每个“不投”都有原因，`skip` 会把线索改为 `withdrawn`，并记录一条带原因的事件。`queue list` 列出尚未跳过的线索，按匹配度、截止时间、地点排序和发布时间排列。`queue score [--all] [--limit <n>] [--dry-run]` 给还没有匹配度的队列岗位评分（例如 2.0 之前记录的或手动加的线索），评分方式与扫描相同：先 Jev，再大语言模型，最后规则；`--all` 会重新评所有队列岗位

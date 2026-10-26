@@ -22,6 +22,28 @@
 
 - 无
 
+## [2.2.0] - 2026-10-26
+
+### 新增
+
+- CareerOps 岗位扫描可以用于锁定的上游版本（该版本不带适配器）：CareerOps 目录里没有 `career-journal-adapter.mjs` 时，扫描使用内置的只读桥接，运行 CareerOps 自己的 dry-run 职位板扫描。桥接读取 `portals.yml` 的临时副本，职位名称筛选放宽到实习和 co-op，不做地点筛选，由个人资料的筛选决定去留；扫描历史和 pipeline 指向临时目录，从不修改 CareerOps 的文件。生成申请材料仍需要 CareerOps 适配器
+- `sources.simplify.urls` 可以在 `sources.simplify.url` 之外列出更多 SimplifyJobs 列表链接。每份列表单独读取、单独显示来源行，同一职位出现在两份列表里只保留一次，一份列表出错不影响其他列表
+- 个人资料里的地点可以写 `"seasons":["summer"]` 或 `"seasons":["off-season"]`，只对这类学期生效。先看职位板标注的学期，再看标题里的学期；没写暑期的 co-op 算作非暑期，完全没有学期信息的岗位对所有地点生效
+
+### 变更
+
+- 方向关键词新增不带 manager 的产品岗位（product intern、product development intern、product strategy、product operations），以及软件工程标题里的数据团队（data platforms、data infra、data architecture、data transformations、data & intelligence）。Product Engineering、Product Development Engineer、Product Support Engineer 这类硬件岗位仍不匹配
+- CareerOps 扫描的默认时间上限从 5 分钟改为 20 分钟，因为完整扫描需要几分钟；仍可用 `careerOps.scanTimeoutMs` 改写
+
+### 修复
+
+- 个人资料的学期只写年份（例如 2027）时，不再保留标成前一年秋季、冬季或春季的岗位；只有前一年的 Summer 标签才当作沿用的旧标签
+- 内置 CareerOps 桥接把多地点岗位的每个办公室都当作地点读取，并且不再报告发布日期，因为 CareerOps 回执里的日期是扫描日期
+
+### 安全
+
+- 无
+
 ## [2.1.1] - 2026-10-26
 
 ### 新增

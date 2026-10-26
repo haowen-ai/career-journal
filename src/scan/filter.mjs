@@ -105,9 +105,10 @@ export function checkSeason(role, profile) {
   const listed = (role?.terms ?? []).map(parseSeason).filter((item) => item.term || item.year);
   // A board tag for the same term one year earlier (Summer 2026 on a Summer 2027 list) is usually a
   // carried-over label, not the real term, so it does not drop the role; the title or the official
-  // posting decides instead.
+  // posting decides instead. A profile that names only a year ("2027") treats only Summer tags that
+  // way: a Fall, Winter or Spring tag of the year before is a real off-season term, not a carried-over label.
   const carriedOver = listed.length && target.year
-    && listed.every((item) => item.year === target.year - 1 && (!target.term || item.term === target.term));
+    && listed.every((item) => item.year === target.year - 1 && item.term === (target.term ?? 'Summer'));
   if (listed.length && !carriedOver) {
     return listed.some((item) => seasonMatches(item, target))
       ? { ok: true }
@@ -310,8 +311,34 @@ export function checkReturnOffer(role, profile) {
 const REMOTE = /(?<![a-z])(remote|anywhere|work from home|wfh|distributed|virtual)(?![a-z])/;
 const BROAD = /^(?:(?:united states|usa|us|u\.s\.|u\.s\.a\.|north america|multiple locations|various locations|various|nationwide|americas)(?: of america)?)$/;
 
+// Whether a role is a summer or an off-season role, for profile locations limited to one
+// kind of term. Listed terms decide first, then seasons named in the title; a co-op that
+// names no term counts as off-season. Returns null when nothing tells, and then every
+// profile location applies.
+export function roleSeasonKind(role) {
+  const kinds = (mentions) => {
+    const terms = mentions.map((item) => item.term).filter(Boolean);
+    if (!terms.length) return null;
+    return terms.includes('Summer') ? 'summer' : 'off-season';
+  };
+  const listed = kinds((role?.terms ?? []).map(parseSeason));
+  if (listed) return listed;
+  const title = normalizeText(role?.title);
+  const named = kinds(seasonMentions(title));
+  if (named) return named;
+  if (/(?<![a-z])summer(?![a-z])/.test(title)) return 'summer';
+  if (/(?<![a-z])(?:fall|autumn|winter|spring)(?![a-z])/.test(title)) return 'off-season';
+  if (/(?<![a-z])co-?ops?(?![a-z])/.test(title)) return 'off-season';
+  return null;
+}
+
+function appliesTo(preference, kind) {
+  return !kind || !preference.seasons?.length || preference.seasons.includes(kind);
+}
+
 export function rankLocation(role, profile) {
   const preferences = profile?.search?.locations ?? [];
+  const kind = preferences.some((preference) => preference.seasons?.length) ? roleSeasonKind(role) : null;
   const remoteOk = profile?.search?.remoteOk === true;
   const locations = (role?.locations ?? []).map((item) => String(item ?? '').trim()).filter(Boolean);
   if (!locations.length) return { ok: true, locRank: null, matched: null };
@@ -319,7 +346,8 @@ export function rankLocation(role, profile) {
   for (const location of locations) {
     const text = normalizeText(location);
     preferences.forEach((preference, index) => {
-      if ((best === null || index + 1 < best.locRank) && preference.match.some((term) => termPattern(term).test(text))) {
+      if ((best === null || index + 1 < best.locRank) && appliesTo(preference, kind)
+        && preference.match.some((term) => termPattern(term).test(text))) {
         best = { locRank: index + 1, matched: preference.label };
       }
     });
@@ -333,11 +361,14 @@ export function rankLocation(role, profile) {
   if (remote && locations.every((location) => REMOTE.test(normalizeText(location)) || BROAD.test(normalizeText(location)))) {
     return { ok: false, locRank: null, matched: null, reason: `remote: remote role (${locations.join('; ')}) and profile does not accept remote` };
   }
+  const applicable = preferences.filter((preference) => appliesTo(preference, kind)).map((item) => item.label);
   return {
     ok: false,
     locRank: null,
     matched: null,
-    reason: `location: ${locations.join('; ')} matches none of the profile locations (${preferences.map((item) => item.label).join(', ')})`,
+    reason: applicable.length === preferences.length
+      ? `location: ${locations.join('; ')} matches none of the profile locations (${applicable.join(', ')})`
+      : `location: ${locations.join('; ')} matches none of the profile locations for ${kind} roles (${applicable.join(', ') || 'none'})`,
   };
 }
 

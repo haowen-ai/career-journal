@@ -39,13 +39,29 @@ export function parseSimplify(payload) {
   return roles;
 }
 
+// The configured list URLs in order: the original single `url` first, then any
+// extra `urls` (for example a second Simplify list), without repeats.
+export function simplifyUrls(settings) {
+  return uniqueStrings([settings?.url, ...(Array.isArray(settings?.urls) ? settings.urls : [])]);
+}
+
 export async function fetchSimplify(settings, fetchImpl, options = {}) {
   if (!settings?.enabled) return { sources: [{ source: 'simplify', status: 'skipped', count: 0, detail: 'opt-in source is not enabled' }], roles: [] };
-  if (!settings.url) return { sources: [{ source: 'simplify', status: 'skipped', count: 0, detail: 'enabled but no URL is configured' }], roles: [] };
-  try {
-    const roles = parseSimplify(await fetchJson(fetchImpl, settings.url, options));
-    return { sources: [{ source: 'simplify', url: settings.url, status: 'ok', count: roles.length }], roles };
-  } catch (error) {
-    return { sources: [{ source: 'simplify', url: settings.url, status: 'error', count: 0, detail: sourceError(error) }], roles: [] };
+  const urls = simplifyUrls(settings);
+  if (!urls.length) return { sources: [{ source: 'simplify', status: 'skipped', count: 0, detail: 'enabled but no URL is configured' }], roles: [] };
+  const sources = [];
+  const roles = [];
+  const seen = new Set();
+  for (const url of urls) {
+    try {
+      // A listing that appears on more than one list is kept once, from the first list.
+      const listRoles = parseSimplify(await fetchJson(fetchImpl, url, options)).filter((role) => !seen.has(role.sourceId));
+      for (const role of listRoles) seen.add(role.sourceId);
+      roles.push(...listRoles);
+      sources.push({ source: 'simplify', url, status: 'ok', count: listRoles.length });
+    } catch (error) {
+      sources.push({ source: 'simplify', url, status: 'error', count: 0, detail: sourceError(error) });
+    }
   }
+  return { sources, roles };
 }

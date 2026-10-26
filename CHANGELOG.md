@@ -22,6 +22,28 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - None
 
+## [2.2.0] - 2026-10-26
+
+### Added
+
+- CareerOps role scans work with the pinned upstream release, which ships no adapter: without `career-journal-adapter.mjs` the scan uses a built-in read-only bridge that runs CareerOps's own dry-run portal scan. It reads a temporary copy of `portals.yml` with the title filter widened to internship and co-op titles and no location filter, so the profile filters decide; scan history and pipeline point at a temporary folder, and CareerOps files are never edited. Material generation still needs the CareerOps adapter
+- `sources.simplify.urls` lists more SimplifyJobs list links next to `sources.simplify.url`. Each list is read and reported on its own source line, a listing on two lists is kept once, and one failing list does not stop the others
+- A profile location can carry `"seasons":["summer"]` or `"seasons":["off-season"]` so it counts only for that kind of term. Listed terms decide first, then seasons in the title; a co-op that names no summer term counts as off-season, and a role with no term information keeps every location
+
+### Changed
+
+- Direction keywords add product roles titled without "manager" (product intern, product development intern, product strategy, product operations) and data teams inside software engineering titles (data platforms, data infra, data architecture, data transformations, data & intelligence). Hardware titles such as Product Engineering, Product Development Engineer, and Product Support Engineer still do not match
+- The CareerOps scan time limit defaults to 20 minutes instead of 5, because a full portal scan takes several minutes; `careerOps.scanTimeoutMs` still overrides it
+
+### Fixed
+
+- A profile season that names only a year (for example 2027) no longer keeps roles tagged Fall, Winter, or Spring of the year before; only a Summer tag of the year before is treated as a carried-over label
+- The built-in CareerOps bridge reads every office of a multi-office posting as a location and reports no posting date, because the CareerOps receipt date is the scan date
+
+### Security
+
+- None
+
 ## [2.1.1] - 2026-10-26
 
 ### Added

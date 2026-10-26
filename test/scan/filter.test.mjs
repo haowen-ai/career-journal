@@ -11,6 +11,7 @@ import {
   filterRole,
   parseSeason,
   rankLocation,
+  roleSeasonKind,
 } from '../../src/scan/filter.mjs';
 import { normalizeScanProfile } from '../../src/scan/profile-input.mjs';
 
@@ -86,6 +87,10 @@ test('season matching reads the profile term from titles, listed terms, and inte
     'a same-term tag one year early is a carried-over label; the official posting decides');
   assert.match(checkSeason(role({ title: 'ML Intern - Summer 2026', terms: ['Summer 2026'] }), wanted).reason, /title names Summer 2026/);
   assert.match(checkSeason(role({ title: 'ML Intern', terms: ['Summer 2026', 'Fall 2026'] }), wanted).reason, /listed for Summer 2026, Fall 2026/);
+  const yearOnly = profile({ search: { season: '2027' } });
+  assert.equal(checkSeason(role({ title: 'ML Intern', terms: ['Summer 2026'] }), yearOnly).ok, true, 'a year-only profile still treats a Summer tag as carried over');
+  assert.match(checkSeason(role({ title: 'Data Science Co-op', terms: ['Winter 2026'] }), yearOnly).reason, /listed for Winter 2026; profile wants 2027/);
+  assert.equal(checkSeason(role({ title: 'Data Science Co-op', terms: ['Spring 2027'] }), yearOnly).ok, true);
   assert.match(checkSeason(role({ title: 'ML Intern', description: 'Join our Fall 2026 co-op program.' }), wanted).reason, /posting mentions only Fall 2026/);
   assert.equal(checkSeason(role({ title: 'ML Intern', description: 'Interviews take place in Fall 2026. The summer internship runs 12 weeks.' }), wanted).ok, true,
     'an interview date is not the internship term');
@@ -203,4 +208,45 @@ test('a listed degrees field naming only bachelor\'s or associate degrees is lef
   assert.equal(checkDegree(role({ degrees: ["Bachelor's", "Master's"] }), profile()).ok, true);
   assert.equal(checkDegree(role({ degrees: [] }), profile()).ok, true);
   assert.equal(checkDegree(role({ degrees: ["Bachelor's"] }), profile({ candidate: { degree: { level: 'bachelors' } } })).ok, true);
+});
+
+test('product and data roles titled without the usual keywords match their directions, hardware product titles do not', () => {
+  const wanted = profile({ search: { directions: { primary: ['data-engineering'], secondary: ['product'] } } });
+  const ids = (title) => checkDirection(role({ title }), wanted).matches.map((item) => item.id);
+  for (const title of [
+    'Product Development Intern - Global Commercial Services', 'Digital Product Intern', 'Product Intern',
+    'Product Strategy and Operations Project Intern', 'Product Operations Intern - Apps and API', 'Product Co-op',
+  ]) assert.deepEqual(ids(title), ['product'], title);
+  for (const title of [
+    'Software Engineer Intern - Data Platforms', 'Software Engineer Intern - Data Transformations',
+    'Software Engineer Intern - Data Architecture - E-commerce', 'Innovation & Technology Internship - Software Engineering: Data & Intelligence',
+    'Data Infra Engineer Intern',
+  ]) assert.deepEqual(ids(title), ['data-engineering'], title);
+  for (const title of [
+    'Product Engineering Intern', 'Product Engineer Intern', 'Product Development Engineer Intern',
+    'Product Development Engineering Intern/Co-op', 'Product Support Engineer Intern - Service Engineering', 'Product Test Engineer Intern',
+  ]) assert.deepEqual(ids(title), [], title);
+});
+
+test('a location limited to summer roles does not admit off-season roles, and co-ops without a term count as off-season', () => {
+  const wanted = profile({
+    search: {
+      locations: [
+        { label: 'New York, NY', match: ['new york'], seasons: ['summer'] },
+        { label: 'Chicago area', match: ['chicago', 'evanston'] },
+      ],
+    },
+  });
+  assert.equal(roleSeasonKind(role({ terms: ['Summer 2027'] })), 'summer');
+  assert.equal(roleSeasonKind(role({ terms: ['Fall 2027', 'Spring 2027'] })), 'off-season');
+  assert.equal(roleSeasonKind(role({ terms: ['Summer 2027', 'Fall 2027'] })), 'summer');
+  assert.equal(roleSeasonKind(role({ title: 'Data Science Co-op' })), 'off-season');
+  assert.equal(roleSeasonKind(role({ title: 'Data Science Intern - Winter 2027' })), 'off-season');
+  assert.equal(roleSeasonKind(role({ title: 'Data Science Intern' })), null);
+  assert.deepEqual(rankLocation(role({ terms: ['Summer 2027'] }), wanted), { ok: true, locRank: 1, matched: 'New York, NY' });
+  assert.equal(rankLocation(role(), wanted).locRank, 1, 'a role with no term information keeps every location');
+  assert.match(rankLocation(role({ terms: ['Spring 2027'] }), wanted).reason,
+    /^location: New York, NY matches none of the profile locations for off-season roles \(Chicago area\)$/);
+  assert.equal(rankLocation(role({ title: 'Data Co-op', locations: ['Evanston, IL'] }), wanted).locRank, 2);
+  assert.equal(rankLocation(role({ title: 'Data Co-op', locations: ['Remote - US'] }), wanted).locRank, 3, 'remote follows search.remoteOk for every term');
 });

@@ -70,6 +70,8 @@ test('validates only the fields the scan needs, with the field path in each erro
     [{ sources: { atsBoards: [{ ats: 'workday', board: 'example' }] } }, /sources\.atsBoards\[0\]\.ats must be one of: greenhouse, lever, ashby/],
     [{ sources: { atsBoards: [{ ats: 'greenhouse', board: '../etc' }] } }, /sources\.atsBoards\[0\]\.board must be the public board name/],
     [{ sources: { simplify: { enabled: true, url: 'http://example.com/listings.json' } } }, /sources\.simplify\.url must be an https URL/],
+    [{ sources: { simplify: { enabled: true, urls: ['http://example.com/off.json'] } } }, /sources\.simplify\.urls\[0\] must be an https URL/],
+    [{ search: { locations: [{ label: 'Chicago', seasons: ['autumn'] }] } }, /search\.locations\[0\]\.seasons contains unknown season "autumn"/],
   ];
   for (const [input, pattern] of cases) assert.throws(() => normalizeScanProfile(input), pattern);
   const minimal = normalizeScanProfile({});
@@ -79,6 +81,12 @@ test('validates only the fields the scan needs, with the field path in each erro
   const overlapping = normalizeScanProfile({ search: { directions: { primary: ['quant'], secondary: ['quant', 'product'] }, locations: [{ label: 'Boston, MA' }] } });
   assert.deepEqual(overlapping.search.directions.secondary, ['product']);
   assert.deepEqual(overlapping.search.locations[0].match, ['boston, ma']);
+  const extra = normalizeScanProfile({
+    search: { locations: [{ label: 'NYC', match: ['nyc'], seasons: ['summer'] }] },
+    sources: { simplify: { enabled: true, url: 'https://example.com/a.json', urls: ['https://example.com/b.json'] } },
+  });
+  assert.deepEqual(extra.search.locations[0], { label: 'NYC', match: ['nyc'], seasons: ['summer'] });
+  assert.deepEqual(extra.sources.simplify, { enabled: true, url: 'https://example.com/a.json', urls: ['https://example.com/b.json'] });
 });
 
 test('an unreadable profile reports the filesystem error', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, async () => withHome(async (home) => {

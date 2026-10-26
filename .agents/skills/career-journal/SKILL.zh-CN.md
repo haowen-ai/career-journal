@@ -32,8 +32,8 @@
 - 一次写入完整列表：`profile set --key sources.atsBoards --value '[{"ats":"greenhouse","board":"<token>","company":"<公司名>"}]'`。这条命令会替换整个列表，所以先用 `profile show --json` 读出当前列表，加上新公司后整体写回。
 - 用 `scan run --dry-run` 检查结果：每个职位板的来源一行都必须显示 `ok`。HTTP 404 说明标识不对，改正或删掉这一项。不得猜测标识。
 - 招聘页使用其他招聘系统（Workday、iCIMS、Oracle、SuccessFactors 等）的公司，无法通过这些公开职位板接口扫描。告诉用户是哪几家，不要加入列表。
-- **CareerOps（用户自选开启）。** 只有用户同意时才运行 `profile set --key sources.careerOps --value true`。只有安装并检测到 CareerOps 时才会运行。
-- **SimplifyJobs（用户自选开启）。** 默认关闭，只有用户主动开启才使用。询问时要告诉用户：这份列表没有许可证，只在扫描时在这台电脑上实时读取，项目从不打包、缓存或再分发其中内容。用户同意后，用用户确认过的链接保存 `profile set --key sources.simplify --value '{"enabled":true,"url":"<列表 JSON 的 https 链接>"}'`。
+- **CareerOps（用户自选开启）。** 只有用户同意时才运行 `profile set --key sources.careerOps --value true`。只有安装并检测到 CareerOps 时才会运行；CareerOps 没有适配器时，扫描使用内置的只读桥接，需要几分钟。
+- **SimplifyJobs（用户自选开启）。** 默认关闭，只有用户主动开启才使用。询问时要告诉用户：这份列表没有许可证，只在扫描时在这台电脑上实时读取，项目从不打包、缓存或再分发其中内容。用户同意后，用用户确认过的链接保存 `profile set --key sources.simplify --value '{"enabled":true,"url":"<列表 JSON 的 https 链接>"}'`。用户确认的其他列表写在 `url` 旁边的 `"urls":[...]` 里。
 - 第 1 轮完成且至少设置了上面一种来源之前，`profile status --json` 会把扫描就绪状态报告为 incomplete。
 
 ## 暂留岗位

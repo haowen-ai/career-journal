@@ -37,8 +37,8 @@ Manual EML is a one-off fallback. It does not replace daily access or satisfy se
 - Save the complete list in one write: `profile set --key sources.atsBoards --value '[{"ats":"greenhouse","board":"<token>","company":"<Company>"}]'`. The command replaces the list, so read the current one with `profile show --json` first and write it back with the additions.
 - Check the result with `scan run --dry-run`: every board's source line must read `ok`. An HTTP 404 means a wrong token; fix or remove that entry. Never guess a token.
 - A company whose careers page uses another hiring system (Workday, iCIMS, Oracle, SuccessFactors, and others) cannot be scanned through these public job-board APIs. Tell the user which ones and leave them out.
-- **CareerOps (opt-in).** Run `profile set --key sources.careerOps --value true` only when the user says yes. It runs only when CareerOps is installed and detected.
-- **SimplifyJobs (opt-in).** Off unless the user turns it on. When asking, tell the user that the list has no licence, is read live on this computer at scan time, and is never bundled, cached, or redistributed. When the user says yes, save `profile set --key sources.simplify --value '{"enabled":true,"url":"<https link to the list JSON>"}'` with a link the user confirmed.
+- **CareerOps (opt-in).** Run `profile set --key sources.careerOps --value true` only when the user says yes. It runs only when CareerOps is installed and detected; without a CareerOps adapter the scan uses the built-in read-only bridge, which takes several minutes.
+- **SimplifyJobs (opt-in).** Off unless the user turns it on. When asking, tell the user that the list has no licence, is read live on this computer at scan time, and is never bundled, cached, or redistributed. When the user says yes, save `profile set --key sources.simplify --value '{"enabled":true,"url":"<https link to the list JSON>"}'` with a link the user confirmed. Further lists the user confirms go in `"urls":[...]` next to `url`.
 - `profile status --json` reports scan readiness as incomplete until round 1 is complete and at least one of these sources is set.
 
 ## Held leads

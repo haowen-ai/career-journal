@@ -1,10 +1,11 @@
-import { detectCareerOps, runCareerOpsScan } from '../../integrations/careerops.mjs';
+import { detectCareerOpsScan, runCareerOpsScan } from '../../integrations/careerops.mjs';
 import { htmlToText } from '../text.mjs';
 import { httpUrl, isoDate, sourceError, text, uniqueStrings } from './common.mjs';
 
 // CareerOps portal scans, only when the profile enables them and the pinned
-// CareerOps installation with its bridge is detected. The bridge runs a
-// read-only scan; CAREER JOURNAL only reads the role list it prints.
+// CareerOps installation is detected. Its own bridge runs the read-only scan, or the
+// built-in bridge when the checkout has none; CAREER JOURNAL only reads the role list
+// it prints.
 
 export function parseCareerOpsRoles(result) {
   const roles = [];
@@ -28,12 +29,12 @@ export function parseCareerOpsRoles(result) {
 
 export async function fetchCareerOpsRoles(enabled, careerOpsConfig, dependencies = {}) {
   if (!enabled) return { sources: [{ source: 'careerops', status: 'skipped', count: 0, detail: 'not enabled in the profile' }], roles: [] };
-  const detect = dependencies.detect ?? detectCareerOps;
+  const detect = dependencies.detect ?? detectCareerOpsScan;
   const health = await detect(careerOpsConfig ?? {});
   if (!health.ok) return { sources: [{ source: 'careerops', status: 'skipped', count: 0, detail: `CareerOps not detected: ${health.detail}` }], roles: [] };
   try {
     const roles = parseCareerOpsRoles(await runCareerOpsScan(careerOpsConfig ?? {}, dependencies));
-    return { sources: [{ source: 'careerops', status: 'ok', count: roles.length }], roles };
+    return { sources: [{ source: 'careerops', status: 'ok', count: roles.length, ...(health.builtInBridge ? { detail: 'built-in read-only bridge' } : {}) }], roles };
   } catch (error) {
     return { sources: [{ source: 'careerops', status: 'error', count: 0, detail: sourceError(error) }], roles: [] };
   }

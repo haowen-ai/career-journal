@@ -2,10 +2,13 @@ import { constants } from 'node:fs';
 import { access, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const MAX_REQUEST_BYTES = 1_000_000;
 const ACTIONS = new Set(['prepare', 'verify']);
 const MATERIAL_KINDS = new Set(['resume', 'cover-letter']);
+// Read-only role scans fall back to this bridge when the CareerOps checkout has no adapter.
+export const BUILT_IN_SCAN_BRIDGE = fileURLToPath(new URL('./careerops-scan-bridge.mjs', import.meta.url));
 
 async function exists(file) {
   try { await access(file, constants.R_OK); return true; } catch { return false; }
@@ -106,12 +109,30 @@ export async function runCareerOps(request, config = {}, dependencies = {}) {
   return validateResult(result, structured);
 }
 
+// The role scan uses the CareerOps adapter when it is installed. The pinned upstream release
+// ships no adapter, so a checkout that is otherwise ready scans through the built-in
+// read-only bridge, which runs CareerOps's own dry-run scan. Material generation still
+// needs the CareerOps adapter.
+export async function detectCareerOpsScan(config = {}) {
+  const health = await detectCareerOps(config);
+  if (health.ok || health.code !== 'bridge-missing') return health;
+  return {
+    ok: true,
+    code: 'ready',
+    installedVersion: health.installedVersion,
+    entrypoint: BUILT_IN_SCAN_BRIDGE,
+    root: path.resolve(config.root),
+    builtInBridge: true,
+    detail: `CareerOps ${health.installedVersion} is ready; scans use the built-in read-only bridge`,
+  };
+}
+
 // Read-only role scan through the same pinned bridge:
 //   node <careerops-root>/career-journal-adapter.mjs scan
 // stdin: { "action": "scan", "readOnly": true }
 // stdout: { "ok": true, "roles": [{ id, company, title, url, locations[] | location, postedAt, description }] }
 export async function runCareerOpsScan(config = {}, dependencies = {}) {
-  const health = await detectCareerOps(config);
+  const health = await detectCareerOpsScan(config);
   if (!health.ok) throw new Error(health.detail);
   const execute = dependencies.execute ?? executeProcess;
   const execution = await execute({
@@ -119,7 +140,8 @@ export async function runCareerOpsScan(config = {}, dependencies = {}) {
     args: [health.entrypoint, 'scan'],
     cwd: health.root,
     stdin: JSON.stringify({ action: 'scan', readOnly: true }),
-    timeoutMs: config.scanTimeoutMs ?? 300_000,
+    // A full CareerOps portal scan takes several minutes; the built-in bridge stops its own scan at 18.
+    timeoutMs: config.scanTimeoutMs ?? 1_200_000,
   });
   if (execution.exitCode !== 0) {
     const detail = String(execution.stderr ?? '').trim().slice(0, 2_000);

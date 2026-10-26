@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  atsBoardPattern, atsProviders, authorizationStatuses, degreeLevels, directionIds, profilePath, readProfile,
+  atsBoardPattern, atsProviders, authorizationStatuses, degreeLevels, directionIds, locationSeasons, profilePath, readProfile,
 } from '../domain/profile.mjs';
 
 // Reads only the profile fields the role scan needs. The complete profile
@@ -13,6 +13,7 @@ export const DIRECTION_IDS = directionIds;
 export const DEGREE_LEVELS = degreeLevels;
 export const AUTHORIZATION_STATUSES = authorizationStatuses;
 export const ATS_KINDS = atsProviders;
+export const LOCATION_SEASONS = locationSeasons;
 
 const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const MONTH = /^\d{4}-(?:0[1-9]|1[0-2])$/;
@@ -71,7 +72,9 @@ function locations(value) {
     const label = optionalString(entry.label, `${field}.label`);
     if (!label) fail(`${field}.label`, 'is required');
     const match = stringList(entry.match, `${field}.match`).map((term) => term.toLowerCase());
-    return { label, match: match.length ? match : [label.toLowerCase()] };
+    const seasons = stringList(entry.seasons, `${field}.seasons`);
+    for (const season of seasons) if (!LOCATION_SEASONS.includes(season)) fail(`${field}.seasons`, `contains unknown season "${season}"; use: ${LOCATION_SEASONS.join(', ')}`);
+    return { label, match: match.length ? match : [label.toLowerCase()], ...(seasons.length ? { seasons } : {}) };
   });
 }
 
@@ -90,16 +93,22 @@ function atsBoards(value) {
   });
 }
 
+function httpsUrl(value, field) {
+  const url = optionalString(value, field);
+  if (url) {
+    let parsed;
+    try { parsed = new URL(url); } catch { fail(field, 'must be an https URL'); }
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) fail(field, 'must be an https URL without credentials');
+  }
+  return url;
+}
+
 function simplify(value) {
   const input = object(value, 'sources.simplify');
   if (input.enabled != null && typeof input.enabled !== 'boolean') fail('sources.simplify.enabled', 'must be true or false');
-  const url = optionalString(input.url, 'sources.simplify.url');
-  if (url) {
-    let parsed;
-    try { parsed = new URL(url); } catch { fail('sources.simplify.url', 'must be an https URL'); }
-    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) fail('sources.simplify.url', 'must be an https URL without credentials');
-  }
-  return { enabled: input.enabled === true, url };
+  const url = httpsUrl(input.url, 'sources.simplify.url');
+  const urls = stringList(input.urls, 'sources.simplify.urls').map((item, index) => httpsUrl(item, `sources.simplify.urls[${index}]`));
+  return { enabled: input.enabled === true, url, ...(urls.length ? { urls } : {}) };
 }
 
 export function normalizeScanProfile(raw) {
