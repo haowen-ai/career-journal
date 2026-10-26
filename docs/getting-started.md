@@ -280,7 +280,7 @@ The hard rules are fixed text in the Skill, shown in round 4, and no setting tur
 
 - Never click any button labelled Submit*
 - Never sign in, create accounts, or type passwords or verification codes, and never bypass a CAPTCHA
-- Never tick consent, attestation, or arbitration boxes, and never sign
+- Never tick consent, attestation, or arbitration boxes. Authorized typed-name/date e-signatures follow the Apply Skill's rule 3; entering a value that itself accepts a legally binding agreement requires confirmation at action time. Final Review and Submit remain with the user
 - Never write essays; only organise the user's own words
 - Upload the transcript only when the field is required
 - Upload the one resume the user chose

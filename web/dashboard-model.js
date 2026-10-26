@@ -9,6 +9,7 @@ export function applicationGroup(application) {
   if (waitingStatuses.has(status)) return 'waiting';
   if (interviewStatuses.has(status)) return 'interview';
   if (closedStatuses.has(status)) return 'closed';
+  if (preparingStatuses.has(status) && application?.skipReason != null) return 'closed';
   if (preparingStatuses.has(status)) return 'preparing';
   return 'unknown';
 }
@@ -248,7 +249,7 @@ export function statFilter(stat) {
 }
 
 function matchesFilter(application, group) {
-  if (group === 'all') return true;
+  if (group === 'all') return application?.skipReason == null || wasApplied(application);
   if (group === 'sent') return wasApplied(application);
   if (group === 'tasks') return hasOpenTask(application);
   if (group === 'queue') return isQueued(application);
@@ -307,6 +308,19 @@ function skipReasonOf(application) {
   return reason == null || !String(reason).trim() ? null : String(reason).trim();
 }
 
+// A review can explain a deadline without inventing a timestamp for it.
+function deadlineReview(application, locale) {
+  const event = [...(application?.events ?? [])].filter((item) => item.type === 'deadline_review')
+    .sort(compareEventsNewestFirst)[0];
+  if (!event) return null;
+  const note = String(event.note ?? '');
+  const zh = note.match(/^截止说明：([^\r\n]+)/m)?.[1]?.trim();
+  const en = note.match(/^Deadline: ([^\r\n]+)/m)?.[1]?.trim();
+  const label = locale === 'zh-CN' ? zh ?? en : en ?? zh;
+  if (!label) return null;
+  return { label, sourceUrl: safeHttpUrl(note.match(/^来源：([^\r\n]+)/m)?.[1]), checkedAt: event.observedAt ?? event.recordedAt };
+}
+
 // What a card shows about a queued role, as data so it can be tested without a
 // DOM. Returns null for applications past the preparing stage that were not
 // skipped from the queue. The deadline time-left hint only applies while the
@@ -319,10 +333,11 @@ export function queueSummary(application, { locale = 'en', now = Date.now(), tim
   const level = fitLevel(application.fit);
   const deadlineAt = timeOrNull(application.deadlineAt) === null ? null : application.deadlineAt;
   const deadline = preparing ? taskDeadlineStatus({ dueAt: deadlineAt }, { now, timeZone }) : null;
+  const review = deadlineReview(application, locale);
   return {
     queued: isQueued(application),
     fit: { level, label: fitLabel(level, locale), note: application.fitNote || null },
-    deadline: { at: deadlineAt, status: deadline, hint: deadline ? roleDeadlineLabel(deadline, locale) : null },
+    deadline: { at: deadlineAt, status: deadline, hint: deadline ? roleDeadlineLabel(deadline, locale) : null, ...(review ? { review } : {}) },
     location: application.location || null,
     source: sourceName(application.source),
     check: { state: application.verifiedAt ? 'verified' : 'unverified', at: application.verifiedAt || null, label: postingCheckLabel(application, locale) },
@@ -420,13 +435,14 @@ export function toApplyRow(application, { locale = 'en', now = Date.now(), timeZ
   const level = fitLevel(application.fit);
   const deadlineAt = timeOrNull(application.deadlineAt) === null ? null : application.deadlineAt;
   const status = taskDeadlineStatus({ dueAt: deadlineAt }, { now, timeZone });
+  const review = deadlineReview(application, locale);
   return {
     id: application.id,
     company: application.company,
     role: application.role,
     fit: { level, label: fitLabel(level, locale), note: application.fitNote || null },
     location: application.location || null,
-    deadline: { at: deadlineAt, status, label: deadlineAt ? roleDeadlineLabel(status, locale) : null },
+    deadline: { at: deadlineAt, status, label: deadlineAt ? roleDeadlineLabel(status, locale) : null, ...(review ? { review } : {}) },
     check: { state: application.verifiedAt ? 'verified' : 'unverified', label: postingCheckLabel(application, locale) },
     jobUrl: safeHttpUrl(application.jobUrl),
   };

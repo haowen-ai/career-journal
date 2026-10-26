@@ -4,7 +4,7 @@
 
 Generic technique for filling applications on common applicant tracking systems (ATS) in the user's own browser. Nothing here is specific to one person. Sites change; when a tip no longer matches what the page shows, trust the page, stay within the hard rules, and report the difference.
 
-The hard rules in [`../SKILL.md`](../SKILL.md) apply on every site: no Submit*-labelled clicks, no sign-in, account, password, or code, no CAPTCHA, no consent or signature, no essays, transcript only when required, one resume, and work descriptions one bullet per line prefixed "• ".
+The hard rules in [`../SKILL.md`](../SKILL.md) apply on every site: no Submit*-labelled clicks, no sign-in, account, password, or code, no CAPTCHA or consent boxes, typed e-signatures only under rule 3's authorization and confirmation requirements, no essays, transcript only when required, one resume, and work descriptions one bullet per line prefixed "• ".
 
 ## Every site
 
@@ -94,7 +94,7 @@ The hard rules in [`../SKILL.md`](../SKILL.md) apply on every site: no Submit*-l
 - Sign-in or account creation is the user's (`🔑`). "Use My Last Application" needs the user to be signed in; otherwise use the manual or resume-autofill path.
 - "Autofill with Resume" creates education and work entries from the parse. Fix each entry against the answers sheet.
 - Date fields are split into month and year (sometimes day) parts; set each part and read it back.
-- On Voluntary Disclosures, the required terms or consent checkbox is the user's (`👆`). On Self Identify, the name and date signature is the user's (`👆`).
+- On Voluntary Disclosures, the required terms or consent checkbox is the user's (`👆`). On Self Identify, fill the confirmed name and required current date when authorized under rule 3; a signature needing authorization or action-time confirmation stays at `👆`.
 - The footer Back button may open a "Discard Application?" dialog. Prefer the step navigation to move between steps, and never confirm a discard.
 - Save and Continue keeps a draft, so a closed tab can resume from the last saved step.
 
@@ -103,7 +103,7 @@ The hard rules in [`../SKILL.md`](../SKILL.md) apply on every site: no Submit*-l
 - The flow starts with the email address and sends a verification code to it. The user enters the code (`🔑`).
 - The session is valid only in the tab where the code was verified. Keep working in that tab; opening the flow in another tab starts a new, unverified session.
 - Dropdowns and comboboxes: click, type to filter, and pick the listed option; read the value back.
-- An e-signature step (typed full name) near the end is the user's (`👆`).
+- At an e-signature step near the end, fill the confirmed full name when authorized under rule 3 and stop before Submit. A signature needing authorization or action-time confirmation stays at `👆`.
 - Completed steps are saved, so a lost tab resumes after the user verifies again.
 
 ## iCIMS

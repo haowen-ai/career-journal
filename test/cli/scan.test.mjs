@@ -17,6 +17,29 @@ import { ATS_URLS, SIMPLIFY_URL, defaultRoutes, fixtureFetch, readFixture } from
 
 const JEV_URL = 'https://api.typesafe.ai/v1/systemone';
 
+test('official-review gate retains new scan records but exposes only verified roles to the queue', async () => fixture(async (home) => {
+  await writeProfile(home, (profile) => ({ ...profile, search: { ...profile.search,
+    exclusions: [...profile.search.exclusions, 'official-review-required'] } }));
+  const scan = await json(['scan', 'run', '--home', home]);
+  assert.equal(scan.counts.queued, 0);
+  assert.equal(scan.counts.held, 5);
+  assert.deepEqual(scan.queued, []);
+  assert.equal((await json(['queue', 'list', '--home', home])).length, 0);
+  const db = database(home);
+  let held;
+  try {
+    held = db.prepare('SELECT id,status,skip_reason FROM applications ORDER BY id').all();
+    assert.equal(held.length, 5);
+    assert.ok(held.every((row) => row.status === 'lead' && row.skip_reason));
+  } finally { db.close(); }
+  const again = await json(['scan', 'run', '--home', home]);
+  assert.equal(again.counts.duplicates, 5, 'held history prevents the same posting reappearing');
+  await json(['queue', 'verify', '--home', home, '--id', held[0].id, '--result', 'ok', '--reason', 'Official requirements and quota checked']);
+  const queue = await json(['queue', 'list', '--home', home]);
+  assert.equal(queue.length, 1);
+  assert.equal(queue[0].id, held[0].id);
+}));
+
 async function fixture(run) {
   const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-cli-scan-'));
   try {

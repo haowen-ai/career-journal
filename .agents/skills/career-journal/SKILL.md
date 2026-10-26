@@ -41,6 +41,13 @@ Manual EML is a one-off fallback. It does not replace daily access or satisfy se
 - **SimplifyJobs (opt-in).** Off unless the user turns it on. When asking, tell the user that the list has no licence, is read live on this computer at scan time, and is never bundled, cached, or redistributed. When the user says yes, save `profile set --key sources.simplify --value '{"enabled":true,"url":"<https link to the list JSON>"}'` with a link the user confirmed.
 - `profile status --json` reports scan readiness as incomplete until round 1 is complete and at least one of these sources is set.
 
+## Held leads
+
+- When `search.exclusions` contains `official-review-required`, `scan run` keeps every new discovery with a skip reason, hides it from `queue list`, and prints the held count in its summary. A lead whose official posting could not be fetched, or whose check came out uncertain, is also held, with that reason, instead of being released or dropped.
+- Review every held lead on the same day as the scan. When a plain fetch of the official posting fails (blocked, sign-in wall, or a script-rendered page), open it in the browser before deciding. Release a lead with `queue verify --id <application> --result ok` only after the checks; otherwise keep it held or skip it, always with a reason.
+- Never report the queue size without the held count, for example "3 queued, 12 held for review".
+- A skip for an unmet "required" qualification quotes the exact line and confirms it is in the mandatory section, not under preferred qualifications; a requirement the candidate meets through experience counts as met. Re-review these skips against the current resume from time to time.
+
 ## Role-scan schedule
 
 The daily role scan is optional and is created only when the user says yes in round 4. It cannot share the job that carries `mail-sync` and `deadline-review`: that shared Codex heartbeat or Claude Code scheduled task is fixed to 20:00 and 20:15, and `register-external` refuses to bind any other task to its ID. Give `role-scan` its own scheduled task at `pace.scanTime` in the detected time zone:
@@ -55,7 +62,7 @@ The daily role scan is optional and is created only when the user says yes in ro
 
 - Application, event, deadline, status, or dashboard: use the CLI
 - Online assessment, coding test, or interview invitation: record it with `task add`, including the deadline from the message (`--due-at` with a UTC offset, `--due-note` for how it was computed) and the invitation URL (`--link`); mark it with `task done` once completed
-- Find roles, new roles, or the daily role scan: run `scan run` (`--dry-run` previews without writing), read each new lead's official posting, and record `queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>]`; every skip has a reason. `queue list` shows the queue in order; when queued roles have no fit yet, run `queue score` to rate them. Official ATS job boards of the companies the user watches are the default source; SimplifyJobs and CareerOps sources are opt-in. When `profile status --json` reports no scan sources, resolve the user's companies first (see Scan sources)
+- Find roles, new roles, or the daily role scan: run `scan run` (`--dry-run` previews without writing), read each new lead's official posting, and record `queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>]`; every skip has a reason. `queue list` shows the queue in order; when queued roles have no fit yet, run `queue score` to rate them. Held leads are reviewed the same day (see Held leads). Official ATS job boards of the companies the user watches are the default source; SimplifyJobs and CareerOps sources are opt-in. When `profile status --json` reports no scan sources, resolve the user's companies first (see Scan sources)
 - Apply, start applying, or fill application forms: read the `career-journal-apply` Skill. It needs profile rounds 1 and 2, fills forms only in the user's own browser, and stops before every submit
 - Profile, preferences, or form answers: use `profile show|questions|set|answer|skip|status`. Profile files live in `<home>/.career-journal/profile/` (`profile.json`, `answers.md`) and never in the repository
 - Resume or cover letter: read `careerops-materials`; verified generation requires CareerOps plus built-in and personal rules
@@ -70,7 +77,7 @@ CareerOps is the independently maintained MIT-licensed [career-ops-hq/career-ops
 
 ## Evidence rules
 
-Append events instead of rewriting history. Distinguish observed, occurred, and recorded time; use `occurred_at = null` when unknown. A user-reported submission supports a status event for one unambiguous application, but does not identify the submitted artifact. If roles could match, obtain the application ID. Keep generated files as a draft until the exact uploaded file is recorded. Never infer rejection from silence or treat a recruiting newsletter as progress.
+Append events instead of rewriting history. Distinguish observed, occurred, and recorded time; use `occurred_at = null` when unknown. A user-reported submission supports a status event for one unambiguous application, but does not identify the submitted artifact. If roles could match, obtain the application ID. Keep generated files as a draft until the exact uploaded file is recorded. Never infer rejection from silence or treat a recruiting newsletter as progress. A rejection email that does not name the role is recorded against an application only with an explicit "inferred" note that says why; when several applications at that company could match, leave it unassigned and ask.
 
 ## Capability failure
 

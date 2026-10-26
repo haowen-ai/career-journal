@@ -63,7 +63,7 @@ const copy = {
     statTasks: 'Assessments & interviews', statTasksLabel: (count, hint) => `Go to Assessments & interviews (${count}): ${hint}`,
     toApplyTitle: 'To apply', toApplyBody: 'Roles waiting for you to apply, soonest deadline first.',
     toApplyToday: 'Apply today', toApplyWeek: 'Due this week', toApplyLater: (count) => `Later (${count})`,
-    toApplyNone: (count) => `No deadline listed (${count})`, openPosting: 'Open posting',
+    toApplyNone: (count) => `No confirmed cutoff time (${count})`, openPosting: 'Open posting', deadlineSource: 'Source',
     toApplyEmptyTitle: 'Nothing waiting to apply', toApplyEmptyBody: 'Leads you have not applied to or skipped appear here, soonest deadline first.',
   },
   'zh-CN': {
@@ -98,7 +98,7 @@ const copy = {
     statTasks: '测评与面试准备', statTasksLabel: (count, hint) => `前往测评与面试准备（${count}）：${hint}`,
     toApplyTitle: '等待我投递', toApplyBody: '等你投递的岗位，截止时间最近的排在前面。',
     toApplyToday: '今天要投', toApplyWeek: '本周截止', toApplyLater: (count) => `稍后（${count}）`,
-    toApplyNone: (count) => `未写截止日期（${count}）`, openPosting: '打开官网',
+    toApplyNone: (count) => `无明确截止时间（${count}）`, openPosting: '打开官网', deadlineSource: '截止来源',
     toApplyEmptyTitle: '暂无等待投递的岗位', toApplyEmptyBody: '尚未投递、也没有跳过的线索会显示在这里，截止时间最近的排在前面。',
   },
 };
@@ -348,6 +348,21 @@ function renderTasks() {
   elements.completedTasksLabel.textContent = t('completedTasks')(done.length);
 }
 
+function renderDeadlineReview(review) {
+  const note = document.createElement('p');
+  note.className = 'task-due-note';
+  note.textContent = review.label;
+  if (review.sourceUrl) {
+    const source = document.createElement('a');
+    source.href = review.sourceUrl;
+    source.target = '_blank';
+    source.rel = 'noopener noreferrer';
+    source.textContent = t('deadlineSource');
+    note.append(' · ', source);
+  }
+  return note;
+}
+
 function renderApplyRow(application, now) {
   const summary = toApplyRow(application, { locale: state.locale, now, timeZone: state.timezone });
   const fragment = elements.applyTemplate.content.cloneNode(true);
@@ -374,6 +389,7 @@ function renderApplyRow(application, now) {
   } else {
     row.querySelector('.task-when').hidden = true;
   }
+  if (summary.deadline.review) row.querySelector('.task-main').append(renderDeadlineReview(summary.deadline.review));
   const link = row.querySelector('.apply-link');
   if (summary.jobUrl) {
     link.href = summary.jobUrl;
@@ -460,14 +476,15 @@ function renderQueue(card, application) {
   if (summary.fit.note) fit.title = summary.fit.note; else fit.removeAttribute('title');
 
   const facts = [];
-  if (summary.deadline.at || summary.deadline.status) {
+  if (summary.deadline.at || summary.deadline.status || summary.deadline.review) {
     const content = [];
     if (summary.deadline.at) {
       const time = document.createElement('time'); time.dateTime = summary.deadline.at;
       time.textContent = formatDeadline(summary.deadline.at, { compact: true, zone: true });
       content.push(time);
     }
-    if (summary.deadline.status) content.push(deadlineBadge(summary.deadline.status, summary.deadline.hint));
+    if (summary.deadline.status && (summary.deadline.at || !summary.deadline.review)) content.push(deadlineBadge(summary.deadline.status, summary.deadline.hint));
+    if (summary.deadline.review) content.push(renderDeadlineReview(summary.deadline.review));
     facts.push(queueFact('queue-deadline', t('deadline'), ...content));
   }
   if (summary.location) facts.push(queueFact('queue-location', t('location'), summary.location));
@@ -539,7 +556,7 @@ function render() {
     document.querySelector(`[data-stat="${key}"]`).setAttribute('aria-label', t('statCardLabel')(key, stats[key]));
   }
   const filterCounts = {
-    all: state.applications.length, sent: stats.applied, waiting: stats.waiting, interview: stats.interview, closed: stats.closed, preparing: stats.preparing,
+    all: filterApplications(state.applications).length, sent: stats.applied, waiting: stats.waiting, interview: stats.interview, closed: stats.closed, preparing: stats.preparing,
     tasks: state.applications.filter(hasOpenTask).length, queue: state.applications.filter(isQueued).length,
   };
   for (const [key, value] of Object.entries(filterCounts)) document.querySelector(`[data-count="${key}"]`).textContent = value;

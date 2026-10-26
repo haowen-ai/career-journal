@@ -7,7 +7,7 @@ export const DIRECTION_KEYWORDS = Object.freeze({
   'ai-ml': Object.freeze([
     'machine learning', 'ml', 'ai', 'artificial intelligence', 'deep learning', 'llm', 'llms', 'nlp',
     'natural language', 'computer vision', 'generative ai', 'genai', 'applied scientist', 'research scientist',
-    'ai/ml', 'ml/ai', 'mlops', 'reinforcement learning', 'perception',
+    'ai/ml', 'ml/ai', 'mlops', 'reinforcement learning', 'perception', 'forward deployed',
   ]),
   'data-science': Object.freeze([
     'data science', 'data scientist', 'statistician', 'statistics', 'decision science', 'causal inference',
@@ -32,7 +32,7 @@ export const DIRECTION_KEYWORDS = Object.freeze({
   ]),
   product: Object.freeze([
     'product manager', 'product management', 'associate product manager', 'apm', 'product owner',
-    'technical program manager', 'program manager',
+    'technical program manager', 'program manager', 'engineering program manager', 'program management',
   ]),
   other: Object.freeze([]),
 });

@@ -203,12 +203,9 @@ export function checkDegree(role, profile) {
   if (level !== 'phd' && listedDegrees.length && listedDegrees.every((item) => PHD_WORD.test(item))) {
     return { ok: false, reason: `degree-phd-only: listed degrees are ${role.degrees.join(', ')}; profile degree is ${level}` };
   }
-  // Boards that list the accepted degrees (SimplifyJobs does) are taken at their word: a list naming only
-  // bachelor's or associate degrees is undergraduate-only for a graduate candidate.
-  if (['masters', 'mba'].includes(level) && listedDegrees.length
-    && listedDegrees.every((item) => /bachelor|associate|undergrad/.test(item))) {
-    return { ok: false, reason: `degree-undergrad-only: listed degrees are ${role.degrees.join(', ')}; profile degree is ${level}` };
-  }
+  // A board's listed degrees naming only bachelor's (SimplifyJobs tags most postings that way) is not
+  // proof a master's student is excluded, and dropping on it removed many otherwise-matching roles, so the
+  // official posting text decides instead (title and wording checks below, then the official-text review).
   if (level !== 'phd' && !masterOk) {
     const phdTitle = PHD_WORD.exec(prepareText(title));
     if (phdTitle) return { ok: false, reason: `degree-phd-only: title "${title}" is for PhD students; profile degree is ${level}` };
