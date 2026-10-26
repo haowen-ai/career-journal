@@ -2,7 +2,7 @@
 
 [English](SKILL.md) | [简体中文](SKILL.zh-CN.md)
 
-按用户自己的个人资料和答案表，在用户自己的浏览器里填写求职申请，停在提交前；只有拿到证据才记为已投递。登录、验证码、勾同意、签名和点提交都由用户本人完成。CLI 从不操作浏览器；填表由宿主 Agent 的浏览器能力完成（Claude in Chrome、Codex 浏览器，或宿主提供的其他能力）。
+按用户自己的个人资料和答案表，在用户自己的浏览器里填写求职申请，停在提交前；只有拿到证据才记为已投递。用户授权后，可按第 3 条代填电子签名。登录、验证码、勾同意、最终 Review 和点提交仍由用户本人完成。CLI 从不操作浏览器；填表由宿主 Agent 的浏览器能力完成（Claude in Chrome、Codex 浏览器，或宿主提供的其他能力）。
 
 仓库命令使用 `node ./bin/career-journal.mjs ... --home <absolute-home>` 或 `./career-journal ...`。
 
@@ -12,7 +12,7 @@
 
 1. 不点任何写着 Submit*（Submit、Submit Application、Submit Profile 等）的按钮，即使它看起来只是中间步骤；也不点其他任何会把申请发出去的按钮。停在它前面，由用户自己点。
 2. 不替用户登录、注册账号，不输入密码或验证码，也不做或绕过 CAPTCHA。
-3. 不勾同意、声明、认证或仲裁条款，不代签名：不手写签名，也不输入姓名或日期作为电子签名。
+3. 不勾同意、声明、认证或仲裁条款。用户授权后，可用已确认的全名和网站要求的当日日期代填电子签名，最终 Review 和 Submit 仍由用户完成。不手写或伪造签名。如果填入本身就会接受有法律约束力的协议，须在操作时取得确认后再填。
 4. 不写作文：cover letter、why us、动机和补充问答都属于用户本人。只整理用户自己说的话。
 5. 成绩单只在表单把成绩单设为必填项时上传；不放进简历、可选或“其他附件”位置。
 6. 只上传一份简历，即用户选定的那份：`materials.resumePath`，或者用户为该岗位明确指定的版本。不换成其他版本。
@@ -24,15 +24,16 @@
 ## 每批开始前
 
 1. 运行 `profile status --json`。第 1、2 轮必须已完成，`materials.resumePath` 必须指向可读文件。否则先通过 `career-journal` Skill 补问缺的资料；不得凭猜测的资料填表。
-2. 运行 `profile show --json`，读取 `pace.batchSize`（N，默认 5）、`search.locations`、`search.exclusions`、`candidate.degree`、`candidate.authorization` 和 `materials`。完整读取 `<home>/.career-journal/profile/answers.md`。
+2. 运行 `profile show --json`，读取 `pace.batchSize`（N，默认 5；用户在本次会话中约定的批次数量优先）、`search.locations`、`search.exclusions`、`candidate.degree`、`candidate.authorization` 和 `materials`。完整读取 `<home>/.career-journal/profile/answers.md`。
 3. 运行 `queue list --json`，取排在最前面的 N 个岗位。每个岗位都必须已核实：`verifiedAt` 为空时，先读官网岗位原文，检查学历层次、毕业时间、工作身份、是否明确不给转正、是否已关闭、截止日期和必答作文，再用 `queue verify --id <application> --result ok|skip --reason <原因> [--deadline <带时区的 ISO 时间>]` 记录。每个“不投”都必须写原因。
-4. 动浏览器之前先查重。运行 `application list --json`，公司加岗位、岗位编号或岗位链接与已处于 `applied` 或之后状态的申请相同的，直接去掉。扫描产生的重复记录用 `queue verify --id <重复记录> --result skip --reason "duplicate of <保留的申请 ID>"` 标记。
-5. 遵守公司规则。公司规定每人只能投一个岗位时，通过判断路由（启用 Jev 时用 Jev，否则由当前 Agent 判断）选最对口的一个，其余标记“不投”并写原因；没有用 Jev 时要注明。
-6. 用一条简短消息告诉用户这一批是哪 N 个岗位。
+   - 因为“必备”条件不满足而不投时，要引用岗位原文中的那一行，并确认它位于必备部分（Required、Minimum、Basic qualifications），而不是 Preferred、Nice to have 或 Bonus 下面。候选人通过工作、实习、研究或项目经历满足的要求算作已满足，即使简历的措辞不同。要不时、以及每次简历更新后，对照当前简历复查这类“不投”，已不成立的重新打开。
+4. 每一批开始前、动浏览器之前先查重。运行 `application list --json`，把每个岗位与所有已处于 `applied` 或之后状态的申请逐一比对，不论它来自哪个来源：岗位编号或岗位链接相同的，或者公司相同且职位名几乎一样（只差词序、标点、季节或地点后缀）的，直接去掉。两个扫描来源（例如官方职位板和 SimplifyJobs）找到的同一个岗位算同一个。扫描产生的重复记录用 `queue verify --id <重复记录> --result skip --reason "duplicate of <保留的申请 ID>"` 标记。
+5. 遵守公司规则。公司规定每人只能投一个岗位时，通过判断路由（启用 Jev 时用 Jev，否则由当前 Agent 判断）选最对口的一个，其余标记“不投”并写原因；没有用 Jev 时要注明。用户已经投过好几份的公司，在本批中排到没投过或投得少的公司后面。
+6. 用一条简短消息告诉用户这一批是哪 N 个岗位。只做这一批：“继续”或“看看别的”指把当前这一批做完，不得擅自打开用户没要求的新岗位。用户要下一批时才开始下一批。
 
 ## 队列为空时
 
-队列里没有已核实的岗位、用户又想找新岗位时，运行 `scan run`。`profile status --json` 显示没有扫描来源时，先问用户要关注哪些公司，再从每家公司自己的招聘页找到它的职位板标识（token）：链接指向 `boards.greenhouse.io/<token>` 或 `job-boards.greenhouse.io/<token>` 的是 Greenhouse，`jobs.lever.co/<token>` 是 Lever，`jobs.ashbyhq.com/<token>` 是 Ashby；标识就是域名后的第一段路径。用 `profile set --key sources.atsBoards --value '[{"ats":"greenhouse","board":"<token>","company":"<公司名>"}]'` 一次写入完整列表，确认 `scan run --dry-run` 中每个职位板都显示 `ok`，并告诉用户哪些公司使用其他招聘系统、无法扫描。不得猜测标识。需要用户自己开启的 CareerOps 和 SimplifyJobs 来源见 `career-journal` Skill 的“扫描来源”。
+队列里没有已核实的岗位、用户又想找新岗位时，运行 `scan run`。待核实的暂留岗位（见 `career-journal` Skill 的“暂留岗位”）不在 `queue list` 中；在说队列为空之前，要在扫描当天把它们核实完，汇报队列数量时同时说明还有多少暂留。`profile status --json` 显示没有扫描来源时，先问用户要关注哪些公司，再从每家公司自己的招聘页找到它的职位板标识（token）：链接指向 `boards.greenhouse.io/<token>` 或 `job-boards.greenhouse.io/<token>` 的是 Greenhouse，`jobs.lever.co/<token>` 是 Lever，`jobs.ashbyhq.com/<token>` 是 Ashby；标识就是域名后的第一段路径。用 `profile set --key sources.atsBoards --value '[{"ats":"greenhouse","board":"<token>","company":"<公司名>"}]'` 一次写入完整列表，确认 `scan run --dry-run` 中每个职位板都显示 `ok`，并告诉用户哪些公司使用其他招聘系统、无法扫描。不得猜测标识。需要用户自己开启的 CareerOps 和 SimplifyJobs 来源见 `career-journal` Skill 的“扫描来源”。
 
 ## 派发
 
@@ -40,6 +41,8 @@
 - 每个子 Agent 自己新开一个标签页，只用这一个标签页，不读取、不复用、不关闭任何别的标签页。网站自己在新标签页中打开申请时，那个新标签页也归同一个子 Agent。
 - 宿主支持时并行运行子 Agent；不支持子 Agent 时，由主会话按同一份任务说明逐个岗位处理。
 - 只按 `answers.md` 和个人资料填写。不知道的事实留空并报告，不编造任何内容。
+- 答案表标明“问用户”的题（例如是否愿意接受背景调查、可入职的月份）留空并报告，即使答案看似显而易见，也不猜，不从相似的题照抄。
+- 在最终确认页上，子 Agent 仍可以填写该页显示的题目，但绝不点 Submit*、它旁边的任何按钮或提交区域里的其他任何东西；停下并设为 `✅`。
 
 ## 标签标题
 
@@ -50,7 +53,7 @@
 | `🔑待登录 <公司>` | 需要登录、注册账号、输入密码或邮件验证码 |
 | `🤖待验证 <公司>` | 需要完成 CAPTCHA 或机器人检查 |
 | `❓待回答 <公司>` | 答案表里没有的必填题 |
-| `👆待点击 <公司>` | 需要用户勾同意框、签名，或点一个写着 Submit* 的中间步骤按钮 |
+| `👆待点击 <公司>` | 需要用户勾同意框、授权或操作时确认签名，或点一个写着 Submit* 的中间步骤按钮 |
 | `✅待提交 <公司>` | 其余内容都已填好，停在最终提交前 |
 
 ## 边投边问
@@ -67,15 +70,16 @@
 
 ## 用户提交之后
 
-- 用证据确认每一次提交：所选求职邮箱里的确认邮件（通常由每日 `mail-sync` 读到）、网站的“已收到”页面，或候选人后台中的状态。然后记录 `event add --id <application> --type application_submitted --title "Application submitted" --status-after applied --source <email|site|user> --note "<证据>"`；只有证据写明了时间时才加 `--occurred-at`。
+- 用证据确认每一次提交：所选求职邮箱里的确认邮件（通常由每日 `mail-sync` 读到）、网站的“已收到”页面，或候选人后台中的状态。只有其中之一显示了该申请，才记为 `applied`；填好的表、`✅` 标签标题或子 Agent 的报告都不是提交证据。然后记录 `event add --id <application> --type application_submitted --title "Application submitted" --status-after applied --source <email|site|user> --note "<证据>"`；只有证据写明了时间时才加 `--occurred-at`。
 - 按 `career-journal` 的证据规则，用户明确说某一个无歧义的申请已提交，也可以作为证据，用 `--source user` 记录。没有证据时，该申请仍留在队列中，下一次邮件同步后再查。
+- 没有写明岗位的拒信，只有附上明确的“推断”说明、写清为什么对应到这个申请，才可以记到该申请上。这家公司有多个申请都可能对应时，不要归到任何一个，询问用户。
 - 只有填表报告写明了实际上传的那个文件、且用户没有替换时，才用 `material mark-submitted --id <application> --file <resumePath> --confirm` 记录提交的简历。
 - 测评或面试邀请用 `task add --id <application> --kind assessment|interview --title <标题> --platform <平台> --due-at <带 UTC 偏移的 ISO 8601 时间> --due-note "<截止时间如何推算>" --link <邀请链接>` 记录。
 
 ## 中断恢复
 
 - 浏览器扩展会掉线，用户也会关掉标签组。在自己新开的标签页里重新打开该岗位的申请链接后继续：会保存草稿的网站（Workday、Oracle HCM、iCIMS、SuccessFactors）从第一个未保存的步骤继续；不保存草稿的网站（Greenhouse、Lever、Ashby、Yello）从头重填。
-- 不得为了解决问题而刷新填了一半的页面。
+- 不得为了解决问题而刷新填了一半的页面。填了一半的页面卡死或没有响应时，子 Agent 关闭自己的标签页（绝不关别的标签页），在自己新开的标签页里重新填写；网站保存了草稿就从草稿继续。
 - 在会话中或仓库以外的私有临时文件里，为每个岗位记一条简短进度（岗位、标签页、最后保存的步骤、标题），让重新启动的子 Agent 知道从哪里继续。
 
 ## 用到的命令

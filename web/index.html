@@ -43,37 +43,78 @@
       </section>
 
       <section class="stats" aria-label="Application summary">
-        <article class="stat-card stat-primary">
+        <button class="stat-card stat-primary" type="button" data-stat="applied" data-testid="stat-card-applied" aria-label="Show sent applications">
           <span class="stat-label"><span class="semantic-dot dot-applied" aria-hidden="true"></span><span data-i18n="statApplied">Applications sent</span></span>
           <strong id="stat-applied" data-testid="stat-applied">0</strong>
           <span class="stat-note" data-i18n="statAppliedNote">Confirmed submissions</span>
-        </article>
-        <article class="stat-card">
+        </button>
+        <button class="stat-card" type="button" data-stat="waiting" data-testid="stat-card-waiting" aria-label="Show Waiting applications">
           <span class="stat-label"><span class="semantic-dot dot-waiting" aria-hidden="true"></span><span data-i18n="statWaiting">Waiting</span></span>
           <strong id="stat-waiting" data-testid="stat-waiting">0</strong>
           <span class="stat-note" data-i18n="statWaitingNote">Submitted or in assessment</span>
-        </article>
-        <article class="stat-card">
+        </button>
+        <button class="stat-card" type="button" data-stat="interview" data-testid="stat-card-interview" aria-label="Show Interview / Offer applications">
           <span class="stat-label"><span class="semantic-dot dot-interview" aria-hidden="true"></span><span data-i18n="statInterview">Interview / Offer</span></span>
           <strong id="stat-interview" data-testid="stat-interview">0</strong>
           <span class="stat-note" data-i18n="statInterviewNote">Active interview or decision</span>
-        </article>
-        <article class="stat-card">
+        </button>
+        <button class="stat-card" type="button" data-stat="closed" data-testid="stat-card-closed" aria-label="Show Closed applications">
           <span class="stat-label"><span class="semantic-dot dot-closed" aria-hidden="true"></span><span data-i18n="statClosed">Closed</span></span>
           <strong id="stat-closed" data-testid="stat-closed">0</strong>
           <span class="stat-note" data-i18n="statClosedNote">Finished, withdrawn, or rejected</span>
-        </article>
-        <article class="stat-card">
+        </button>
+        <button class="stat-card" type="button" data-stat="preparing" data-testid="stat-card-preparing" aria-label="Show Preparing applications">
           <span class="stat-label"><span class="semantic-dot dot-preparing" aria-hidden="true"></span><span data-i18n="statPreparing">Preparing</span></span>
           <strong id="stat-preparing" data-testid="stat-preparing">0</strong>
           <span class="stat-note" data-i18n="statPreparingNote">Not yet confirmed as submitted</span>
-        </article>
+        </button>
+        <button class="stat-card stat-tasks" type="button" data-scroll-target="tasks-heading" data-testid="stat-card-tasks" aria-label="Go to Assessments &amp; interviews">
+          <span class="stat-label"><span class="semantic-dot dot-tasks" aria-hidden="true"></span><span data-i18n="statTasks">Assessments &amp; interviews</span></span>
+          <strong id="stat-tasks" data-testid="stat-tasks">0</strong>
+          <span class="stat-note" id="stat-tasks-hint" data-testid="stat-tasks-hint">Nothing open</span>
+        </button>
+      </section>
+
+      <section class="to-apply-section" aria-labelledby="to-apply-heading" data-testid="to-apply-section">
+        <div class="list-heading">
+          <div>
+            <h2 id="to-apply-heading" data-i18n="toApplyTitle">To apply</h2>
+            <p data-i18n="toApplyBody">Roles waiting for you to apply, soonest deadline first.</p>
+          </div>
+        </div>
+        <p class="to-apply-summary" id="to-apply-summary" data-testid="to-apply-summary" aria-live="polite" hidden></p>
+        <section class="apply-group is-today" id="apply-group-today" data-testid="to-apply-today" aria-labelledby="apply-today-heading" hidden>
+          <h3 class="apply-group-title" id="apply-today-heading"><span data-i18n="toApplyToday">Apply today</span><b class="apply-group-count" id="apply-today-count">0</b></h3>
+          <div class="task-list apply-list" id="apply-today-rows" data-testid="to-apply-today-rows"></div>
+        </section>
+        <section class="apply-group is-week" id="apply-group-week" data-testid="to-apply-week" aria-labelledby="apply-week-heading" hidden>
+          <h3 class="apply-group-title" id="apply-week-heading"><span data-i18n="toApplyWeek">Due this week</span><b class="apply-group-count" id="apply-week-count">0</b></h3>
+          <div class="task-list apply-list" id="apply-week-rows" data-testid="to-apply-week-rows"></div>
+        </section>
+        <details class="apply-more" id="apply-group-later" data-testid="to-apply-later" hidden>
+          <summary>
+            <span id="apply-later-label">Later (0)</span>
+            <span class="details-icons" aria-hidden="true"><img class="details-plus" src="/icons/plus.svg" alt=""><img class="details-minus" src="/icons/minus.svg" alt=""></span>
+          </summary>
+          <div class="task-list apply-list" id="apply-later-rows" data-testid="to-apply-later-rows"></div>
+        </details>
+        <details class="apply-more" id="apply-group-none" data-testid="to-apply-none" hidden>
+          <summary>
+            <span id="apply-none-label">No deadline listed (0)</span>
+            <span class="details-icons" aria-hidden="true"><img class="details-plus" src="/icons/plus.svg" alt=""><img class="details-minus" src="/icons/minus.svg" alt=""></span>
+          </summary>
+          <div class="task-list apply-list" id="apply-none-rows" data-testid="to-apply-none-rows"></div>
+        </details>
+        <section class="empty-state task-empty" id="to-apply-empty" data-testid="to-apply-empty" hidden>
+          <h3 data-i18n="toApplyEmptyTitle">Nothing waiting to apply</h3>
+          <p data-i18n="toApplyEmptyBody">Leads you have not applied to or skipped appear here, soonest deadline first.</p>
+        </section>
       </section>
 
       <section class="tasks-section" aria-labelledby="tasks-heading" data-testid="tasks-section">
         <div class="list-heading">
           <div>
-            <h2 id="tasks-heading" data-i18n="tasksTitle">Assessments &amp; interviews</h2>
+            <h2 id="tasks-heading" tabindex="-1" data-i18n="tasksTitle">Assessments &amp; interviews</h2>
             <p data-i18n="tasksBody">Open steps across all applications, soonest deadline first.</p>
           </div>
         </div>
@@ -107,6 +148,7 @@
         <div class="filter-bar">
           <div class="filters" role="group" aria-label="Application status filters">
             <button data-testid="filter-all" data-filter="all" type="button" aria-pressed="true"><span data-i18n="filterAll">All</span><b data-count="all">0</b></button>
+            <button data-testid="filter-sent" data-filter="sent" type="button" aria-pressed="false"><span data-i18n="filterSent">Sent</span><b data-count="sent">0</b></button>
             <button data-testid="filter-waiting" data-filter="waiting" type="button" aria-pressed="false"><span data-i18n="filterWaiting">Waiting</span><b data-count="waiting">0</b></button>
             <button data-testid="filter-interview" data-filter="interview" type="button" aria-pressed="false"><span data-i18n="filterInterview">Interview / Offer</span><b data-count="interview">0</b></button>
             <button data-testid="filter-closed" data-filter="closed" type="button" aria-pressed="false"><span data-i18n="filterClosed">Closed</span><b data-count="closed">0</b></button>
@@ -115,6 +157,26 @@
             <button data-testid="filter-tasks" data-filter="tasks" type="button" aria-pressed="false"><span data-i18n="filterTasks">Assessments / interviews</span><b data-count="tasks">0</b></button>
           </div>
           <span class="result-count" id="result-count" aria-live="polite">0 of 0</span>
+        </div>
+        <div class="role-controls" id="role-controls" data-testid="role-controls" hidden>
+          <div class="role-control">
+            <span class="control-label" id="sort-label" data-i18n="sortLabel">Sort by</span>
+            <div class="segmented" role="group" aria-labelledby="sort-label">
+              <button data-testid="sort-deadline" data-sort="deadline" type="button" aria-pressed="true"><span data-i18n="sortDeadline">Deadline (soonest first)</span></button>
+              <button data-testid="sort-fit" data-sort="fit" type="button" aria-pressed="false"><span data-i18n="sortFit">Fit</span></button>
+              <button data-testid="sort-newest" data-sort="newest" type="button" aria-pressed="false"><span data-i18n="sortNewest">Newest</span></button>
+            </div>
+          </div>
+          <div class="role-control">
+            <span class="control-label" id="fit-filter-label" data-i18n="fitFilterLabel">Fit</span>
+            <div class="fit-chips" role="group" aria-labelledby="fit-filter-label">
+              <button data-testid="fit-all" data-fit="all" type="button" aria-pressed="true"><span data-i18n="fitAll">All</span><b data-fit-count="all">0</b></button>
+              <button data-testid="fit-high" data-fit="high" type="button" aria-pressed="false"><span data-i18n="fitHigh">High</span><b data-fit-count="high">0</b></button>
+              <button data-testid="fit-medium" data-fit="medium" type="button" aria-pressed="false"><span data-i18n="fitMedium">Medium</span><b data-fit-count="medium">0</b></button>
+              <button data-testid="fit-low" data-fit="low" type="button" aria-pressed="false"><span data-i18n="fitLow">Low</span><b data-fit-count="low">0</b></button>
+              <button data-testid="fit-none" data-fit="none" type="button" aria-pressed="false"><span data-i18n="fitNone">Unrated</span><b data-fit-count="none">0</b></button>
+            </div>
+          </div>
         </div>
 
         <p class="loading-state" id="loading" data-i18n="loading">Loading applications…</p>
@@ -207,14 +269,29 @@
       <div class="task-main">
         <p class="task-application"><span class="task-company"></span><span class="task-role"></span></p>
         <h3 class="task-title"></h3>
-        <p class="task-meta"><span class="task-kind"></span><span class="task-platform"></span><a class="task-link" target="_blank" rel="noopener noreferrer"></a></p>
+        <p class="task-meta"><span class="task-kind"></span><span class="task-platform"></span><button class="task-action" type="button"></button></p>
         <p class="task-due-note"></p>
       </div>
       <div class="task-when">
         <time class="task-deadline"></time>
         <span class="task-badge"></span>
       </div>
-      <button class="task-action" type="button"></button>
+      <a class="task-link" target="_blank" rel="noopener noreferrer"></a>
+    </article>
+  </template>
+
+  <template id="apply-template">
+    <article class="task-row apply-row" data-testid="to-apply-row">
+      <div class="task-main">
+        <p class="task-application"><span class="apply-company"></span></p>
+        <h4 class="task-title apply-role"></h4>
+        <p class="task-meta apply-meta"><span class="fit-badge"></span><span class="apply-location"></span><span class="queue-check apply-check"></span></p>
+      </div>
+      <div class="task-when">
+        <time class="task-deadline apply-deadline"></time>
+        <span class="task-badge"></span>
+      </div>
+      <a class="task-action apply-link" data-testid="to-apply-link" target="_blank" rel="noopener noreferrer"></a>
     </article>
   </template>
 

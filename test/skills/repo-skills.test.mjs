@@ -122,7 +122,7 @@ test('apply skill keeps fixed hard rules, own-tab batches, and evidence-gated st
   for (const text of [english, briefEn]) {
     assert.match(text, /Never click any button labelled Submit\*/);
     assert.match(text, /Never sign in, create accounts, or type passwords or verification codes/);
-    assert.match(text, /Never tick consent, attestation, certification, or arbitration boxes, and never sign/);
+    assert.match(text, /Never tick consent, attestation, certification, or arbitration boxes\. With the user's authorization, enter their confirmed full name and the site's required current date as a typed e-signature, leaving final review and Submit to the user\. Do not draw or fabricate a signature\. If entering the value itself accepts a legally binding agreement, obtain confirmation at action time before entering it\./);
     assert.match(text, /Never write essays[^\n]*Only organise the user's own words/);
     assert.match(text, /transcript only when the form makes a transcript a required field/);
     assert.match(text, /Upload exactly one resume/);
@@ -132,7 +132,7 @@ test('apply skill keeps fixed hard rules, own-tab batches, and evidence-gated st
   for (const text of [chinese, briefZh]) {
     assert.match(text, /不点任何写着 Submit\*/);
     assert.match(text, /不替用户登录、注册账号，不输入密码或验证码/);
-    assert.match(text, /不勾同意、声明、认证或仲裁条款，不代签名/);
+    assert.match(text, /不勾同意、声明、认证或仲裁条款。用户授权后，可用已确认的全名和网站要求的当日日期代填电子签名，最终 Review 和 Submit 仍由用户完成。不手写或伪造签名。如果填入本身就会接受有法律约束力的协议，须在操作时取得确认后再填。/);
     assert.match(text, /不写作文[^\n]*只整理用户自己说的话/);
     assert.match(text, /成绩单只在表单把成绩单设为必填项时上传/);
     assert.match(text, /只上传一份简历/);

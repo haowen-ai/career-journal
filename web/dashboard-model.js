@@ -9,6 +9,7 @@ export function applicationGroup(application) {
   if (waitingStatuses.has(status)) return 'waiting';
   if (interviewStatuses.has(status)) return 'interview';
   if (closedStatuses.has(status)) return 'closed';
+  if (preparingStatuses.has(status) && application?.skipReason != null) return 'closed';
   if (preparingStatuses.has(status)) return 'preparing';
   return 'unknown';
 }
@@ -99,6 +100,54 @@ export function taskDeadlineLabel(status, locale = 'en') {
   return status.state === 'upcoming' ? labels.upcoming(status.daysLeft) : labels[status.state];
 }
 
+// The Assessments & interviews summary card. "Due soon" is the amber badge
+// window: due within 2 workspace calendar days and not yet past. Past-due open
+// steps are counted apart, and `nextDueAt` is the soonest deadline still ahead.
+export function taskCardSummary(applications, { now = Date.now(), timeZone = 'UTC' } = {}) {
+  const { open } = taskQueue(applications);
+  const summary = { open: open.length, dueSoon: 0, overdue: 0, nextDueAt: null, urgent: false };
+  for (const task of open) {
+    const status = taskDeadlineStatus(task, { now, timeZone });
+    if (status.state === 'none') continue;
+    if (status.state === 'overdue') { summary.overdue += 1; continue; }
+    if (status.urgent) summary.dueSoon += 1;
+    summary.nextDueAt ??= task.dueAt;
+  }
+  summary.urgent = summary.dueSoon + summary.overdue > 0;
+  return summary;
+}
+
+const taskCardCopy = {
+  en: {
+    empty: 'Nothing open', undated: 'No deadlines set', overdue: (count) => `${count} overdue`,
+    soon: (count) => `${count} due within 2 days`, next: (date) => `Next due ${date}`,
+  },
+  'zh-CN': {
+    empty: '暂无待办', undated: '暂无截止时间', overdue: (count) => `${count} 个已过期`,
+    soon: (count) => `${count} 个两天内截止`, next: (date) => `最近截止 ${date}`,
+  },
+};
+
+function shortDate(value, locale, timeZone) {
+  const options = { month: 'short', day: 'numeric' };
+  try { return new Intl.DateTimeFormat(locale, { ...options, timeZone }).format(new Date(value)); }
+  catch { return new Intl.DateTimeFormat(locale, { ...options, timeZone: 'UTC' }).format(new Date(value)); }
+}
+
+// The card's hint line: past-due steps first, then how many are due within 2
+// days, or the soonest deadline ahead when none are; "Nothing open" without
+// open steps and "No deadlines set" when no open step has a deadline.
+export function taskCardHint(summary, { locale = 'en', timeZone = 'UTC' } = {}) {
+  const language = locale === 'zh-CN' ? 'zh-CN' : 'en';
+  const labels = taskCardCopy[language];
+  if (!summary?.open) return labels.empty;
+  const parts = [];
+  if (summary.overdue) parts.push(labels.overdue(summary.overdue));
+  if (summary.dueSoon) parts.push(labels.soon(summary.dueSoon));
+  else if (summary.nextDueAt) parts.push(labels.next(shortDate(summary.nextDueAt, language, timeZone)));
+  return parts.length ? parts.join(' · ') : labels.undated;
+}
+
 // The apply queue is the same set `career-journal queue list` shows: leads that
 // have not been skipped.
 export function isQueued(application) {
@@ -134,14 +183,82 @@ export function queueApplications(applications) {
   return (applications ?? []).filter(isQueued).sort(compareQueueApplications);
 }
 
+// The Preparing and Queue views get a sort control and fit filter chips.
+export const ROLE_SORTS = Object.freeze(['deadline', 'fit', 'newest']);
+export const FIT_FILTERS = Object.freeze(['all', 'high', 'medium', 'low', 'none']);
+
+export function hasRoleControls(group) {
+  return group === 'preparing' || group === 'queue';
+}
+
+function addedTime(application) {
+  return timeOrNull(application.postedAt) ?? timeOrNull(application.createdAt);
+}
+
+// Newest first by posting date, or by the date the role was added when the
+// posting date is unknown; ties fall back to the deadline order.
+export function compareNewest(left, right) {
+  const leftTime = addedTime(left);
+  const rightTime = addedTime(right);
+  if (leftTime !== rightTime) {
+    if (leftTime === null) return 1;
+    if (rightTime === null) return -1;
+    return rightTime - leftTime;
+  }
+  return compareToApply(left, right);
+}
+
+// deadline: soonest first, then roles without one in queue order.
+// fit: high, medium, low, unrated, then deadline (the `queue list` order).
+// newest: posted or added date, newest first.
+const roleComparators = { deadline: compareToApply, fit: compareQueueApplications, newest: compareNewest };
+
+// Under the deadline sort, roles whose deadline passed more than a day ago can no longer be applied to,
+// so they go after the roles without a deadline instead of to the top of the list.
+function deadlineBucket(application, now) {
+  const due = timeOrNull(application?.deadlineAt);
+  if (due === null) return 1;
+  return due < now - PAST_DEADLINE_GRACE_MS ? 2 : 0;
+}
+
+export function sortRoles(applications, sort = 'deadline', { now = Date.now() } = {}) {
+  const compare = roleComparators[sort] ?? roleComparators.deadline;
+  const byDeadline = compare === compareToApply;
+  return [...(applications ?? [])].sort((left, right) => (byDeadline ? deadlineBucket(left, now) - deadlineBucket(right, now) : 0)
+    || compare(left, right));
+}
+
+export function matchesFit(application, fit = 'all') {
+  return fit === 'all' || !FIT_FILTERS.includes(fit) || fitLevel(application?.fit) === fit;
+}
+
+export function fitCounts(applications) {
+  const counts = { all: 0, high: 0, medium: 0, low: 0, none: 0 };
+  for (const application of applications ?? []) {
+    counts.all += 1;
+    counts[fitLevel(application.fit)] += 1;
+  }
+  return counts;
+}
+
+// Each summary card opens the list filter that shows the applications it counts.
+export const STAT_FILTERS = Object.freeze({ applied: 'sent', waiting: 'waiting', interview: 'interview', closed: 'closed', preparing: 'preparing' });
+
+export function statFilter(stat) {
+  return STAT_FILTERS[stat] ?? 'all';
+}
+
 function matchesFilter(application, group) {
-  if (group === 'all') return true;
+  if (group === 'all') return application?.skipReason == null || wasApplied(application);
+  if (group === 'sent') return wasApplied(application);
   if (group === 'tasks') return hasOpenTask(application);
   if (group === 'queue') return isQueued(application);
   return applicationGroup(application) === group;
 }
 
-export function filterApplications(applications, { group = 'all', query = '' } = {}) {
+// In the Preparing and Queue views, `fit` keeps one fit level and `sort` picks
+// the order. Without `sort`, the Queue view keeps the `queue list` order.
+export function filterApplications(applications, { group = 'all', query = '', sort = null, fit = 'all', now = Date.now() } = {}) {
   const normalized = String(query).trim().toLocaleLowerCase();
   const visible = (applications ?? []).filter((application) => {
     const matchesGroup = matchesFilter(application, group);
@@ -150,7 +267,10 @@ export function filterApplications(applications, { group = 'all', query = '' } =
       .filter(Boolean).join(' ').toLocaleLowerCase();
     return matchesGroup && (!normalized || haystack.includes(normalized));
   });
-  return group === 'queue' ? visible.sort(compareQueueApplications) : visible;
+  if (!hasRoleControls(group)) return visible;
+  const fitted = visible.filter((application) => matchesFit(application, fit));
+  if (sort) return sortRoles(fitted, sort, { now });
+  return group === 'queue' ? fitted.sort(compareQueueApplications) : fitted;
 }
 
 const fitCopy = {
@@ -188,10 +308,24 @@ function skipReasonOf(application) {
   return reason == null || !String(reason).trim() ? null : String(reason).trim();
 }
 
+// A review can explain a deadline without inventing a timestamp for it.
+function deadlineReview(application, locale) {
+  const event = [...(application?.events ?? [])].filter((item) => item.type === 'deadline_review')
+    .sort(compareEventsNewestFirst)[0];
+  if (!event) return null;
+  const note = String(event.note ?? '');
+  const zh = note.match(/^截止说明：([^\r\n]+)/m)?.[1]?.trim();
+  const en = note.match(/^Deadline: ([^\r\n]+)/m)?.[1]?.trim();
+  const label = locale === 'zh-CN' ? zh ?? en : en ?? zh;
+  if (!label) return null;
+  return { label, sourceUrl: safeHttpUrl(note.match(/^来源：([^\r\n]+)/m)?.[1]), checkedAt: event.observedAt ?? event.recordedAt };
+}
+
 // What a card shows about a queued role, as data so it can be tested without a
 // DOM. Returns null for applications past the preparing stage that were not
 // skipped from the queue. The deadline time-left hint only applies while the
 // role is still being prepared; a skipped role keeps its deadline date only.
+// The hint uses the posting wording: "Deadline passed", "No deadline listed".
 export function queueSummary(application, { locale = 'en', now = Date.now(), timeZone = 'UTC' } = {}) {
   const preparing = applicationGroup(application) === 'preparing';
   const skipReason = skipReasonOf(application);
@@ -199,14 +333,118 @@ export function queueSummary(application, { locale = 'en', now = Date.now(), tim
   const level = fitLevel(application.fit);
   const deadlineAt = timeOrNull(application.deadlineAt) === null ? null : application.deadlineAt;
   const deadline = preparing ? taskDeadlineStatus({ dueAt: deadlineAt }, { now, timeZone }) : null;
+  const review = deadlineReview(application, locale);
   return {
     queued: isQueued(application),
     fit: { level, label: fitLabel(level, locale), note: application.fitNote || null },
-    deadline: { at: deadlineAt, status: deadline, hint: deadline ? taskDeadlineLabel(deadline, locale) : null },
+    deadline: { at: deadlineAt, status: deadline, hint: deadline ? roleDeadlineLabel(deadline, locale) : null, ...(review ? { review } : {}) },
     location: application.location || null,
     source: sourceName(application.source),
     check: { state: application.verifiedAt ? 'verified' : 'unverified', at: application.verifiedAt || null, label: postingCheckLabel(application, locale) },
     skipReason,
+  };
+}
+
+// The "To apply" section: every role still waiting for the user to apply, which
+// is a lead or a prepared application that was not skipped. It is the Queue
+// filter's set plus prepared roles.
+export function isWaitingToApply(application) {
+  return preparingStatuses.has(String(application?.status ?? '').toLowerCase()) && application?.skipReason == null;
+}
+
+// Soonest deadline first; roles without a deadline go last, and any tie falls
+// back to queue order (fit, then the most recently posted role).
+export function compareToApply(left, right) {
+  return lastIfMissing(timeOrNull(left.deadlineAt)) - lastIfMissing(timeOrNull(right.deadlineAt))
+    || compareQueueApplications(left, right);
+}
+
+export const TO_APPLY_GROUPS = Object.freeze(['today', 'week', 'later', 'none']);
+const APPLY_TODAY_DAYS = 2;
+const APPLY_WEEK_DAYS = 7;
+const PAST_DEADLINE_GRACE_MS = 86_400_000;
+
+// Days are workspace calendar days, the same count as the deadline badge.
+// "today": due within 2 days, or past the deadline by at most 24 hours;
+// "week": 3-7 days; "later": more than 7 days; "none": no valid deadline.
+// A deadline more than 24 hours past returns null and the role is not listed.
+export function toApplyGroup(application, { now = Date.now(), timeZone = 'UTC' } = {}) {
+  const status = taskDeadlineStatus({ dueAt: application?.deadlineAt }, { now, timeZone });
+  if (status.state === 'none') return 'none';
+  if (status.state === 'overdue') {
+    const current = typeof now === 'number' ? now : Date.parse(now);
+    return current - timeOrNull(application.deadlineAt) <= PAST_DEADLINE_GRACE_MS ? 'today' : null;
+  }
+  if (status.daysLeft <= APPLY_TODAY_DAYS) return 'today';
+  if (status.daysLeft <= APPLY_WEEK_DAYS) return 'week';
+  return 'later';
+}
+
+export function toApplyQueue(applications, { now = Date.now(), timeZone = 'UTC' } = {}) {
+  const groups = { today: [], week: [], later: [], none: [] };
+  for (const application of (applications ?? []).filter(isWaitingToApply).sort(compareToApply)) {
+    const group = toApplyGroup(application, { now, timeZone });
+    if (group) groups[group].push(application);
+  }
+  return groups;
+}
+
+const toApplyCopy = {
+  en: {
+    passed: 'Deadline passed',
+    unlisted: 'No deadline listed',
+    summary: (today, week, more) => [`${today} to apply today`, `${week} this week`, more ? `${more} more` : null],
+  },
+  'zh-CN': {
+    passed: '已过截止',
+    unlisted: '未写截止日期',
+    summary: (today, week, more) => [`今天要投 ${today} 个`, `本周截止 ${week} 个`, more ? `其余 ${more} 个` : null],
+  },
+};
+
+function toApplyLanguage(locale) {
+  return toApplyCopy[locale === 'zh-CN' ? 'zh-CN' : 'en'];
+}
+
+// Deadline wording for a role's application deadline, as opposed to a task.
+export function roleDeadlineLabel(status, locale = 'en') {
+  if (status.state === 'overdue') return toApplyLanguage(locale).passed;
+  if (status.state === 'none') return toApplyLanguage(locale).unlisted;
+  return taskDeadlineLabel(status, locale);
+}
+
+// "2 to apply today · 5 this week · 140 more"; the last part is left out when
+// nothing is due later, and the whole line is empty when nothing is waiting.
+export function toApplySummaryLine(groups, locale = 'en') {
+  const count = (key) => groups?.[key]?.length ?? 0;
+  const more = count('later') + count('none');
+  if (count('today') + count('week') + more === 0) return '';
+  return toApplyLanguage(locale).summary(count('today'), count('week'), more).filter(Boolean).join(' · ');
+}
+
+export function safeHttpUrl(value) {
+  if (typeof value !== 'string' || !/^https?:\/\//i.test(value.trim())) return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+  } catch { return null; }
+}
+
+// What one "To apply" row shows, as data so it can be tested without a DOM.
+export function toApplyRow(application, { locale = 'en', now = Date.now(), timeZone = 'UTC' } = {}) {
+  const level = fitLevel(application.fit);
+  const deadlineAt = timeOrNull(application.deadlineAt) === null ? null : application.deadlineAt;
+  const status = taskDeadlineStatus({ dueAt: deadlineAt }, { now, timeZone });
+  const review = deadlineReview(application, locale);
+  return {
+    id: application.id,
+    company: application.company,
+    role: application.role,
+    fit: { level, label: fitLabel(level, locale), note: application.fitNote || null },
+    location: application.location || null,
+    deadline: { at: deadlineAt, status, label: deadlineAt ? roleDeadlineLabel(status, locale) : null, ...(review ? { review } : {}) },
+    check: { state: application.verifiedAt ? 'verified' : 'unverified', label: postingCheckLabel(application, locale) },
+    jobUrl: safeHttpUrl(application.jobUrl),
   };
 }
 

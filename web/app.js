@@ -2,18 +2,28 @@ import {
   applicationGroup,
   applicationStats,
   compareEventsNewestFirst,
+  FIT_FILTERS,
   filterApplications,
+  fitCounts,
   hasOpenTask,
+  hasRoleControls,
   isQueued,
   latestEvent,
   materialKindLabel,
   openTasks,
   queueSummary,
+  ROLE_SORTS,
+  statFilter,
   suggestedNextAction,
+  taskCardHint,
+  taskCardSummary,
   taskDeadlineLabel,
   taskDeadlineStatus,
   taskKindLabel,
   taskQueue,
+  toApplyQueue,
+  toApplyRow,
+  toApplySummaryLine,
   verificationLabel,
 } from './dashboard-model.js';
 
@@ -44,6 +54,17 @@ const copy = {
     completedTasks: (count) => `Completed (${count})`, taskCompleted: 'Completed', platform: 'Platform', openLink: 'Open link', deadline: 'Deadline',
     openSteps: 'Open steps', cardTasks: 'Assessment and interview steps', cardTasksNote: 'Deadlines use the workspace time zone.',
     filterQueue: 'Queue', queueFacts: 'Role queue details', location: 'Location', skipReason: 'Skip reason',
+    sortLabel: 'Sort by', sortDeadline: 'Deadline (soonest first)', sortFit: 'Fit', sortNewest: 'Newest',
+    fitFilterLabel: 'Fit', fitAll: 'All', fitHigh: 'High', fitMedium: 'Medium', fitLow: 'Low', fitNone: 'Unrated',
+    filterSent: 'Sent', statCardLabel: (stat, count) => `${{
+      applied: 'Show sent applications', waiting: 'Show Waiting applications', interview: 'Show Interview / Offer applications',
+      closed: 'Show Closed applications', preparing: 'Show Preparing applications',
+    }[stat]} (${count})`,
+    statTasks: 'Assessments & interviews', statTasksLabel: (count, hint) => `Go to Assessments & interviews (${count}): ${hint}`,
+    toApplyTitle: 'To apply', toApplyBody: 'Roles waiting for you to apply, soonest deadline first.',
+    toApplyToday: 'Apply today', toApplyWeek: 'Due this week', toApplyLater: (count) => `Later (${count})`,
+    toApplyNone: (count) => `No confirmed cutoff time (${count})`, openPosting: 'Open posting', deadlineSource: 'Source',
+    toApplyEmptyTitle: 'Nothing waiting to apply', toApplyEmptyBody: 'Leads you have not applied to or skipped appear here, soonest deadline first.',
   },
   'zh-CN': {
     localWorkspace: '本地档案', heroEyebrow: '让每一步都有记录', heroTitle: '求职进度总览',
@@ -68,6 +89,17 @@ const copy = {
     completedTasks: (count) => `已完成（${count}）`, taskCompleted: '已完成', platform: '平台', openLink: '打开链接', deadline: '截止时间',
     openSteps: '待完成步骤', cardTasks: '测评与面试步骤', cardTasksNote: '截止时间按工作区时区显示。',
     filterQueue: '投递队列', queueFacts: '待投岗位信息', location: '地点', skipReason: '跳过原因',
+    sortLabel: '排序', sortDeadline: '截止时间（最近的在前）', sortFit: '匹配度', sortNewest: '最新加入',
+    fitFilterLabel: '匹配度', fitAll: '全部', fitHigh: '高', fitMedium: '中', fitLow: '低', fitNone: '未评',
+    filterSent: '已投递', statCardLabel: (stat, count) => `${{
+      applied: '查看已投递的申请', waiting: '查看等待进展的申请', interview: '查看面试 / Offer 的申请',
+      closed: '查看已结束的申请', preparing: '查看准备中的申请',
+    }[stat]}（${count}）`,
+    statTasks: '测评与面试准备', statTasksLabel: (count, hint) => `前往测评与面试准备（${count}）：${hint}`,
+    toApplyTitle: '等待我投递', toApplyBody: '等你投递的岗位，截止时间最近的排在前面。',
+    toApplyToday: '今天要投', toApplyWeek: '本周截止', toApplyLater: (count) => `稍后（${count}）`,
+    toApplyNone: (count) => `无明确截止时间（${count}）`, openPosting: '打开官网', deadlineSource: '截止来源',
+    toApplyEmptyTitle: '暂无等待投递的岗位', toApplyEmptyBody: '尚未投递、也没有跳过的线索会显示在这里，截止时间最近的排在前面。',
   },
 };
 
@@ -81,7 +113,10 @@ const sourceCopy = {
   'zh-CN': { api: 'API', cli: '命令行', email: '邮件', import: '导入', manual: '手动记录', system: '系统', 'role-scan': '岗位扫描', 'queue-verify': '岗位核对', other: '其他' },
 };
 
-const state = { applications: [], group: 'all', locale: initialLocale(), timezone: 'UTC', generatedAt: null };
+const state = {
+  applications: [], group: 'all', locale: initialLocale(), timezone: 'UTC', generatedAt: null,
+  sort: savedChoice('career-journal-role-sort', ROLE_SORTS, 'deadline'), fit: savedChoice('career-journal-role-fit', FIT_FILTERS, 'all'),
+};
 const elements = {
   search: document.querySelector('#search'), list: document.querySelector('#applications'), empty: document.querySelector('#empty'),
   loading: document.querySelector('#loading'), error: document.querySelector('#error'), errorMessage: document.querySelector('#error-message'),
@@ -90,7 +125,26 @@ const elements = {
   openTasks: document.querySelector('#open-tasks'), doneTasks: document.querySelector('#done-tasks'),
   tasksEmpty: document.querySelector('#tasks-empty'), completedTasks: document.querySelector('#completed-tasks'),
   completedTasksLabel: document.querySelector('#completed-tasks-label'), taskTemplate: document.querySelector('#task-template'),
+  applyTemplate: document.querySelector('#apply-template'), applySummary: document.querySelector('#to-apply-summary'),
+  applyEmpty: document.querySelector('#to-apply-empty'),
+  applyLaterLabel: document.querySelector('#apply-later-label'), applyNoneLabel: document.querySelector('#apply-none-label'),
+  roleControls: document.querySelector('#role-controls'),
+  tasksCard: document.querySelector('[data-testid="stat-card-tasks"]'), tasksCount: document.querySelector('#stat-tasks'),
+  tasksHint: document.querySelector('#stat-tasks-hint'),
 };
+
+// Remembered view choices are a convenience: without storage the defaults apply.
+function savedChoice(key, allowed, fallback) {
+  try {
+    const saved = localStorage.getItem(key);
+    if (allowed.includes(saved)) return saved;
+  } catch {}
+  return fallback;
+}
+
+function saveChoice(key, value) {
+  try { localStorage.setItem(key, value); } catch {}
+}
 
 function initialLocale() {
   try {
@@ -125,10 +179,10 @@ function formatDeadline(value, { compact = false, zone = false } = {}) {
   catch { return new Intl.DateTimeFormat(state.locale, options).format(date); }
 }
 
-function deadlineBadge(deadline) {
+function deadlineBadge(deadline, label = taskDeadlineLabel(deadline, state.locale)) {
   const badge = document.createElement('span');
   badge.className = `task-badge is-${deadline.state}${deadline.urgent && deadline.state !== 'overdue' ? ' is-urgent' : ''}`;
-  badge.textContent = taskDeadlineLabel(deadline, state.locale);
+  badge.textContent = label;
   return badge;
 }
 
@@ -273,6 +327,17 @@ function renderTaskRow(task) {
   return fragment;
 }
 
+// The Assessments & interviews card counts open steps; it turns amber when a
+// step is past due or due within 2 days.
+function renderTasksCard() {
+  const summary = taskCardSummary(state.applications, { timeZone: state.timezone });
+  const hint = taskCardHint(summary, { locale: state.locale, timeZone: state.timezone });
+  elements.tasksCount.textContent = summary.open;
+  elements.tasksHint.textContent = hint;
+  elements.tasksCard.classList.toggle('is-urgent', summary.urgent);
+  elements.tasksCard.setAttribute('aria-label', t('statTasksLabel')(summary.open, hint));
+}
+
 function renderTasks() {
   const { open, done } = taskQueue(state.applications);
   elements.openTasks.replaceChildren(...open.map(renderTaskRow));
@@ -281,6 +346,74 @@ function renderTasks() {
   elements.doneTasks.replaceChildren(...done.map(renderTaskRow));
   elements.completedTasks.hidden = done.length === 0;
   elements.completedTasksLabel.textContent = t('completedTasks')(done.length);
+}
+
+function renderDeadlineReview(review) {
+  const note = document.createElement('p');
+  note.className = 'task-due-note';
+  note.textContent = review.label;
+  if (review.sourceUrl) {
+    const source = document.createElement('a');
+    source.href = review.sourceUrl;
+    source.target = '_blank';
+    source.rel = 'noopener noreferrer';
+    source.textContent = t('deadlineSource');
+    note.append(' · ', source);
+  }
+  return note;
+}
+
+function renderApplyRow(application, now) {
+  const summary = toApplyRow(application, { locale: state.locale, now, timeZone: state.timezone });
+  const fragment = elements.applyTemplate.content.cloneNode(true);
+  const row = fragment.querySelector('.apply-row');
+  row.dataset.applicationId = summary.id;
+  setText(row, '.apply-company', summary.company);
+  setText(row, '.apply-role', summary.role);
+  const fit = row.querySelector('.fit-badge');
+  fit.className = `fit-badge fit-${summary.fit.level}`;
+  fit.textContent = summary.fit.label;
+  if (summary.fit.note) fit.title = summary.fit.note;
+  const location = row.querySelector('.apply-location');
+  location.textContent = summary.location ? `${t('location')}: ${summary.location}` : '';
+  location.hidden = !summary.location;
+  const check = row.querySelector('.apply-check');
+  check.className = `queue-check apply-check is-${summary.check.state}`;
+  check.textContent = summary.check.label;
+  const deadline = row.querySelector('.apply-deadline');
+  const badge = row.querySelector('.task-badge');
+  if (summary.deadline.at) {
+    deadline.dateTime = summary.deadline.at;
+    deadline.textContent = formatDeadline(summary.deadline.at, { compact: true, zone: true });
+    badge.replaceWith(deadlineBadge(summary.deadline.status, summary.deadline.label));
+  } else {
+    row.querySelector('.task-when').hidden = true;
+  }
+  if (summary.deadline.review) row.querySelector('.task-main').append(renderDeadlineReview(summary.deadline.review));
+  const link = row.querySelector('.apply-link');
+  if (summary.jobUrl) {
+    link.href = summary.jobUrl;
+    link.textContent = t('openPosting');
+    link.setAttribute('aria-label', `${t('openPosting')}: ${summary.company} · ${summary.role}`);
+  } else link.remove();
+  return fragment;
+}
+
+function renderToApply() {
+  const now = Date.now();
+  const groups = toApplyQueue(state.applications, { now, timeZone: state.timezone });
+  for (const key of ['today', 'week', 'later', 'none']) {
+    document.querySelector(`#apply-${key}-rows`).replaceChildren(...groups[key].map((application) => renderApplyRow(application, now)));
+    document.querySelector(`#apply-group-${key}`).hidden = groups[key].length === 0;
+  }
+  document.querySelector('#apply-today-count').textContent = groups.today.length;
+  document.querySelector('#apply-week-count').textContent = groups.week.length;
+  elements.applyLaterLabel.textContent = t('toApplyLater')(groups.later.length);
+  elements.applyNoneLabel.textContent = t('toApplyNone')(groups.none.length);
+  const line = toApplySummaryLine(groups, state.locale);
+  elements.applySummary.textContent = line;
+  elements.applySummary.hidden = !line;
+  elements.applyEmpty.hidden = Boolean(line);
 }
 
 function renderCardTasks(card, application) {
@@ -343,14 +476,15 @@ function renderQueue(card, application) {
   if (summary.fit.note) fit.title = summary.fit.note; else fit.removeAttribute('title');
 
   const facts = [];
-  if (summary.deadline.at || summary.deadline.status) {
+  if (summary.deadline.at || summary.deadline.status || summary.deadline.review) {
     const content = [];
     if (summary.deadline.at) {
       const time = document.createElement('time'); time.dateTime = summary.deadline.at;
       time.textContent = formatDeadline(summary.deadline.at, { compact: true, zone: true });
       content.push(time);
     }
-    if (summary.deadline.status) content.push(deadlineBadge(summary.deadline.status));
+    if (summary.deadline.status && (summary.deadline.at || !summary.deadline.review)) content.push(deadlineBadge(summary.deadline.status, summary.deadline.hint));
+    if (summary.deadline.review) content.push(renderDeadlineReview(summary.deadline.review));
     facts.push(queueFact('queue-deadline', t('deadline'), ...content));
   }
   if (summary.location) facts.push(queueFact('queue-location', t('location'), summary.location));
@@ -417,14 +551,27 @@ function applyLocale() {
 function render() {
   applyLocale();
   const stats = applicationStats(state.applications);
-  for (const key of ['applied', 'waiting', 'interview', 'closed', 'preparing']) document.querySelector(`#stat-${key}`).textContent = stats[key];
+  for (const key of ['applied', 'waiting', 'interview', 'closed', 'preparing']) {
+    document.querySelector(`#stat-${key}`).textContent = stats[key];
+    document.querySelector(`[data-stat="${key}"]`).setAttribute('aria-label', t('statCardLabel')(key, stats[key]));
+  }
   const filterCounts = {
-    all: state.applications.length, waiting: stats.waiting, interview: stats.interview, closed: stats.closed, preparing: stats.preparing,
+    all: filterApplications(state.applications).length, sent: stats.applied, waiting: stats.waiting, interview: stats.interview, closed: stats.closed, preparing: stats.preparing,
     tasks: state.applications.filter(hasOpenTask).length, queue: state.applications.filter(isQueued).length,
   };
   for (const [key, value] of Object.entries(filterCounts)) document.querySelector(`[data-count="${key}"]`).textContent = value;
+  renderTasksCard();
+  renderToApply();
   renderTasks();
-  const visible = filterApplications(state.applications, { group: state.group, query: elements.search.value });
+  const roleView = hasRoleControls(state.group);
+  elements.roleControls.hidden = !roleView;
+  if (roleView) {
+    const counts = fitCounts(filterApplications(state.applications, { group: state.group, query: elements.search.value }));
+    for (const [key, value] of Object.entries(counts)) document.querySelector(`[data-fit-count="${key}"]`).textContent = value;
+    document.querySelectorAll('[data-sort]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.sort === state.sort)));
+    document.querySelectorAll('[data-fit]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.fit === state.fit)));
+  }
+  const visible = filterApplications(state.applications, { group: state.group, query: elements.search.value, sort: state.sort, fit: state.fit });
   elements.list.replaceChildren(...visible.map(renderCard));
   elements.empty.hidden = visible.length !== 0;
   elements.resultCount.textContent = t('results')(visible.length, state.applications.length);
@@ -451,6 +598,33 @@ document.querySelectorAll('[data-filter]').forEach((button) => button.addEventLi
   state.group = button.dataset.filter;
   document.querySelectorAll('[data-filter]').forEach((candidate) => candidate.setAttribute('aria-pressed', String(candidate === button)));
   render();
+}));
+document.querySelectorAll('[data-sort]').forEach((button) => button.addEventListener('click', () => {
+  state.sort = button.dataset.sort;
+  saveChoice('career-journal-role-sort', state.sort);
+  render();
+}));
+document.querySelectorAll('[data-fit]').forEach((button) => button.addEventListener('click', () => {
+  state.fit = button.dataset.fit;
+  saveChoice('career-journal-role-fit', state.fit);
+  render();
+}));
+function scrollBehavior() {
+  try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'; } catch { return 'smooth'; }
+}
+
+// A summary card applies its list filter exactly as the filter button does,
+// then brings the list into view.
+document.querySelectorAll('[data-stat]').forEach((card) => card.addEventListener('click', () => {
+  document.querySelector(`[data-filter="${statFilter(card.dataset.stat)}"]`).click();
+  document.querySelector('.applications-section').scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
+}));
+// A card with a scroll target leaves the list filter alone: it brings that
+// section into view and moves focus to its heading.
+document.querySelectorAll('[data-scroll-target]').forEach((card) => card.addEventListener('click', () => {
+  const heading = document.getElementById(card.dataset.scrollTarget);
+  (heading.closest('section') ?? heading).scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
+  heading.focus({ preventScroll: true });
 }));
 elements.languageToggle.addEventListener('click', () => {
   state.locale = state.locale === 'en' ? 'zh-CN' : 'en';

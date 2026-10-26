@@ -17,6 +17,29 @@ import { ATS_URLS, SIMPLIFY_URL, defaultRoutes, fixtureFetch, readFixture } from
 
 const JEV_URL = 'https://api.typesafe.ai/v1/systemone';
 
+test('official-review gate retains new scan records but exposes only verified roles to the queue', async () => fixture(async (home) => {
+  await writeProfile(home, (profile) => ({ ...profile, search: { ...profile.search,
+    exclusions: [...profile.search.exclusions, 'official-review-required'] } }));
+  const scan = await json(['scan', 'run', '--home', home]);
+  assert.equal(scan.counts.queued, 0);
+  assert.equal(scan.counts.held, 5);
+  assert.deepEqual(scan.queued, []);
+  assert.equal((await json(['queue', 'list', '--home', home])).length, 0);
+  const db = database(home);
+  let held;
+  try {
+    held = db.prepare('SELECT id,status,skip_reason FROM applications ORDER BY id').all();
+    assert.equal(held.length, 5);
+    assert.ok(held.every((row) => row.status === 'lead' && row.skip_reason));
+  } finally { db.close(); }
+  const again = await json(['scan', 'run', '--home', home]);
+  assert.equal(again.counts.duplicates, 5, 'held history prevents the same posting reappearing');
+  await json(['queue', 'verify', '--home', home, '--id', held[0].id, '--result', 'ok', '--reason', 'Official requirements and quota checked']);
+  const queue = await json(['queue', 'list', '--home', home]);
+  assert.equal(queue.length, 1);
+  assert.equal(queue[0].id, held[0].id);
+}));
+
 async function fixture(run) {
   const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-cli-scan-'));
   try {
@@ -356,4 +379,55 @@ test('an enabled Simplify source without a URL does not count as a scan source',
   const result = await cli(['scan', 'run', '--home', home, '--dry-run']);
   assert.notEqual(result.code, 0);
   assert.match(result.io.stderr, /The profile has no scan sources/);
+}));
+
+test('queue score rates queued roles that have no fit, through Jev, and leaves rated and skipped roles alone', async () => fixture(async (home) => {
+  await writeProfile(home);
+  const add = async (company, role) => JSON.parse((await cli(['application', 'add', '--home', home, '--company', company, '--role', role])).io.stdout).id;
+  const unrated = await add('Example Corp', 'Machine Learning Intern');
+  const quant = await add('Example Quant', 'Quantitative Research Intern');
+  const skipped = await add('Example Labs', 'Data Science Intern');
+  assert.equal((await cli(['queue', 'verify', '--home', home, '--id', skipped, '--result', 'skip', '--reason', 'PhD only'])).code, 0);
+
+  const dry = await json(['queue', 'score', '--home', home, '--dry-run']);
+  assert.equal(dry.dryRun, true);
+  assert.deepEqual(dry.results.map((item) => [item.id, item.fit]), [[unrated, 'high'], [quant, 'medium']]);
+  let db = database(home);
+  try { assert.equal(db.prepare('SELECT COUNT(*) count FROM applications WHERE fit IS NOT NULL').get().count, 0, 'a dry run writes nothing'); } finally { db.close(); }
+
+  const config = await loadConfig(home);
+  config.jev = { ...config.jev, accessState: 'enabled', mode: 'active', threshold: 0.8, secretRef: 'env:CAREER_JOURNAL_SCAN_TEST_JEV', retryDelaysMs: [] };
+  await saveConfig(home, config);
+  process.env.CAREER_JOURNAL_SCAN_TEST_JEV = 'fixture-secret';
+  try {
+    const routes = { [JEV_URL]: { answers: { fit: { type: 'choice', choice: 'low', confidence: 0.9 } } } };
+    const first = await json(['queue', 'score', '--home', home, '--limit', '1'], { routes });
+    assert.equal(first.scored, 1);
+    assert.equal(first.remaining, 1);
+    const rest = await json(['queue', 'score', '--home', home], { routes });
+    assert.deepEqual(rest.results.map((item) => item.id), [quant]);
+    const again = await json(['queue', 'score', '--home', home], { routes });
+    assert.equal(again.scored, 0, 'roles that already have a fit are not rescored without --all');
+    db = database(home);
+    try {
+      assert.deepEqual(db.prepare('SELECT id, fit, fit_note FROM applications ORDER BY id').all().map((row) => ({ ...row })), [
+        { id: quant, fit: 'low', fit_note: 'Fit by Jev (confidence 0.9)' },
+        { id: unrated, fit: 'low', fit_note: 'Fit by Jev (confidence 0.9)' },
+        { id: skipped, fit: null, fit_note: null },
+      ].sort((a, b) => a.id.localeCompare(b.id)));
+      assert.equal(db.prepare("SELECT COUNT(*) count FROM decision_traces WHERE mode = 'role-fit'").get().count, 2);
+    } finally { db.close(); }
+    const all = await json(['queue', 'score', '--home', home, '--all'], { routes });
+    assert.equal(all.scored, 2);
+  } finally { delete process.env.CAREER_JOURNAL_SCAN_TEST_JEV; }
+}));
+
+test('queue score needs a profile and a valid limit', async () => fixture(async (home) => {
+  const missing = await cli(['queue', 'score', '--home', home]);
+  assert.notEqual(missing.code, 0);
+  assert.match(missing.io.stderr, /queue score needs the search profile/);
+  await writeProfile(home);
+  const bad = await cli(['queue', 'score', '--home', home, '--limit', '0']);
+  assert.notEqual(bad.code, 0);
+  assert.match(bad.io.stderr, /--limit must be a positive whole number/);
 }));

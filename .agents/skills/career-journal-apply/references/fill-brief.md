@@ -35,12 +35,13 @@ Browser tools: {{browserTools}}
 - Open a new tab for {{applyUrl}} and record its tab ID. Use only that tab. Never read, reuse, or close any other tab.
 - If the site opens the application in a new tab by itself, that new tab is yours too; record its ID.
 - If your tab disappears (extension disconnected, tab group closed), open the apply link again in a new tab and continue from the site's saved draft, or from the start when the site keeps no draft. Report that it happened.
+- If your half-filled page freezes or stops responding, do not reload it. Close your own tab (never another one), open the apply link in a new tab, and fill again from the saved draft or from the start. Report that it happened.
 
 ## Hard rules
 
 1. Never click any button labelled Submit* (Submit, Submit Application, Submit Profile, and similar), even when it looks like an intermediate step, and never click any other button that sends the application. Stop before it; the user clicks it.
 2. Never sign in, create accounts, or type passwords or verification codes for the user, and never solve or bypass a CAPTCHA.
-3. Never tick consent, attestation, certification, or arbitration boxes, and never sign: no drawn signature and no typed name or date entered as an e-signature.
+3. Never tick consent, attestation, certification, or arbitration boxes. With the user's authorization, enter their confirmed full name and the site's required current date as a typed e-signature, leaving final review and Submit to the user. Do not draw or fabricate a signature. If entering the value itself accepts a legally binding agreement, obtain confirmation at action time before entering it.
 4. Never write essays: cover letters, why-us, motivation, and supplemental answers are the user's. Only organise the user's own words.
 5. Upload the transcript only when the form makes a transcript a required field; never into resume, optional, or "other attachments" slots.
 6. Upload exactly one resume, the one the user chose: `materials.resumePath`, or a per-role version only when the user picked it for that role. Never substitute another version.
@@ -48,6 +49,8 @@ Browser tools: {{browserTools}}
 8. Never put personal data into the repository. Profile, answers, resumes, transcripts, screenshots, filled briefs, and fill reports stay in the user's data home or a private temporary directory.
 
 Intermediate buttons such as Next, Continue, and Save and Continue are fine. If the host's permission system blocks a click, do not work around it: stop and report exactly which box or button the user must click.
+
+On the final review page you may still fill question fields the page shows, but never click Submit*, any button next to it, or anything else in the submit area.
 
 ## Before filling
 
@@ -63,6 +66,7 @@ Intermediate buttons such as Next, Continue, and Save and Continue are fine. If 
 - Date fields that need a day: use the 1st of the month unless the sheet gives a day.
 - Voluntary disclosures (gender, race and ethnicity, veteran status, disability, and similar): use exactly what the answers sheet says, including "prefer not to say" when the user chose it. If the sheet has no answer, leave the question and report it; never guess.
 - Optional marketing, SMS, talent-community, or AI-processing opt-ins: leave them unticked or pick the opt-out option.
+- A question the answers sheet marks as "ask the user" (for example background-check willingness or availability months) stays blank and is reported, even when an answer seems obvious. Never guess it or copy it from a similar question.
 - Never invent anything: salary figures, test scores, language levels, dates, references, or contact details. If a required question is not covered, leave it, set the `❓` title, and report the exact question, its options, and whether it is required.
 - Essays, cover letters, and why-us questions stay empty. Report the exact prompt, whether it is required, and the length limit. Short factual fields, such as a list of programming languages, may be filled from the sheet.
 
@@ -78,10 +82,10 @@ Follow the general and per-ATS techniques in {{atsTipsPath}}. In short: prefer J
 
 ## Blockers
 
-If the site needs the user (sign-in, account, password, emailed code, CAPTCHA, consent, signature):
+If the site needs the user (sign-in, account, password, emailed code, CAPTCHA, consent, or a signature awaiting authorization or action-time confirmation):
 
 1. Go as far as you can without doing that step, for example click Apply to reach the sign-in page.
-2. Set the tab title, in {{titleLanguage}}, to `🔑 Sign in {{company}}` (sign-in, account, password, or code), `🤖 Verify {{company}}` (CAPTCHA), `❓ Question {{company}}` (uncovered required question), or `👆 Click {{company}}` (consent, signature, or a Submit*-labelled intermediate button), and keep it set with `setInterval`.
+2. Set the tab title, in {{titleLanguage}}, to `🔑 Sign in {{company}}` (sign-in, account, password, or code), `🤖 Verify {{company}}` (CAPTCHA), `❓ Question {{company}}` (uncovered required question), or `👆 Click {{company}}` (consent, a signature awaiting authorization or action-time confirmation, or a Submit*-labelled intermediate button), and keep it set with `setInterval`.
 3. Report immediately what exactly the user must do.
 
 ## Finish

@@ -192,11 +192,10 @@ test('filterRole aggregates every reason and returns the location rank for kept 
   assert.deepEqual(dropped.codes, ['season', 'direction', 'location']);
 });
 
-test('a listed degrees field naming only bachelor\'s or associate degrees is undergraduate-only for a graduate candidate', () => {
-  const dropped = checkDegree(role({ degrees: ["Bachelor's"] }), profile());
-  assert.equal(dropped.ok, false);
-  assert.match(dropped.reason, /^degree-undergrad-only: listed degrees are Bachelor's; profile degree is masters$/);
-  assert.equal(checkDegree(role({ degrees: ["Associate's", "Bachelor's"] }), profile()).ok, false);
+test('a listed degrees field naming only bachelor\'s or associate degrees is left to the posting text', () => {
+  assert.equal(checkDegree(role({ degrees: ["Bachelor's"] }), profile()).ok, true);
+  assert.equal(checkDegree(role({ degrees: ["Associate's", "Bachelor's"] }), profile()).ok, true);
+  assert.equal(checkDegree(role({ degrees: ["Bachelor's"], description: 'Open to undergraduates only.' }), profile()).ok, false);
   assert.equal(checkDegree(role({ degrees: ["Bachelor's", "Master's"] }), profile()).ok, true);
   assert.equal(checkDegree(role({ degrees: [] }), profile()).ok, true);
   assert.equal(checkDegree(role({ degrees: ["Bachelor's"] }), profile({ candidate: { degree: { level: 'bachelors' } } })).ok, true);
