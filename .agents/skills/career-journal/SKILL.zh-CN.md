@@ -36,6 +36,13 @@
 - **SimplifyJobs（用户自选开启）。** 默认关闭，只有用户主动开启才使用。询问时要告诉用户：这份列表没有许可证，只在扫描时在这台电脑上实时读取，项目从不打包、缓存或再分发其中内容。用户同意后，用用户确认过的链接保存 `profile set --key sources.simplify --value '{"enabled":true,"url":"<列表 JSON 的 https 链接>"}'`。
 - 第 1 轮完成且至少设置了上面一种来源之前，`profile status --json` 会把扫描就绪状态报告为 incomplete。
 
+## 暂留岗位
+
+- `search.exclusions` 包含 `official-review-required` 时，`scan run` 会把每个新发现的岗位带着跳过原因保留下来，不显示在 `queue list` 中，并在扫描摘要里列出暂留数量。官网原文读取失败或核实结果拿不准的岗位，也带着相应原因暂留，既不放行也不丢弃。
+- 每个暂留岗位都要在扫描当天核实完。直接读取官网原文失败时（被拦截、需要登录或页面靠脚本渲染），先在浏览器里打开再判断。检查完成后才用 `queue verify --id <application> --result ok` 放行；否则继续暂留或标记“不投”，都要写原因。
+- 汇报队列数量时必须同时说明暂留数量，例如“队列 3 个，另有 12 个暂留待核实”。
+- 因为“必备”条件不满足而不投时，要引用原文那一行，并确认它在必备部分而不是 Preferred 下面；候选人通过经历满足的要求算作已满足。要不时对照当前简历复查这类“不投”。
+
 ## 岗位扫描定时任务
 
 每日岗位扫描是可选的，只有用户在第 4 轮同意后才创建。它不能和 `mail-sync`、`deadline-review` 共用一个任务：那个共享的 Codex heartbeat 或 Claude Code 定时任务固定在 20:00 和 20:15 运行，`register-external` 也会拒绝把其他任务登记到它的 ID 上。要为 `role-scan` 单独创建一个定时任务，按检测到的时区在 `pace.scanTime` 运行：
@@ -50,7 +57,7 @@
 
 - Application、事件、截止日期、状态或 Dashboard：使用 CLI
 - 在线测评、编程测试或面试邀请：用 `task add` 记录，带上邮件里的截止时间（`--due-at`，须含时区偏移；`--due-note` 写明如何推算）和邀请链接（`--link`）；完成后用 `task done` 标记
-- 找岗位、看新岗位或每日岗位扫描：运行 `scan run`（加 `--dry-run` 只预览、不写入），逐个阅读新岗位的官网原文，再用 `queue verify --id <application> --result ok|skip --reason <原因> [--deadline <iso>]` 记录；每个“不投”都要写原因。`queue list` 按顺序显示队列；队列里还有没评匹配度的岗位时，运行 `queue score` 补评。默认来源是用户关注的公司在官方招聘系统上的公开岗位接口；SimplifyJobs 和 CareerOps 来源需用户自己开启。`profile status --json` 报告没有扫描来源时，先按“扫描来源”把用户的公司对应到职位板
+- 找岗位、看新岗位或每日岗位扫描：运行 `scan run`（加 `--dry-run` 只预览、不写入），逐个阅读新岗位的官网原文，再用 `queue verify --id <application> --result ok|skip --reason <原因> [--deadline <iso>]` 记录；每个“不投”都要写原因。`queue list` 按顺序显示队列；队列里还有没评匹配度的岗位时，运行 `queue score` 补评。暂留岗位在扫描当天核实（见“暂留岗位”）。默认来源是用户关注的公司在官方招聘系统上的公开岗位接口；SimplifyJobs 和 CareerOps 来源需用户自己开启。`profile status --json` 报告没有扫描来源时，先按“扫描来源”把用户的公司对应到职位板
 - 投递、开始投、填申请表：读取 `career-journal-apply` Skill。它要求个人资料第 1、2 轮已完成，只在用户自己的浏览器里填表，并在每次提交前停下
 - 个人资料、偏好或表单答案：使用 `profile show|questions|set|answer|skip|status`。资料文件放在 `<home>/.career-journal/profile/`（`profile.json`、`answers.md`），不进仓库
 - Resume 或 Cover Letter：读取 `careerops-materials`；经验证的生成流程需要 CareerOps、内置规则和个人规则
@@ -65,7 +72,7 @@ CareerOps 是由 Santiago Fernández de Valderrama 独立维护、使用 MIT 许
 
 ## 证据规则
 
-追加事件，不覆盖历史。区分观察时间、发生时间和记录时间；不知道发生时间时使用 `occurred_at = null`。用户报告已提交，可为一个无歧义 Application 支持一条状态事件，但不能证明具体提交了哪个 Artifact。如果多个岗位可能匹配，必须取得 Application ID。生成文件保持 draft，直到准确上传文件被记录。不得因长期无回复推断拒绝，也不得把招聘营销邮件当成进展。
+追加事件，不覆盖历史。区分观察时间、发生时间和记录时间；不知道发生时间时使用 `occurred_at = null`。用户报告已提交，可为一个无歧义 Application 支持一条状态事件，但不能证明具体提交了哪个 Artifact。如果多个岗位可能匹配，必须取得 Application ID。生成文件保持 draft，直到准确上传文件被记录。不得因长期无回复推断拒绝，也不得把招聘营销邮件当成进展。没有写明岗位的拒信，只有附上明确的“推断”说明并写清原因，才可以记到某个申请上；这家公司有多个申请都可能对应时，不要归到任何一个，询问用户。
 
 ## 能力失败
 

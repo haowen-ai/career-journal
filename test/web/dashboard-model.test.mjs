@@ -52,6 +52,25 @@ const application = (overrides = {}) => ({
   stage: null, appliedAt: null, events: [], artifacts: [], ...overrides,
 });
 
+test('unreviewed retained leads do not appear in preparing counts or the apply queue', () => {
+  const held = application({ skipReason: 'Pending official eligibility review' });
+  assert.notEqual(applicationGroup(held), 'preparing');
+  assert.equal(applicationStats([held]).preparing, 0);
+  assert.equal(isWaitingToApply(held), false);
+  assert.equal(isQueued(held), false);
+});
+
+test('hidden unsubmitted records stay out of the default list but remain in closed history', () => {
+  const ready = application({ id: 'ready' });
+  const held = application({ id: 'held', skipReason: 'Unverified required skill' });
+  const excluded = application({ id: 'excluded', status: 'withdrawn', skipReason: 'Annual quota reached' });
+  const submitted = application({ id: 'submitted', status: 'applied', skipReason: 'Old queue note' });
+  const records = [ready, held, excluded, submitted];
+  assert.deepEqual(filterApplications(records).map(item => item.id), ['ready', 'submitted']);
+  assert.deepEqual(filterApplications(records, { group: 'closed' }).map(item => item.id), ['held', 'excluded']);
+  assert.equal(records.length, 4);
+});
+
 test('groups every supported status for the five-card dashboard summary', () => {
   const applications = [
     application({ id: 'lead', status: 'lead' }),
@@ -298,7 +317,8 @@ test('queue filter keeps unskipped leads in the same order as queue list without
   assert.equal(isQueued(items.find((item) => item.id === 'skip-reason-but-still-lead')), false);
   assert.equal(isQueued(items.find((item) => item.id === 'prepared')), false);
   assert.deepEqual(filterApplications(items, { group: 'queue', query: 'role high-no' }).map((item) => item.id), ['high-no-deadline-new', 'high-no-deadline-old']);
-  assert.equal(filterApplications(items, { group: 'preparing' }).length, 12);
+  assert.equal(filterApplications(items, { group: 'preparing' }).length, 11);
+  assert.equal(filterApplications(items, { group: 'preparing' }).some(item => item.id === 'skip-reason-but-still-lead'), false);
   assert.deepEqual(queueApplications([]), []);
 });
 

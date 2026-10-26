@@ -101,8 +101,8 @@ export const hardRules = deepFreeze([
   },
   {
     id: 'never-consent-or-sign',
-    en: 'Never tick consent, attestation, certification, or arbitration boxes, and never sign: no drawn signature and no typed name or date entered as an e-signature.',
-    zh: '不勾同意、声明、认证或仲裁条款，不代签名：不手写签名，也不输入姓名或日期作为电子签名。',
+    en: "Never tick consent, attestation, certification, or arbitration boxes. With the user's authorization, enter their confirmed full name and the site's required current date as a typed e-signature, leaving final review and Submit to the user. Do not draw or fabricate a signature. If entering the value itself accepts a legally binding agreement, obtain confirmation at action time before entering it.",
+    zh: '不勾同意、声明、认证或仲裁条款。用户授权后，可用已确认的全名和网站要求的当日日期代填电子签名，最终 Review 和 Submit 仍由用户完成。不手写或伪造签名。如果填入本身就会接受有法律约束力的协议，须在操作时取得确认后再填。',
   },
   {
     id: 'never-write-essays',

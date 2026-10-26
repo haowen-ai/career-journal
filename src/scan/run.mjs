@@ -40,7 +40,7 @@ function summarizeRole(role) {
 }
 
 function insertLead(db, item, now) {
-  const { role, filter, fit, possibleDuplicate } = item;
+  const { role, filter, fit, possibleDuplicate, reviewReason = null } = item;
   const sourceKey = `${role.source}:${role.sourceId}`;
   const note = [fit.note, possibleDuplicate ? `Possible duplicate of ${possibleDuplicate.of.id ?? `"${possibleDuplicate.of.title}"`} (title similarity ${possibleDuplicate.similarity}); check before applying` : null]
     .filter(Boolean).join('. ');
@@ -58,9 +58,9 @@ function insertLead(db, item, now) {
       return null;
     }
     db.prepare(`UPDATE applications SET source = ?, source_id = ?, location = ?, posted_at = ?, deadline_at = ?,
-      fit = ?, fit_confidence = ?, fit_note = ?, updated_at = ? WHERE id = ?`)
+      fit = ?, fit_confidence = ?, fit_note = ?, skip_reason = ?, updated_at = ? WHERE id = ?`)
       .run(role.source, role.sourceId, role.locations.length ? role.locations.join('; ') : null, role.postedAt ?? null,
-        role.deadlineAt ?? null, fit.fit, fit.confidence, note, now, application.id);
+        role.deadlineAt ?? null, fit.fit, fit.confidence, note, reviewReason, now, application.id);
     const traceId = `fit-${shortHash(sourceKey)}`;
     db.prepare(`INSERT OR IGNORE INTO decision_traces
       (id, application_id, engine, mode, decision_json, confidence, applied, created_at)
@@ -82,7 +82,7 @@ function insertLead(db, item, now) {
       observedAt: now,
       recordedAt: now,
       title: 'Found by role scan',
-      note: possibleDuplicate ? possibleDuplicate.reason : '',
+      note: [reviewReason, possibleDuplicate?.reason].filter(Boolean).join('. '),
       source: {
         kind: 'role-scan',
         source: role.source,
@@ -132,12 +132,15 @@ export async function runScan({
     }
   });
   const queued = [];
+  const held = [];
+  const reviewRequired = profile.search.exclusions.includes('official-review-required');
+  const reviewReason = reviewRequired ? 'Pending official eligibility, submission history and company quota review' : null;
   for (const candidate of candidates) {
-    const fit = await scoreFit(candidate.role, profile, adapters, { rulesOnly: dryRun });
-    const item = { ...candidate, fit };
+    const fit = await scoreFit(candidate.role, profile, adapters, { rulesOnly: dryRun || reviewRequired });
+    const item = { ...candidate, fit, reviewReason };
     const id = dryRun ? null : insertLead(db, item, now);
     if (!dryRun && !id) continue;
-    queued.push({
+    (reviewRequired ? held : queued).push({
       id,
       ...summarizeRole(candidate.role),
       location: candidate.role.locations.join('; ') || null,
@@ -169,10 +172,12 @@ export async function runScan({
       dropped: dropped.length,
       duplicates: duplicates.length,
       queued: queued.length,
+      ...(reviewRequired ? { held: held.length } : {}),
       possibleDuplicates: queued.filter((item) => item.possibleDuplicateOf).length,
     },
     dropReasons,
     queued,
+    ...(reviewRequired ? { held } : {}),
     dropped,
     duplicates,
   };

@@ -72,6 +72,7 @@ export function formatScanSummary(summary) {
   lines.push(`Sources: ${summary.sources.map((item) => `${sourceLabel(item)} ${item.status}${item.status === 'ok' ? ` ${item.count}` : item.detail ? ` (${item.detail})` : ''}`).join('; ')}`);
   const { fetched, queued, dropped, duplicates, possibleDuplicates } = summary.counts;
   lines.push(`Fetched ${fetched}; queued ${queued}${possibleDuplicates ? ` (${possibleDuplicates} possible duplicate${possibleDuplicates === 1 ? '' : 's'})` : ''}; dropped ${dropped}; duplicates ${duplicates}`);
+  if (summary.counts.held) lines.push(`Retained for official eligibility and application-history review: ${summary.counts.held}`);
   for (const item of summary.queued) {
     lines.push(['  ', item.fit ?? '-', item.company, item.title, item.location ?? '-', item.id ?? '(dry run)'].join('\t'));
   }

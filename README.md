@@ -27,7 +27,7 @@ The Agent handles cloning, setup, mailbox configuration, local time-zone detecti
 - Tracks each application, status change, deadline, interview, and next action
 - Keeps your job-search profile and form answers on your computer, never in the repository
 - Scans official job boards by your own criteria, verifies each posting, and queues roles by fit
-- Fills application forms in your own browser and stops before submit: you sign in, enter codes, consent, sign, and click submit yourself
+- Fills application forms in your own browser, including authorized typed e-signatures, and stops before submit: you sign in, enter codes, consent, review, and click submit yourself
 - Imports existing applications from a bounded mailbox review, files, spreadsheets, or a guided interview after the user confirms the proposed records
 - Discovers signed-in mail accounts, then reads the one or more accounts the user selects in read-only mode
 - Keeps generated drafts, verified files, and the exact submitted resume or cover letter distinct
