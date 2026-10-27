@@ -82,6 +82,13 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
     let value = verdict.decision === 'eligible' ? companyVerdict(posting, verdict, policy) : verdict;
     // Exclusions are rechecked at delivery even if the inputs changed while judging.
     if ((policy.userExcludedCompanies ?? []).some((c) => key(c) === key(posting.company))) value = { ...value, decision: 'not_eligible', code: 'company_excluded' };
+    // Exploration never creates a user question, including delivery-time holds
+    // such as company quotas. Keep the sampled lane as the negative reason.
+    if (['no_student_signal', 'out_of_direction'].includes(review.lane)) {
+      value = value.decision === 'eligible'
+        ? { ...value, flags: [...new Set([...(value.flags ?? []), 'found_by_sampling'])] }
+        : { ...value, decision: 'not_eligible', code: review.lane, question: null, holdFactIds: [], nextAction: null };
+    }
     let action;
     let held = value.decision === 'unclear';
     if (protectedApp) { action = 'superseded_by_user'; held = false; }
@@ -122,7 +129,7 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
       } else action = 'no_application';
     }
     const evidence = { ...oldEvidence, evidence: value.evidence ?? [], needs: value.needs ?? {}, fit: value.fit ?? null, deadline: value.deadline ?? { kind: 'none' },
-      program: value.program ?? null, location: value.location ?? null, factsUsed: value.factsUsed ?? [], question: value.question ?? null };
+      program: value.program ?? null, location: value.location ?? null, factsUsed: value.factsUsed ?? [], question: value.question ?? null, holdFactIds: value.holdFactIds ?? [] };
     const userHold = held && !['unavailable','quota_full','quota_reconciliation'].includes(value.code);
     if (value.flags) db.prepare('UPDATE reviews SET flags_json=? WHERE posting_id=?')
       .run(JSON.stringify([...new Set([...parseJson(review.flags_json, []).filter((flag) => flag !== 'term_inferred'), ...value.flags])]), postingId);

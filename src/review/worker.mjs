@@ -19,6 +19,7 @@ import { redact } from '../runtime/redact.mjs';
 import { userDecided } from './ownership.mjs';
 import { cachedJudgment, judgmentEnvelope, rememberJudgment } from './judgment-cache.mjs';
 import { postingPartitions } from '../funnel/membership.mjs';
+import { awaitingUserSummary } from './awaiting-user.mjs';
 export { scheduleRefresh } from './freshness.mjs';
 
 const DAY = 86400000;
@@ -96,7 +97,8 @@ function absentFromCensuses(db, postingId) {
 export async function runReview({ db, runId, parentRunId = null, owner, now, budget, maxFetches = Infinity, concurrency = 1,
   deadlineMs, deadlineAt, clock = Date.now, fetcher, judges, attemptDir, sleep, inputs, hooks = {} }) {
   const receipt = { schema: 1, kind: 'review', run_id: runId, parent_run_id: parentRunId, started: now, finished: null, status: 'ok', stop_reason: null,
-    previous_run_interrupted: false, counts: { attempts: 0, attempts_lost: 0, escalations: 0, fetched: 0 }, breaches: [], awaiting_user: [], backlog: {}, warnings: [], errors: [] };
+    previous_run_interrupted: false, counts: { attempts: 0, attempts_lost: 0, escalations: 0, fetched: 0 }, sampling: { judged: 0, found: 0 },
+    breaches: [], awaiting_user: [], awaiting_user_summary: [], backlog: {}, warnings: [], errors: [] };
   const lease = acquireRunLease(db, { kind: 'review', owner, runId, parentRunId, now });
   if (!lease) return { ...receipt, status: 'busy' };
   receipt.previous_run_interrupted = lease.previousRunInterrupted;
@@ -291,7 +293,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         } else {
           spending.markFailed(attempt.id, { error: result.error ?? result.status, transportRetries: result.transportRetries, now });
           if (result.status === 'quota') {
-            setCooldown(db, `judge:${tier}`, { until: new Date(Date.parse(now) + stageInputs.policy.budgets.quotaCooldownHours * 3600000).toISOString(), reason: 'quota' });
+            setCooldown(db, `judge:${tier}`, { until: new Date(Date.parse(now) + (stageInputs.policy.budgets?.quotaCooldownHours ?? 6) * 3600000).toISOString(), reason: 'quota' });
             receipt.stop_reason = 'quota'; if (tier === 'primary') primaryStopped = true;
           } else {
             const error = result.error ?? result.status;
@@ -319,8 +321,13 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       });
       release(id, fence, { stage: 'judge' }); return;
     }
-    if (final) await commitVerdict(id, fence, final);
-    else release(id, fence, { stage: 'judge' });
+    if (final) {
+      await commitVerdict(id, fence, final);
+      if (explorationLane(row)) {
+        receipt.sampling.judged += 1;
+        if (db.prepare('SELECT decision FROM reviews WHERE posting_id=?').get(id).decision === 'eligible') receipt.sampling.found += 1;
+      }
+    } else release(id, fence, { stage: 'judge' });
   }
 
   let drainingCycle = false;
@@ -356,18 +363,19 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     receipt.counts.attempts = db.prepare('SELECT COUNT(*) n FROM attempts WHERE run_id=?').get(runId).n;
     receipt.counts.escalations = db.prepare("SELECT COUNT(*) n FROM attempts WHERE run_id=? AND tier='escalation'").get(runId).n;
     const pending = db.prepare("SELECT * FROM reviews WHERE state IN ('due','held','failed')").all().filter(reviewable);
-    const targets = current.policy.serviceTargets;
+    const maxWaitNights = current.policy.serviceTargets?.maxWaitNights ?? 7;
     for (const row of pending) {
       const age = (Date.parse(now) - Date.parse(row.first_seen)) / DAY;
       if (row.hold_owner === 'user') receipt.awaiting_user.push({ postingId: row.posting_id, age_days: age, code: row.code, question: parseJson(row.evidence_json).question });
-      else if (row.code === 'system_failure' || age >= targets.maxWaitNights) receipt.breaches.push({ postingId: row.posting_id, age_days: age, code: row.code });
+      else if (row.code === 'system_failure' || age >= maxWaitNights) receipt.breaches.push({ postingId: row.posting_id, age_days: age, code: row.code });
     }
+    receipt.awaiting_user_summary = awaitingUserSummary(pending);
     const noSignal = pending.filter((r) => r.lane === 'no_student_signal' && r.state === 'due');
     const outOfDirection = pending.filter((r) => r.lane === 'out_of_direction' && r.state === 'due');
     receipt.backlog = { due: pending.filter((r) => r.state === 'due').length,
       no_student_signal: { due: noSignal.length, oldest_days: Math.max(0, ...noSignal.map((r) => (Date.parse(now) - Date.parse(r.first_seen)) / DAY)) },
       out_of_direction: { due: outOfDirection.length, oldest_days: Math.max(0, ...outOfDirection.map((r) => (Date.parse(now) - Date.parse(r.first_seen)) / DAY)) },
-      recommendation: receipt.breaches.length ? `raise budget to ${Math.max(budget + 1, Math.ceil(pending.length / Math.max(1, targets.maxWaitNights)))}` : null };
+      recommendation: receipt.breaches.length ? `raise budget to ${Math.max(budget + 1, Math.ceil(pending.length / Math.max(1, maxWaitNights)))}` : null };
     if (receipt.status !== 'failed' && (receipt.stop_reason || receipt.breaches.length || pending.some((r) => r.state === 'failed'))) receipt.status = 'partial';
     await hooks.beforeFinish?.();
     receipt.finished = now;

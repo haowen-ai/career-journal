@@ -267,7 +267,8 @@ export function decide({ snapshotText, judgment, facts, policy, tier, firstSeen,
     && item.validation.reason !== 'non_mandatory' && !advisoryCriterion(item));
   if (unresolved) {
     const { criterion, validation } = unresolved;
-    return unclear(validation.reason === 'missing_fact' || criterion.status === 'unclear' ? 'missing_fact' : 'requirement_unclear', validation.clause?.text ?? criterion.quote ?? 'Please clarify the mandatory requirement.');
+    return { ...unclear(validation.reason === 'missing_fact' || criterion.status === 'unclear' ? 'missing_fact' : 'requirement_unclear', validation.clause?.text ?? criterion.quote ?? 'Please clarify the mandatory requirement.'),
+      holdFactIds: [...(criterion.fact_ids ?? [])] };
   }
   if (policy.functions?.outOfScope?.includes(functionValue)) return rejected('function_out_of_scope', `Is ${functionValue} work in scope?`);
   if (policy.functions?.userCall?.includes(functionValue)) return unclear('user_review', `Would you like to consider this ${functionValue} role?`);

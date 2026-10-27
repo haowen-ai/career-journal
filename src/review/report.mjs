@@ -1,5 +1,6 @@
 import { redact } from '../runtime/redact.mjs';
 import { parseJson } from './deliver.mjs';
+import { awaitingUserSummary } from './awaiting-user.mjs';
 export function reviewReport(db, { receipt = null, sourceReceipts = [], lang = 'en' } = {}) {
   const zh = lang === 'zh';
   const rows = db.prepare(`SELECT p.*,r.state,r.decision,r.code,r.flags_json,r.evidence_json,r.hold_owner,a.fit,a.deadline_at,a.posting_end_at,a.skip_reason
@@ -9,7 +10,12 @@ export function reviewReport(db, { receipt = null, sourceReceipts = [], lang = '
   const lines = [zh ? '# 岗位审核报告' : '# Official posting review', '', receipt ? `${receipt.run_id}: ${receipt.status}` : '', '', zh ? '## 已交付' : '## Delivered eligible'];
   for (const row of rows.filter((r) => r.decision === 'eligible' && r.application_id && !r.skip_reason)) lines.push(`${line(row)} — ${row.fit ?? ''}${row.deadline_at ? `; cutoff ${row.deadline_at}` : ''}${row.posting_end_at ? `; posting ends ${row.posting_end_at}` : ''}`);
   lines.push('', zh ? '## 待你定' : '## Awaiting you');
-  for (const row of rows.filter((r) => r.hold_owner === 'user')) lines.push(`${line(row)} — ${parseJson(row.evidence_json).question ?? row.code}`);
+  const held = rows.filter((r) => r.hold_owner === 'user');
+  const heldById = new Map(held.map((row) => [row.id, row]));
+  for (const group of awaitingUserSummary(held.map((row) => ({ ...row, posting_id: row.id })))) {
+    lines.push(`- ${group.key} (${group.count})`);
+    for (const id of group.postings) lines.push(`  ${line(heldById.get(id))}`);
+  }
   lines.push('', zh ? '## 已复用／已提交' : '## Reused / already submitted');
   for (const row of rows.filter((r) => r.decision === 'reused' || r.code === 'already_submitted')) lines.push(`${line(row)} — ${row.code}`);
   lines.push('', zh ? '## 等待系统审核' : '## Pending review');
