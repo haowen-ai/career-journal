@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { EXPLORATION_SHARE, FETCH_BATCH_MIN, JUDGE_TIME_SHARE, NO_SIGNAL_PROMOTE_DAYS } from '../funnel/contract.mjs';
+import { EXPLORATION_SHARE, FETCH_BATCH_MIN, JUDGE_TIME_SHARE } from '../funnel/contract.mjs';
 import { aliasesFor, reconcileAliases, providerRequisition } from '../funnel/identity.mjs';
 import { createBudget, recoverLost } from './budget.mjs';
 import { acquireRunLease, heartbeat, finishRun, claimItem, assertFence, atomic } from './lease.mjs';
@@ -61,22 +61,26 @@ export function replan(db, { inputs, now }) {
   return { requeued };
 }
 
-function ordered(rows, { now, policy, budget }) {
+function ordered(rows, { now, policy, budget, explorationLeft }) {
   const age = (row) => (Date.parse(now) - Date.parse(row.first_seen)) / DAY;
   const deadline = (row) => { const d = parseJson(row.deadline_json); return d.kind === 'cutoff' ? Date.parse(d.date) : Infinity; };
   const soon = (row) => deadline(row) <= Date.parse(now) + 7 * DAY;
   const aged = (row) => row.lane === 'aged' || row.lane !== 'no_student_signal' && age(row) >= (policy.serviceTargets?.agedAfterDays ?? 2);
   const byAge = (a, b) => a.first_seen.localeCompare(b.first_seen) || a.posting_id.localeCompare(b.posting_id);
   const sorted = [...rows].sort(byAge); const chosen = [];
+  const noSignal = sorted.filter((row) => row.lane === 'no_student_signal').slice(0, explorationLeft);
+  // A due-list rebuild must not grant another exploration share or let the
+  // remainder of this lane enter via the deadline/ordinary fallbacks.
+  const eligible = sorted.filter((row) => row.lane !== 'no_student_signal' || noSignal.includes(row));
   const take = (candidates, count = Infinity) => { for (const row of candidates) if (!chosen.includes(row) && count-- > 0) chosen.push(row); };
-  const deadlines = sorted.filter(soon).sort((a, b) => deadline(a) - deadline(b) || byAge(a,b));
+  const deadlines = eligible.filter(soon).sort((a, b) => deadline(a) - deadline(b) || byAge(a,b));
   // One imminent deadline, then reserved shares, then the rest of the paid order.
   take(deadlines, 1);
   take(sorted.filter(aged), Math.max(1, Math.ceil(budget * (policy.serviceTargets?.agedReserveShare ?? .25))));
-  take(sorted.filter((r) => r.lane === 'no_student_signal'), budget >= 1 ? Math.max(1, Math.ceil(budget * EXPLORATION_SHARE)) : 0);
+  take(noSignal);
   take(deadlines); take(sorted.filter(aged));
-  for (const lane of ['bootstrap','new','refresh','no_student_signal']) take(sorted.filter((r) => r.lane === lane));
-  take(sorted); return chosen;
+  for (const lane of ['bootstrap','new','refresh']) take(sorted.filter((r) => r.lane === lane));
+  take(eligible); return chosen;
 }
 
 function absentFromCensuses(db, postingId) {
@@ -137,7 +141,6 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     }
   });
   db.prepare("UPDATE reviews SET state='due',stage='fetch',hold_owner=NULL WHERE state='held' AND code='unavailable' AND next_due<=?").run(now);
-  db.prepare("UPDATE reviews SET lane='aged' WHERE lane='no_student_signal' AND first_seen<=?").run(new Date(Date.parse(now) - NO_SIGNAL_PROMOTE_DAYS * DAY).toISOString());
   attemptDir ??= await mkdtemp(path.join(os.tmpdir(), 'cj-review-attempts-'));
   await mkdir(attemptDir, { recursive: true, mode: 0o700 });
   const seen = new Set();
@@ -161,7 +164,12 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     assertFence(db, id, fence);
     db.prepare("UPDATE reviews SET state='due',stage=COALESCE(?,stage),next_due=?,lease_owner=NULL,lease_until=NULL WHERE posting_id=?").run(stage ?? null, nextDue, id);
   });
-  const due = () => ordered(db.prepare("SELECT * FROM reviews WHERE state='due' AND (next_due IS NULL OR next_due<=?)").all(now).filter((r) => !seen.has(r.posting_id) && !userDecided(db, r)), { now, policy: current.policy, budget });
+  const due = () => {
+    const explored = [...seen].filter((id) => exploration.has(id)).length;
+    return ordered(db.prepare("SELECT * FROM reviews WHERE state='due' AND (next_due IS NULL OR next_due<=?)").all(now)
+      .filter((row) => !seen.has(row.posting_id) && !userDecided(db, row)),
+    { now, policy: current.policy, budget, explorationLeft: Math.max(0, explorationTarget - explored) });
+  };
   const refreshInputs = async () => { current = await inputs(); return current; };
   async function commitVerdict(id, fence, verdict) {
     atomic(db, () => {

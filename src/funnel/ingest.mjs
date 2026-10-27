@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { canonicalUrl, resolvePosting } from './identity.mjs';
+import { canonicalUrl, resolvePosting, postingCandidates } from './identity.mjs';
 import { classifyRole } from './classify.mjs';
 import { SUBMITTED_STATUSES } from './contract.mjs';
 import { redact } from '../runtime/redact.mjs';
@@ -24,12 +24,14 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
   db.exec('BEGIN IMMEDIATE');
   try {
     if (runOwner) assertScanOwner(db, runId, runOwner);
+    // Read once per batch and keep newly created/merged identities in the map.
+    const candidates = postingCandidates(db, { companyAliases: policy.companyAliases });
     for (const raw of records) {
       counts.observed += 1;
       const record = { ...raw, source: raw?.source ?? source, partition };
       const invalid = record.invalid || (!record.title?.trim() ? 'missing title' : !canonicalUrl(record.url) ? 'missing http(s) URL' : null);
       if (invalid) { quarantine(db, record, invalid, now); counts.quarantined += 1; continue; }
-      const resolved = resolvePosting(db, record, { now, companyAliases: policy.companyAliases });
+      const resolved = resolvePosting(db, record, { now, companyAliases: policy.companyAliases, candidates });
       const id = resolved.postingId;
       if (resolved.created) counts.newPostings += 1;
       const posting = db.prepare('SELECT * FROM postings WHERE id=?').get(id);

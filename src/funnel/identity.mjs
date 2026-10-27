@@ -189,7 +189,21 @@ export function reconcileAliases(db, postingId, aliases, { now, fence } = {}) {
   return { action: 'added', postingId };
 }
 
-export function resolvePosting(db, record, { now, companyAliases } = {}) {
+function rememberCandidate(candidates, posting, companyAliases) {
+  const key = companyKey(posting.company, companyAliases);
+  if (!candidates.has(key)) candidates.set(key, new Map());
+  candidates.get(key).set(posting.id, { id: posting.id, title: posting.title });
+}
+
+export function postingCandidates(db, { companyAliases } = {}) {
+  const candidates = new Map();
+  for (const posting of db.prepare('SELECT id,company,title FROM postings WHERE merged_into IS NULL').all()) {
+    rememberCandidate(candidates, posting, companyAliases);
+  }
+  return candidates;
+}
+
+export function resolvePosting(db, record, { now, companyAliases, candidates } = {}) {
   const aliases = aliasesFor(record, { companyAliases });
   const matches = aliases.map((item) => ({ ...item, posting: owned(db, item.alias) })).filter((item) => item.posting);
   if (matches.length) {
@@ -201,17 +215,27 @@ export function resolvePosting(db, record, { now, companyAliases } = {}) {
       conflict(db, postingId, hit.posting.id, now);
       for (const item of aliases) if (!owned(db, item.alias)) db.prepare('INSERT INTO posting_aliases (alias,posting_id,kind,created_at) VALUES (?,?,?,?)').run(item.alias, postingId, item.kind, now);
     } else reconcileAliases(db, postingId, aliases, { now });
-    return { postingId: effective(db, postingId).id, created: separate, matchedBy: hit.kind, links: [] };
+    const posting = effective(db, postingId);
+    if (candidates) {
+      // Alias reconciliation can merge a cached posting during this batch.
+      if (posting.id !== postingId) candidates.get(companyKey(hit.posting.company, companyAliases))?.delete(postingId);
+      rememberCandidate(candidates, posting, companyAliases);
+    }
+    return { postingId: posting.id, created: separate, matchedBy: hit.kind, links: [] };
   }
   const postingId = newPosting(db, record, now);
   reconcileAliases(db, postingId, aliases, { now });
   const links = [];
-  for (const candidate of db.prepare('SELECT * FROM postings WHERE id<>? AND merged_into IS NULL').all(postingId)) {
-    if (companyKey(candidate.company, companyAliases) !== companyKey(record.company ?? '', companyAliases)) continue;
+  const company = companyKey(record.company ?? '', companyAliases);
+  const pool = candidates ? candidates.get(company)?.values() ?? []
+    : db.prepare('SELECT id,company,title FROM postings WHERE id<>? AND merged_into IS NULL').all(postingId)
+      .filter((posting) => companyKey(posting.company, companyAliases) === company);
+  for (const candidate of pool) {
     if (Math.max(titleSimilarity(candidate.title, record.title), titleContainment(candidate.title, record.title)) < 0.6) continue;
     link(db, postingId, candidate.id, 'maybe_same', 'similar title; identity not established', now);
     links.push({ postingId: candidate.id, kind: 'maybe_same' });
   }
+  if (candidates) rememberCandidate(candidates, { id: postingId, company: record.company ?? '', title: record.title ?? '' }, companyAliases);
   return { postingId, created: true, matchedBy: null, links };
 }
 

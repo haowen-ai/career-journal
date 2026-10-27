@@ -3,6 +3,9 @@ import { companyKey } from '../scan/dedupe.mjs';
 import { aliasesFor, canonicalUrl } from './identity.mjs';
 
 const STUDENT = /\b(?:intern(?:s|ship|ships)?|co[- ]?ops?|apprentice(?:s|ship|ships)?|placements?|working students?|students?|fellow(?:s|ship|ships)?|residen(?:t|ts|cy)|graduate program(?:me)?|early career|university program(?:me)?|campus program(?:me)?|summer (?:analysts?|associates?|20\d\d program(?:me)?)|currently enrolled|class of 20\d\d)\b/i;
+// Descriptions often mention students in company-wide boilerplate. Only explicit
+// program phrases count there; titles and departments retain the broader signal.
+const PROGRAM = /\b(?:interns?|internships?|co[- ]?ops?|apprentice(?:s|ship|ships)?|summer\s+20\d\d\s+(?:interns?|analysts?|associates?|program(?:me)?)|(?:graduate|early career|university|campus)\s+program(?:me)?)\b/i;
 const names = new Map();
 const normalized = (value) => String(value).normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const displayNames = new Intl.DisplayNames(['en'], { type: 'region' });
@@ -56,14 +59,15 @@ export function classifyRole(record, { policy = {}, profile, identity: { submitt
       && resolved.every((country) => country && !allowed.includes(country))) return outcome('drop', 'outside_countries', locations);
   if (record.listed === false) flags.push('listed_false');
   if (record.completeness?.locations !== 'complete') flags.push('partial_locations');
-  const signal = STUDENT.test([record.title, ...(record.categories ?? []), record.description].join(' '));
+  const signal = [record.title, ...(record.categories ?? []), record.department].some((text) => STUDENT.test(text ?? ''))
+    || PROGRAM.test(record.description ?? '');
   if (!signal) flags.push('generic_title');
-  if (['internship', 'co-op'].includes(profile?.search?.jobType) && record.completeness?.description === 'full' && !signal && !record.employmentType) {
+  if (['internship', 'co-op'].includes(profile?.search?.jobType) && !signal) {
     flags.push('no_student_signal'); lane = 'no_student_signal';
   }
   if (record.terms?.length) flags.push('term_tag_conflict');
   if (record.degrees?.length) flags.push('degree_tag');
   if (locations.some((location) => stateNames.has(normalized(location)) || Object.hasOwn(countries.usStates, String(location)))) flags.push('state_only_location');
-  if (record.deadlineAt && record.deadlineKind === 'cutoff') lane = 'deadline';
+  if (record.deadlineAt && record.deadlineKind === 'cutoff' && lane !== 'no_student_signal') lane = 'deadline';
   return outcome('review', null);
 }
