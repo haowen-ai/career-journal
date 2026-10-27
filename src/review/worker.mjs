@@ -27,6 +27,7 @@ const DAY = 86400000;
 const explorationLane = (row) => ['no_student_signal', 'out_of_direction'].includes(row.lane);
 const postingUrl = (posting) => /^https?:/.test(posting.canonical_url) ? posting.canonical_url : `https://${posting.canonical_url}`;
 const factsMap = (facts) => Object.fromEntries(facts.map((fact) => [fact.id, dependencyHash(fact)]));
+const judgmentInputsHash = (parts) => dependencyHash(Object.fromEntries(Object.entries(parts).filter(([key]) => key !== 'decide')));
 export function inputState(inputs) {
   return { facts: factsMap(inputs.facts), rules: dependencyHash(inputs.rules), policy: dependencyHash({ policy: inputs.policy, jobType: inputs.profile?.search?.jobType ?? null }),
     screening: dependencyHash(inputs.screeningPolicy), provenance: dependencyHash(inputs.provenance), resume: dependencyHash(inputs.resume?.text ?? null),
@@ -117,9 +118,10 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       ${reviewOwnershipJoins} WHERE NOT ${userDecisionSql}`).all()) {
       if (row.decision === 'eligible' || row.decision === 'reused' || row.decision === 'dropped') continue;
       const old = parseJson(row.dep_hashes_json);
-      if (!old.runtime || dependencyHash(old.runtime) === dependencyHash(runtimeDeps)) continue;
+      const lastDecision = old.decisionRuntime ?? old.runtime;
+      if (!lastDecision || Object.entries(lastDecision).every(([tier, parts]) => dependencyHash(parts) === dependencyHash(runtimeDeps[tier]))) continue;
       db.prepare("UPDATE reviews SET state='due',stage='judge',next_due=?,hold_owner=NULL,hold_since=NULL,lease_owner=NULL,lease_until=NULL,dep_hashes_json=?,updated_at=? WHERE posting_id=?")
-        .run(now, JSON.stringify({ ...old, runtime: runtimeDeps, invalidated: true }), now, row.posting_id);
+        .run(now, JSON.stringify({ ...old, invalidated: true }), now, row.posting_id);
       logReview(db, row.posting_id, { now, stage: 'judge', kind: 'replan', payload: { reason: 'judge dependencies changed' } });
     }
   });
@@ -158,10 +160,11 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     db.prepare("UPDATE reviews SET state='due',stage=COALESCE(?,stage),next_due=?,lease_owner=NULL,lease_until=NULL WHERE posting_id=?").run(stage ?? null, nextDue, id);
   });
   const refreshInputs = async () => { current = await inputs(); return current; };
-  async function commitVerdict(id, fence, verdict) {
+  async function commitVerdict(id, fence, verdict, dependencies) {
     atomic(db, () => {
       hooks.insideDeliver?.({ postingId: id });
       deliver(db, { postingId: id, verdict, fence, now, policy: current.screeningPolicy });
+      if (dependencies) db.prepare('UPDATE reviews SET dep_hashes_json=? WHERE posting_id=?').run(JSON.stringify(dependencies), id);
     });
   }
   async function fetchItem(row) {
@@ -216,11 +219,16 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     const stageInputs = await refreshInputs();
     const startState = inputState(stageInputs);
     const stored = parseJson(row.dep_hashes_json);
-    // Persist dependencies before dispatch so recovered output has a known context.
+    // runtime retains the parts that produced each judgment, including legacy
+    // records already invalidated by replan. inputs.code is only a mixed change
+    // signal; runtime proves whether the model inputs actually changed.
+    const dependencies = { ...stored, inputs: startState, runtime: { ...runtimeDeps, ...stored.runtime },
+      stageStartedAt: now, snapshot: snapshot.content_hash, invalidated: false };
+    const decisionRuntime = {};
+    const persistDependencies = () => db.prepare('UPDATE reviews SET dep_hashes_json=? WHERE posting_id=?').run(JSON.stringify(dependencies), id);
     atomic(db, () => {
       assertFence(db, id, fence);
-      db.prepare('UPDATE reviews SET dep_hashes_json=? WHERE posting_id=?').run(JSON.stringify({ ...stored, inputs: startState, runtime: runtimeDeps,
-        stageStartedAt: now, snapshot: snapshot.content_hash, invalidated: false }), id);
+      persistDependencies();
     });
     let final;
     for (const tier of ['primary','escalation']) {
@@ -229,7 +237,22 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       const request = await buildJudgeRequest({ posting, snapshot, sections: parseJson(snapshot.sections_json, []), inputs: stageInputs, adapter, tier });
       const depsHash = dependencyHash(request.deps.parts);
       if (tier === 'primary' && !evalCurrent(stageInputs.evalRecord, request.deps).current && !receipt.warnings.includes('eval_stale')) receipt.warnings.push('eval_stale');
-      let output = !stored.invalidated && cachedJudgment(db, id, { tier, depsHash, snapshotHash: snapshot.content_hash });
+      let parts = request.deps.parts;
+      let output = cachedJudgment(db, id, { tier, depsHash, snapshotHash: snapshot.content_hash });
+      const previous = stored.runtime?.[tier];
+      if (!output && previous && judgmentInputsHash(previous) === judgmentInputsHash(parts)) {
+        // A decision-code change can replay even an invalidated review. Look up
+        // the original hash, never relabel an old judgment with today's hash.
+        output = cachedJudgment(db, id, { tier, depsHash: dependencyHash(previous), snapshotHash: snapshot.content_hash });
+        if (output) parts = previous;
+      }
+      if (output) {
+        atomic(db, () => {
+          assertFence(db, id, fence);
+          dependencies.runtime[tier] = parts;
+          persistDependencies();
+        });
+      }
       if (!output) {
         if (tier === 'primary' && primaryStopped) break;
         if (activeCooldown(db, `judge:${tier}`, { now })) { receipt.stop_reason ??= 'quota_cooldown'; if (tier === 'primary') primaryStopped = true; break; }
@@ -239,7 +262,12 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         if (reserved > 0 && spending.remaining() <= reserved * (1 + maxRetries)) break;
         const attempt = atomic(db, () => {
           assertFence(db, id, fence);
-          return spending.reserve({ postingId: id, stage: 'judge', runner: adapter.runner, model: adapter.model, tier, now });
+          const reservedAttempt = spending.reserve({ postingId: id, stage: 'judge', runner: adapter.runner, model: adapter.model, tier, now });
+          if (reservedAttempt) {
+            dependencies.runtime[tier] = request.deps.parts;
+            persistDependencies(); // Recovery must see the dispatched tier's actual parts.
+          }
+          return reservedAttempt;
         });
         if (!attempt) { receipt.stop_reason ??= 'budget'; break; }
         if (explorationLane(row)) explorationSpent += 1;
@@ -291,6 +319,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
           break;
         }
       }
+      decisionRuntime[tier] = request.deps.parts;
       final = decide({ snapshotText: snapshot.text, judgment: output, facts: stageInputs.facts, policy: stageInputs.policy, tier,
         firstSeen: posting.first_seen, jobType: stageInputs.profile?.search?.jobType });
       if (tier === 'primary' && final.escalate) { final = null; continue; }
@@ -301,12 +330,14 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       logReview(db, id, { now, stage: 'judge', kind: 'replan', payload: { reason: 'inputs changed during judgment' } });
       atomic(db, () => {
         assertFence(db, id, fence);
-        db.prepare('UPDATE reviews SET dep_hashes_json=? WHERE posting_id=?').run(JSON.stringify({ inputs: inputState(commitInputs), runtime: runtimeDeps, invalidated: true }), id);
+        db.prepare('UPDATE reviews SET dep_hashes_json=? WHERE posting_id=?').run(JSON.stringify({ ...dependencies, inputs: inputState(commitInputs), invalidated: true }), id);
       });
       release(id, fence, { stage: 'judge' }); return;
     }
     if (final) {
-      await commitVerdict(id, fence, final);
+      // Track the applied decision separately so retained judgment provenance
+      // does not requeue a settled review on every subsequent run.
+      await commitVerdict(id, fence, final, { ...dependencies, decisionRuntime });
       if (explorationLane(row)) {
         receipt.sampling.judged += 1;
         if (db.prepare('SELECT decision FROM reviews WHERE posting_id=?').get(id).decision === 'eligible') receipt.sampling.found += 1;
