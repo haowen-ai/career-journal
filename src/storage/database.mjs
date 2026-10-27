@@ -6,8 +6,9 @@ import { migration002 } from './migrations/002-email-account-settings.mjs';
 import { migration003 } from './migrations/003-application-tasks.mjs';
 import { migration004 } from './migrations/004-task-links.mjs';
 import { migration005 } from './migrations/005-role-queue.mjs';
+import { migration006 } from './migrations/006-funnel.mjs';
 
-export const schemaMigrations = [migration001, migration002, migration003, migration004, migration005];
+export const schemaMigrations = [migration001, migration002, migration003, migration004, migration005, migration006];
 
 export function openDatabase(file) {
   const resolved = file === ':memory:' ? file : path.resolve(file);
@@ -35,6 +36,7 @@ function appliedVersions(db) {
 }
 
 export function migrate(db, { dryRun = false, migrations = schemaMigrations } = {}) {
+  assertSchemaNotNewer(db);
   const existing = appliedVersions(db);
   const pending = migrations.filter((item) => !existing.has(item.version));
   if (dryRun) return { pending: pending.map((item) => item.version), applied: [] };
@@ -58,4 +60,11 @@ export function migrate(db, { dryRun = false, migrations = schemaMigrations } = 
     }
   }
   return { pending: [], applied };
+}
+
+export function assertSchemaNotNewer(db) {
+  const highest = Math.max(0, ...appliedVersions(db));
+  if (highest > Math.max(...schemaMigrations.map((item) => item.version))) {
+    throw new Error(`database schema ${highest} is newer than this CAREER JOURNAL; upgrade`);
+  }
 }

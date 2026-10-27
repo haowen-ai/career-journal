@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { loadConfig, workspaceDirectory } from '../config/store.mjs';
 import { detectCareerOps } from '../integrations/careerops.mjs';
-import { openReadOnlyDatabase, migrate } from '../storage/database.mjs';
+import { openReadOnlyDatabase, migrate, assertSchemaNotNewer } from '../storage/database.mjs';
 import { hasCompleteHostSyncCoverage, isLiveVerifiedEmailAccount, listEmailAccounts } from '../email/accounts.mjs';
 import { isCurrentTaskRegistration, listTasks, REQUIRED_TASK_TYPES, taskEmailAccountIds } from '../automation/registry.mjs';
 import { probeTaskRegistration } from '../automation/probe.mjs';
@@ -105,6 +105,7 @@ export async function doctor(home, capabilities = {}) {
   } else try {
     const db = openReadOnlyDatabase(databasePath);
     try {
+      assertSchemaNotNewer(db);
       const pending = migrate(db, { dryRun: true }).pending;
       if (pending.length) {
         checks.push({ id: 'migration', severity: 'fail', detail: `pending versions ${pending.join(', ')}; run migrate --dry-run, back up, then migrate --apply` });

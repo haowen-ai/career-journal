@@ -1,0 +1,22 @@
+// Shared screening interfaces. Keep these values aligned with schema 006.
+export const REVIEW_STAGES = Object.freeze(['scan', 'fetch', 'check', 'judge', 'deliver']);
+export const REVIEW_STATES = Object.freeze(['due', 'leased', 'held', 'done', 'failed']);
+export const DECISIONS = Object.freeze(['dropped', 'reused', 'not_eligible', 'eligible', 'unclear']);
+export const LANES = Object.freeze(['deadline', 'aged', 'bootstrap', 'new', 'refresh', 'no_student_signal']);
+export const DROP_CODES = Object.freeze(['company_excluded', 'posting_excluded', 'outside_countries']);
+export const REUSE_CODES = Object.freeze(['already_submitted', 'user_declined']);
+export const HOLD_CODES = Object.freeze(['user_review', 'browser_review', 'identity_conflict', 'provenance_unknown', 'system_failure', 'quota_full', 'quota_reconciliation', 'quota_unclear', 'unavailable', 'already_applied_mail', 'missing_fact']);
+export const SUBMITTED_STATUSES = Object.freeze(['applied', 'assessment', 'interview', 'offer', 'accepted', 'declined', 'rejected']);
+export const EXIT = Object.freeze({ OK: 0, FAILED: 1, PARTIAL: 2, BUSY: 75 });
+export const ACTOR = Object.freeze({ WORKER: 'review-worker', USER: 'user', BOOTSTRAP: 'bootstrap' });
+export const EXTERNAL_ID_PREFIX = 'posting:';
+export const RUN_KINDS = Object.freeze(['scan', 'review', 'daily', 'prune']);
+export const PARTITION_STATUS = Object.freeze(['ok', 'empty', 'partial', 'error', 'skipped', 'disabled', 'stale', 'retired']);
+export const STOP_REASONS = Object.freeze(['budget', 'fetch_budget', 'deadline', 'quota', 'quota_cooldown', 'adapter_failure']);
+export const DEADLINE_KINDS = Object.freeze(['cutoff', 'posting_end', 'rolling', 'none']);
+export const TAB_STATES = Object.freeze(['createAccount', 'signIn', 'verify', 'question', 'essay', 'documents', 'assessment', 'click', 'ready']);
+export const EXPLORATION_SHARE = 0.10;
+export const FETCH_BATCH_MIN = 5;
+export const JUDGE_TIME_SHARE = 0.5;
+export const NO_SIGNAL_PROMOTE_DAYS = 14;
+export const COLD_START = Object.freeze({ censuses: 3, days: 7 });

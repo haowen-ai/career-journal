@@ -1,5 +1,7 @@
 import { access, mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { createBackup } from './backup.mjs';
 import { loadConfig } from '../config/store.mjs';
 import { migrate, openDatabase, openReadOnlyDatabase, schemaMigrations } from '../storage/database.mjs';
 
@@ -13,14 +15,25 @@ export async function migrateHome(home, options = {}) {
   const database = path.resolve(root, config.data.database);
   const candidates = options.migrations ?? schemaMigrations;
   const existed = await exists(database);
-  if (options.dryRun && !existed) return { database, pending: candidates.map((item) => item.version), applied: [], dryRun: true };
+  if (options.dryRun && !existed) return { database, pending: candidates.map((item) => item.version), applied: [], backup: null, dryRun: true };
 
   if (options.dryRun) {
     const db = openReadOnlyDatabase(database);
-    try { return { database, ...migrate(db, { dryRun: true, migrations: candidates }), dryRun: true }; }
+    try { return { database, ...migrate(db, { dryRun: true, migrations: candidates }), backup: null, dryRun: true }; }
     finally { db.close(); }
   }
 
+  let backup = null;
+  if (existed) {
+    const inspect = openReadOnlyDatabase(database);
+    let pending;
+    try { pending = migrate(inspect, { dryRun: true, migrations: candidates }).pending; }
+    finally { inspect.close(); }
+    if (pending.length) {
+      backup = path.join(path.dirname(database), 'backups', `pre-migrate-${randomUUID()}`);
+      await createBackup(root, backup);
+    }
+  }
   await mkdir(path.dirname(database), { recursive: true, mode: 0o700 });
   let db;
   try {
@@ -29,7 +42,7 @@ export async function migrateHome(home, options = {}) {
     const result = migrate(db, { migrations: candidates });
     db.close();
     db = null;
-    return { database, ...result, dryRun: false };
+    return { database, ...result, backup, dryRun: false };
   } catch (error) {
     try { db?.close(); } catch {}
     throw error;
