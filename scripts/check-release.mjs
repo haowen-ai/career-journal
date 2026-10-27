@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { EMAIL_PATTERN, PHONE_PATTERN, HOME_PATH_PATTERN, FILE_EXTENSION_TLDS } from '../src/runtime/redact.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -33,14 +34,6 @@ export const PERSONAL_DATA_ALLOWLIST = Object.freeze({
   homeDirectoryNames: Object.freeze(['candidate', 'example', 'Shared', 'Public', 'Default']),
 });
 
-const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@((?:[A-Za-z0-9-]+\.)+([A-Za-z]{2,}))(?![A-Za-z0-9-])/g;
-// file@2x.png and similar asset names look like addresses but are file names.
-const FILE_EXTENSION_TLDS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'js', 'mjs', 'cjs', 'ts', 'json', 'css', 'html', 'map']);
-// US numbers: (212) 555-0100, 212-555-0100, 212.555.0100, 212 555 0100 with an optional +1 or 1
-// prefix, +1 555 0100, and +12125550100.
-const PHONE_PATTERN = /(?<![\w.+-])(?:\+?1[\s.-]?)?(?:\(\d{3}\)[\s.-]?|\d{3}[\s.-])\d{3}[\s.-]\d{4}(?![\w-])|(?<![\w.+-])\+1[\s.-]?\d{3}[\s.-]?\d{4}(?![\w-])|(?<![\w.+-])\+1\d{10}(?!\d)/g;
-// /Users/<name>, /home/<name>, and C:\Users\<name> (also with escaped backslashes or forward slashes).
-const HOME_PATH_PATTERN = /(?<![A-Za-z0-9_.~-])(?:\/Users\/|\/home\/|[A-Za-z]:(?:\\+|\/)Users(?:\\+|\/))([A-Za-z0-9][A-Za-z0-9._-]*)/g;
 
 function lineAt(text, index) {
   let line = 1;

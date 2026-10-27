@@ -7,6 +7,7 @@ import { openDatabase, openReadOnlyDatabase, migrate, pendingMigrationError, ass
 import { assertPublicEmailAddress, configureEmailAccount, listEmailAccounts, emailSetupState } from '../email/accounts.mjs';
 import { upsertTask, listTasks, automationSetupState, taskEmailAccountIds } from '../automation/registry.mjs';
 import { validSecretReference } from '../secrets/reference.mjs';
+import { assertHomeOutsideCheckout } from '../runtime/home.mjs';
 
 const DAILY_AUTOMATIONS = Object.freeze({
   'mail-sync': { time: '20:00', notificationPolicy: 'actionable' },
@@ -83,6 +84,7 @@ function hasDailyMailbox(home, config) {
 }
 
 export async function setup(home, answers = {}) {
+  assertHomeOutsideCheckout(home);
   let config;
   let created = false;
   try { config = await loadConfig(home); }
@@ -209,6 +211,7 @@ export async function setup(home, answers = {}) {
 
 export async function setupCommand(parsed, io, runtime) {
   const home = parsed.options.home ?? process.cwd();
+  assertHomeOutsideCheckout(home);
   let timezone = parsed.options.timezone;
   let existing = true;
   let existingConfig = null;
