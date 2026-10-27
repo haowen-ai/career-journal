@@ -75,7 +75,7 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
         && (['user','manual','event-command'].includes(source.kind) || /^(?:manual_|user_)/.test(event.event_type));
     };
     const userWithdrawal = app?.status === 'withdrawn' && isUserEvent(lastStatus);
-    const canRestore = !userWithdrawal && (lastStatus && parseJson(lastStatus.source_json).actor === 'review-worker' || automated);
+    const canRestore = !userWithdrawal && (lastStatus && parseJson(lastStatus.source_json).actor === 'review-worker' || automated || oldEvidence.systemReview === true);
     const stageStart = parseJson(review.dep_hashes_json).stageStartedAt ?? review.updated_at;
     const protectedApp = app && (app.applied_at || SUBMITTED_STATUSES.includes(app.status) || ['user','legacy'].includes(app.skip_owner)
       || app.status === 'withdrawn' && !canRestore || isUserEvent(lastEvent) && lastEvent.recorded_at > stageStart);
@@ -104,7 +104,8 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
       if (app) {
         if (value.decision === 'eligible') {
           const restored = app.status === 'withdrawn';
-          appendEvent(db, app.id, restored ? 'review_restored' : 'review_delivered', now, { statusAfter: restored ? 'lead' : null, reviewRestore: restored, source: { postingId, automatedProvenance: automated } });
+          appendEvent(db, app.id, restored ? 'review_restored' : 'review_delivered', now, { statusAfter: restored ? 'lead' : null, reviewRestore: restored,
+            source: { postingId, automatedProvenance: automated, ...(oldEvidence.systemReview ? { systemReview: true, provenance: oldEvidence.provenance } : {}) } });
           db.prepare('UPDATE applications SET skip_reason=NULL,skip_owner=NULL WHERE id=?').run(app.id);
           action = restored ? 'restored' : action ?? (app.skip_reason ? 'unhidden' : 'updated');
         } else if (held) {
@@ -130,9 +131,11 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
     }
     const evidence = { ...oldEvidence, evidence: value.evidence ?? [], needs: value.needs ?? {}, fit: value.fit ?? null, deadline: value.deadline ?? { kind: 'none' },
       program: value.program ?? null, location: value.location ?? null, factsUsed: value.factsUsed ?? [], question: value.question ?? null, holdFactIds: value.holdFactIds ?? [] };
+    if (value.modelDecision) evidence.modelDecision = value.modelDecision;
+    else delete evidence.modelDecision;
     const userHold = held && !['unavailable','quota_full','quota_reconciliation'].includes(value.code);
-    if (value.flags) db.prepare('UPDATE reviews SET flags_json=? WHERE posting_id=?')
-      .run(JSON.stringify([...new Set([...parseJson(review.flags_json, []).filter((flag) => flag !== 'term_inferred'), ...value.flags])]), postingId);
+    db.prepare('UPDATE reviews SET flags_json=? WHERE posting_id=?')
+      .run(JSON.stringify([...new Set([...parseJson(review.flags_json, []).filter((flag) => !['term_inferred', 'model_decided', 'disputed'].includes(flag)), ...(value.flags ?? [])])]), postingId);
     db.prepare(`UPDATE reviews SET state=?,decision=?,code=?,evidence_json=?,deadline_json=?,hold_owner=?,hold_since=?,next_due=?,stage='deliver',
       lease_owner=NULL,lease_until=NULL,updated_at=? WHERE posting_id=? AND lease_owner=? AND lease_generation=?`)
       .run(held ? 'held' : 'done', value.decision, protectedApp ? 'superseded_by_user' : value.code ?? null, JSON.stringify(evidence), JSON.stringify(value.deadline ?? {}),

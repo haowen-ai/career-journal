@@ -1,4 +1,4 @@
-import { validJudgment } from './judge.mjs';
+import { validJudgment, validForcedDecision } from './judge.mjs';
 
 const object = (value) => {
   try { const parsed = JSON.parse(value); return parsed && !Array.isArray(parsed) ? parsed : {}; }
@@ -6,9 +6,9 @@ const object = (value) => {
 };
 
 // The same envelope is used for live responses, crash recovery and durable reuse.
-export function judgmentEnvelope(output, { tier, depsHash = null, snapshotHash = null } = {}) {
-  if (!validJudgment(output) || !['primary', 'escalation'].includes(tier)) return null;
-  return { output, tier, depsHash, snapshotHash };
+export function judgmentEnvelope(output, { tier, depsHash = null, snapshotHash = null, forceDecision = false, question = null } = {}) {
+  if (!(forceDecision ? tier === 'escalation' && validForcedDecision(output) : validJudgment(output)) || !['primary', 'escalation'].includes(tier)) return null;
+  return { output, tier, depsHash, snapshotHash, ...(forceDecision ? { forceDecision: true, question } : {}) };
 }
 
 export function rememberJudgment(db, postingId, envelope) {
@@ -16,14 +16,16 @@ export function rememberJudgment(db, postingId, envelope) {
   const row = db.prepare('SELECT evidence_json FROM reviews WHERE posting_id=?').get(postingId);
   if (!row) return;
   const evidence = object(row.evidence_json);
-  evidence.judgments = { ...evidence.judgments, [envelope.tier]: envelope };
+  if (envelope.forceDecision) evidence.forcedDecision = envelope;
+  else evidence.judgments = { ...evidence.judgments, [envelope.tier]: envelope };
   db.prepare('UPDATE reviews SET evidence_json=? WHERE posting_id=?').run(JSON.stringify(evidence), postingId);
 }
 
-export function cachedJudgment(db, postingId, { tier, depsHash, snapshotHash, remember = true }) {
+export function cachedJudgment(db, postingId, { tier, depsHash, snapshotHash, remember = true, forceDecision = false, question = null }) {
   const evidence = object(db.prepare('SELECT evidence_json FROM reviews WHERE posting_id=?').get(postingId)?.evidence_json);
-  const matches = (value) => value?.tier === tier && value.depsHash === depsHash && value.snapshotHash === snapshotHash;
-  const cached = evidence.judgments?.[tier];
+  const matches = (value) => value?.tier === tier && Boolean(value.forceDecision) === forceDecision
+    && (!forceDecision || value.question === question) && value.depsHash === depsHash && value.snapshotHash === snapshotHash;
+  const cached = forceDecision ? evidence.forcedDecision : evidence.judgments?.[tier];
   if (matches(cached)) return cached.output;
   for (const row of db.prepare("SELECT payload_json FROM review_log WHERE posting_id=? AND kind='llm_raw' ORDER BY id DESC").all(postingId)) {
     const payload = object(row.payload_json);
@@ -39,7 +41,7 @@ export function preserveJudgments(db) {
   const seen = new Set();
   for (const row of db.prepare("SELECT posting_id,payload_json FROM review_log WHERE kind='llm_raw' ORDER BY id DESC").all()) {
     const payload = object(row.payload_json);
-    const key = JSON.stringify([row.posting_id, payload.tier]);
+    const key = JSON.stringify([row.posting_id, payload.tier, Boolean(payload.forceDecision)]);
     if (seen.has(key)) continue;
     const envelope = judgmentEnvelope(payload.output, payload);
     if (!envelope?.depsHash || !envelope.snapshotHash) continue;

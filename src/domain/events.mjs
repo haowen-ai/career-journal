@@ -47,9 +47,10 @@ export function recordEvent(db, input, { withinTransaction = false, reviewRestor
   if (event.statusAfter) {
     if (reviewRestore && event.type === 'review_restored') {
       const last = db.prepare('SELECT source_json FROM application_events WHERE application_id=? AND status_after IS NOT NULL ORDER BY recorded_at DESC,rowid DESC LIMIT 1').get(event.applicationId);
-      const automated = db.prepare("SELECT r.evidence_json FROM reviews r JOIN postings p ON p.id=r.posting_id WHERE p.application_id=?").all(event.applicationId)
-        .some((row) => JSON.parse(row.evidence_json)?.provenance === 'automated');
-      assertReviewRestore(application.status, event.statusAfter, { actor: event.source.actor, lastActor: last && JSON.parse(last.source_json).actor, automated });
+      const evidence = db.prepare("SELECT r.evidence_json FROM reviews r JOIN postings p ON p.id=r.posting_id WHERE p.application_id=?").all(event.applicationId)
+        .map((row) => JSON.parse(row.evidence_json));
+      assertReviewRestore(application.status, event.statusAfter, { actor: event.source.actor, lastActor: last && JSON.parse(last.source_json).actor,
+        automated: evidence.some((value) => value?.provenance === 'automated'), systemReview: evidence.some((value) => value?.systemReview === true) });
     } else assertStatusTransition(application.status, event.statusAfter);
   }
   if (!withinTransaction) db.exec('BEGIN IMMEDIATE');

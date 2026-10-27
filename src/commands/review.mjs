@@ -18,8 +18,9 @@ import { matchMailHits } from '../review/mail.mjs';
 import { annotateMail, unhide, deliver, logReview, parseJson } from '../review/deliver.mjs';
 import { claimItem, atomic } from '../review/lease.mjs';
 import { redecideReviews } from '../review/redecide.mjs';
+import { releaseHolds } from '../review/release-holds.mjs';
 
-const usage = 'Usage: career-journal review run|redecide|bootstrap|list|report|receipt|attach|add|annotate|unhide|resolve|ledger|audit|daily-finalize|eval';
+const usage = 'Usage: career-journal review run|redecide|release-holds|bootstrap|list|report|receipt|attach|add|annotate|unhide|resolve|ledger|audit|daily-finalize|eval';
 const required = (value, name) => { if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required`); return value; };
 function numberOption(value, name, { zero = false, integer = true } = {}) {
   const result = Number(value);
@@ -62,6 +63,12 @@ export async function reviewCommand(parsed, io, runtime = {}) {
   try {
     switch (parsed.subcommand) {
       case 'run': { const receipt = await reviewWithContext(context, runtime, options); emit(receipt); return reviewExitCode(receipt); }
+      case 'release-holds': {
+        if (isBusy(context.db, now)) throw new Error('A review run is active');
+        const inputs = await loadReviewInputs(context.root);
+        if (isBusy(context.db, now)) throw new Error('A review run is active');
+        emit(releaseHolds(context.db, { now, provenance: inputs.provenance, inputs })); return 0;
+      }
       case 'redecide': {
         if (options.held !== true || options.done !== undefined && options.done !== true) throw new Error('Usage: career-journal review redecide --held [--done] [--json]');
         if (isBusy(context.db, now)) throw new Error('A review run is active');

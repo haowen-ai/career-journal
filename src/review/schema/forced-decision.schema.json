@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision", "assumption"],
+  "properties": {
+    "decision": { "type": "string", "enum": ["eligible", "not_eligible"] },
+    "assumption": { "type": "string", "pattern": "\\S" }
+  }
+}

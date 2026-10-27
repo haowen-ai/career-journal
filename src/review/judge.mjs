@@ -3,11 +3,12 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { JUDGMENT_SCHEMA_PATH } from './prompt.mjs';
+import { JUDGMENT_SCHEMA_PATH, FORCED_DECISION_SCHEMA_PATH } from './prompt.mjs';
 
 export const QUOTA_PATTERNS = Object.freeze([/usage limit|rate limit reached|quota/i]);
 const MAX_BYTES = 2_000_000;
 const schema = JSON.parse(readFileSync(JUDGMENT_SCHEMA_PATH, 'utf8'));
+const forcedSchema = JSON.parse(readFileSync(FORCED_DECISION_SCHEMA_PATH, 'utf8'));
 
 function required(value, name) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`Judge configuration requires ${name}`);
@@ -47,6 +48,7 @@ function schemaValid(value, rule) {
 }
 
 export const validJudgment = (value) => schemaValid(value, schema);
+export const validForcedDecision = (value) => schemaValid(value, forcedSchema);
 
 async function versionOf(spec, timeoutMs, signal) {
   const controller = new AbortController();
@@ -167,7 +169,7 @@ export function codexExecAdapter({ bin = 'codex', codexHome, model, effort, tier
         const rawText = await readFile(outputPath, 'utf8');
         let output;
         try { output = JSON.parse(rawText); } catch { return finish('invalid', { rawText, errorCode: 'output_not_json', error: 'Judge output is not JSON' }); }
-        if (!validJudgment(output)) return finish('invalid', { rawText, errorCode: 'output_schema', error: 'Judge output does not match judgment schema' });
+        if (!(request.forceDecision ? validForcedDecision(output) : validJudgment(output))) return finish('invalid', { rawText, errorCode: 'output_schema', error: 'Judge output does not match judgment schema' });
         return finish('ok', { output, rawText });
       } catch (error) {
         if (error.code === 'ENOENT' && completed) return finish('invalid', { errorCode: 'output_missing', error: 'Judge output file is missing' });

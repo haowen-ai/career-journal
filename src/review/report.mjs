@@ -9,6 +9,11 @@ export function reviewReport(db, { receipt = null, sourceReceipts = [], lang = '
   const line = (row) => `- ${row.company} — ${row.title} ${url(row)}${parseJson(row.flags_json, []).includes('manual') ? ' [manual intake]' : ''}`;
   const lines = [zh ? '# 岗位审核报告' : '# Official posting review', '', receipt ? `${receipt.run_id}: ${receipt.status}` : '', '', zh ? '## 已交付' : '## Delivered eligible'];
   for (const row of rows.filter((r) => r.decision === 'eligible' && r.application_id && !r.skip_reason)) lines.push(`${line(row)} — ${row.fit ?? ''}${row.deadline_at ? `; cutoff ${row.deadline_at}` : ''}${row.posting_end_at ? `; posting ends ${row.posting_end_at}` : ''}`);
+  lines.push('', zh ? '## 模型代定' : '## Model-decided');
+  for (const row of rows.filter((r) => r.state === 'done' && parseJson(r.flags_json, []).includes('model_decided'))) {
+    const model = parseJson(row.evidence_json).modelDecision;
+    if (model) lines.push(`${line(row)} — ${row.decision}: ${model.assumption}${parseJson(row.flags_json, []).includes('disputed') ? ' [disputed]' : ''}`);
+  }
   lines.push('', zh ? '## 待你定' : '## Awaiting you');
   const held = rows.filter((r) => r.hold_owner === 'user');
   const heldById = new Map(held.map((row) => [row.id, row]));

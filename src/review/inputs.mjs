@@ -41,12 +41,15 @@ export async function loadReviewInputs(home) {
   return { facts, policy, screeningPolicy, provenance, profile: searchProfile, rules: { screening, fit }, resume: text === null ? null : { text, hash: dependencyHash(text) }, evalRecord };
 }
 
+export const screeningPolicyParts = (policy) => Object.fromEntries(
+  ['windows', 'areas', 'functions', 'fit', 'jobType'].filter((key) => key in policy).map((key) => [key, policy[key]]));
+
 export function judgeDependencies({ inputs, adapter, skeletonVersion, schemaHash, decideVersion }) {
   if (adapter.runner === 'codex' && adapter.ready && adapter.cliVersion === null) throw new Error('Await judge adapter.ready before computing dependencies');
   const parts = {
     facts: dependencyHash(inputs.facts),
     rules: dependencyHash(inputs.rules),
-    policy: dependencyHash({ policy: inputs.policy, screeningPolicy: inputs.screeningPolicy, provenance: inputs.provenance, jobType: inputs.profile?.search?.jobType ?? null }),
+    policy: dependencyHash({ policy: screeningPolicyParts(inputs.policy), screeningPolicy: inputs.screeningPolicy, provenance: inputs.provenance, jobType: inputs.profile?.search?.jobType ?? null }),
     resume: dependencyHash(inputs.resume?.text ?? null),
     schema: schemaHash,
     prompt: dependencyHash(skeletonVersion),

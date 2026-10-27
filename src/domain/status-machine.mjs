@@ -16,8 +16,8 @@ export function assertStatusTransition(from, to) {
   return true;
 }
 
-export function assertReviewRestore(from, to, { actor, lastActor, automated = false }) {
-  if (from !== 'withdrawn' || to !== 'lead' || actor !== 'review-worker' || !(lastActor === 'review-worker' || automated)) throw new Error('Invalid review restore');
+export function assertReviewRestore(from, to, { actor, lastActor, automated = false, systemReview = false }) {
+  if (from !== 'withdrawn' || to !== 'lead' || actor !== 'review-worker' || !(lastActor === 'review-worker' || automated || systemReview && lastActor !== 'user')) throw new Error('Invalid review restore');
   return true;
 }
 
