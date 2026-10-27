@@ -706,7 +706,9 @@ test('[B] a no-student-signal eligible posting is judged under sustained higher-
   assert.ok(applicationOf(db, noSignal), 'delivered as a lead');
 });
 
-test('[B] no-student-signal items are promoted to aged after 14 days', async () => {
+// Amended for volume ruling V2 (2026-10-26 real-data rehearsal): lane no_student_signal is never promoted by age;
+// it is served only by the exploration share. Previously this asserted promotion to aged after 14 days.
+test('[B] no-student-signal items are not promoted to aged after 14 days (volume V2)', async () => {
   const { runReview } = await workerModule();
   const db = freshDb();
   const q = queue();
@@ -714,7 +716,7 @@ test('[B] no-student-signal items are promoted to aged after 14 days', async () 
   await runReview(runOptions(db, { now: at(13), runId: 'review-13', budget: 0, pages: q.pages }));
   assert.equal(reviewOf(db, id).lane, 'no_student_signal', 'not yet 14 days');
   await runReview(runOptions(db, { now: at(15), runId: 'review-15', budget: 0, pages: q.pages }));
-  assert.equal(reviewOf(db, id).lane, 'aged');
+  assert.equal(reviewOf(db, id).lane, 'no_student_signal', 'V2: no aged promotion for this lane');
   assert.notEqual(reviewOf(db, id).decision, 'dropped', 'never dropped');
 });
 
