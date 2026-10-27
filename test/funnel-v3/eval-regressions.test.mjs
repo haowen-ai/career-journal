@@ -392,3 +392,20 @@ test('[B] a season-only summer term with a free-text label and unknown remote sc
   assert.notEqual(spring.decision, 'eligible', why(spring));
   assert.ok(!spring.flags.includes('term_inferred'), 'no inference in May');
 });
+
+// ===================================================================== R15
+
+test('[B] an unclear criterion that cites no fact and quotes non-requirement prose is advisory; a hold needs an answerable question (eval R15)', async () => {
+  // Captured shape: the model marked the program description "unclear" with fact_ids [], producing a hold whose question is the description itself.
+  const text = posting();
+  const alternatives = [{ term: summer2027, offices: [chicago], remote: none }];
+  const prose = 'This internship runs ten to twelve weeks and pays an hourly rate.';
+  const vague = { key: 'requirement', status: 'unclear', quote: prose, clause_alternatives: [], fact_ids: [] };
+  const verdict = await decideWith({ text, facts: AVAILABILITY_FACTS, judged: decided(alternatives, [vague]) });
+  assert.equal(verdict.decision, 'eligible', `no fact cited outside a requirement section is advisory: ${why(verdict)}`);
+
+  // Guard: an unclear criterion without facts inside the required section still holds (the user can answer it).
+  const required = "Currently pursuing a Bachelor's or Master's degree in Statistics, Computer Science, or a related field.";
+  const held = await decideWith({ text, facts: AVAILABILITY_FACTS, judged: decided(alternatives, [{ ...vague, quote: required }]) });
+  assert.equal(held.decision, 'unclear', `a required-section clause still holds: ${why(held)}`);
+});
