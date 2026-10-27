@@ -63,13 +63,17 @@ export async function reviewJevSplit({ inputs, snapshotText, firstSeen, posting 
       if (reject[dimension] > accept[dimension]) throw new Error('Invalid Jev threshold order');
     }
     if (typeof jev?.ask !== 'function') throw new Error('Jev adapter unavailable');
-    for (const dimension of DIMENSIONS) {
+    // The six questions are independent, so they are asked concurrently.
+    const answers = await Promise.all(DIMENSIONS.map((dimension) => {
       counts.calls += 1;
       const override = questionOverride(inputs.policy, dimension);
-      const { probability } = await jev.ask({ state: stateFor(dimension, inputs, snapshotText, firstSeen, posting, override), question: override?.question ?? JEV_SPLIT_QUESTIONS[dimension] });
+      return jev.ask({ state: stateFor(dimension, inputs, snapshotText, firstSeen, posting, override), question: override?.question ?? JEV_SPLIT_QUESTIONS[dimension] });
+    }));
+    DIMENSIONS.forEach((dimension, index) => {
+      const { probability } = answers[index];
       if (!Number.isFinite(probability) || probability < 0 || probability > 1) throw new Error('Invalid Jev probability');
       probabilities[dimension] = probability;
-    }
+    });
     const failing = DIMENSIONS.find((dimension) => probabilities[dimension] < reject[dimension]);
     const decision = failing ? 'not_eligible' : DIMENSIONS.every((dimension) => probabilities[dimension] >= accept[dimension]) ? 'eligible' : null;
     if (decision) {
