@@ -25,15 +25,15 @@
 
 1. 运行 `profile status --json`。第 1、2 轮必须已完成，`materials.resumePath` 必须指向可读文件。否则先通过 `career-journal` Skill 补问缺的资料；不得凭猜测的资料填表。
 2. 运行 `profile show --json`，读取 `pace.batchSize`（N，默认 5；用户在本次会话中约定的批次数量优先）、`search.locations`、`search.exclusions`、`candidate.degree`、`candidate.authorization` 和 `materials`。完整读取 `<home>/.career-journal/profile/answers.md`。
-3. 运行 `queue list --json`，取排在最前面的 N 个岗位。每个岗位都必须已核实：`verifiedAt` 为空时，先读官网岗位原文，检查学历层次、毕业时间、工作身份、是否明确不给转正、是否已关闭、截止日期和必答作文，再用 `queue verify --id <application> --result ok|skip --reason <原因> [--deadline <带时区的 ISO 时间>]` 记录。每个“不投”都必须写原因。
+3. 运行 `queue list --json`，取排在最前面的 N 个岗位。漏斗岗位由 `review run` 连同官网原文引用证据交付，沿用其资格和匹配度判断，不重新判定。只有 `verifiedAt` 为空的手工岗位仍按原流程阅读官网原文，检查学历层次、毕业时间、工作身份、是否明确不给转正、是否已关闭、截止日期和必答作文，再用 `queue verify --id <application> --result ok|skip --reason <原因> [--deadline <带时区的 ISO 时间>]` 记录。每个“不投”都必须写原因。
    - 因为“必备”条件不满足而不投时，要引用岗位原文中的那一行，并确认它位于必备部分（Required、Minimum、Basic qualifications），而不是 Preferred、Nice to have 或 Bonus 下面。候选人通过工作、实习、研究或项目经历满足的要求算作已满足，即使简历的措辞不同。要不时、以及每次简历更新后，对照当前简历复查这类“不投”，已不成立的重新打开。
-4. 每一批开始前、动浏览器之前先查重。运行 `application list --json`，把每个岗位与所有已处于 `applied` 或之后状态的申请逐一比对，不论它来自哪个来源：岗位编号或岗位链接相同的，或者公司相同且职位名几乎一样（只差词序、标点、季节或地点后缀）的，直接去掉。两个扫描来源（例如官方职位板和 SimplifyJobs）找到的同一个岗位算同一个。扫描产生的重复记录用 `queue verify --id <重复记录> --result skip --reason "duplicate of <保留的申请 ID>"` 标记。
+4. 每一批开始前、动浏览器之前先查重。运行 `application list --json`，把每个岗位与所有已处于 `applied` 或之后状态的申请逐一比对，不论它来自哪个来源：只有精确岗位编号（含招聘系统和公司范围）或岗位链接相同才按重复跳过。职位名相似不能导致不同岗位编号被跳过；只向用户报告为可能重复。两个扫描来源（例如官方职位板和 SimplifyJobs）找到的同一个岗位算同一个。扫描产生的重复记录用 `queue verify --id <重复记录> --result skip --reason "duplicate of <保留的申请 ID>"` 标记。
 5. 遵守公司规则。公司规定每人只能投一个岗位时，通过判断路由（启用 Jev 时用 Jev，否则由当前 Agent 判断）选最对口的一个，其余标记“不投”并写原因；没有用 Jev 时要注明。用户已经投过好几份的公司，在本批中排到没投过或投得少的公司后面。
 6. 用一条简短消息告诉用户这一批是哪 N 个岗位。只做这一批：“继续”或“看看别的”指把当前这一批做完，不得擅自打开用户没要求的新岗位。用户要下一批时才开始下一批。
 
 ## 队列为空时
 
-队列里没有已核实的岗位、用户又想找新岗位时，运行 `scan run`。待核实的暂留岗位（见 `career-journal` Skill 的“暂留岗位”）不在 `queue list` 中；在说队列为空之前，要在扫描当天把它们核实完，汇报队列数量时同时说明还有多少暂留。`profile status --json` 显示没有扫描来源时，先问用户要关注哪些公司，再从每家公司自己的招聘页找到它的职位板标识（token）：链接指向 `boards.greenhouse.io/<token>` 或 `job-boards.greenhouse.io/<token>` 的是 Greenhouse，`jobs.lever.co/<token>` 是 Lever，`jobs.ashbyhq.com/<token>` 是 Ashby；标识就是域名后的第一段路径。用 `profile set --key sources.atsBoards --value '[{"ats":"greenhouse","board":"<token>","company":"<公司名>"}]'` 一次写入完整列表，确认 `scan run --dry-run` 中每个职位板都显示 `ok`，并告诉用户哪些公司使用其他招聘系统、无法扫描。不得猜测标识。需要用户自己开启的 CareerOps 和 SimplifyJobs 来源见 `career-journal` Skill 的“扫描来源”。
+队列里没有已核实的岗位、用户又想找新岗位时，先运行 `scan run`，再运行 `review run`。用 `review list --held` 读取暂留岗位（见 `career-journal` Skill 的“暂留岗位”）；它们不在 `queue list` 中。在扫描当天处理记录的问题，汇报队列数量时同时说明还有多少暂留。`profile status --json` 显示没有扫描来源时，先问用户要关注哪些公司，再从每家公司自己的招聘页找到它的职位板标识（token）：链接指向 `boards.greenhouse.io/<token>` 或 `job-boards.greenhouse.io/<token>` 的是 Greenhouse，`jobs.lever.co/<token>` 是 Lever，`jobs.ashbyhq.com/<token>` 是 Ashby；标识就是域名后的第一段路径。用 `profile set --key sources.atsBoards --value '[{"ats":"greenhouse","board":"<token>","company":"<公司名>"}]'` 一次写入完整列表，确认 `scan run --dry-run` 中每个职位板都显示 `ok`，并告诉用户哪些公司使用其他招聘系统、无法扫描。不得猜测标识。需要用户自己开启的 CareerOps 和 SimplifyJobs 来源见 `career-journal` Skill 的“扫描来源”。
 
 ## 派发
 
@@ -42,31 +42,35 @@
 - 宿主支持时并行运行子 Agent；不支持子 Agent 时，由主会话按同一份任务说明逐个岗位处理。
 - 只按 `answers.md` 和个人资料填写。不知道的事实留空并报告，不编造任何内容。
 - 答案表标明“问用户”的题（例如是否愿意接受背景调查、可入职的月份）留空并报告，即使答案看似显而易见，也不猜，不从相似的题照抄。
-- 在最终确认页上，子 Agent 仍可以填写该页显示的题目，但绝不点 Submit*、它旁边的任何按钮或提交区域里的其他任何东西；停下并设为 `✅`。
+- 在最终确认页上，子 Agent 仍可以填写该页显示的题目，但绝不点 Submit*、它旁边的任何按钮或提交区域里的其他任何东西；停下并按下表选第一个符合的标题；只有没有其他待办时才设为 `✅`。
 
 ## 标签标题
 
-每个子 Agent 都要设置自己标签页的标题，让用户一眼看出哪个标签页需要自己；因为单页应用会重置标题，要用定时器保持。格式为表情、用户语言的简短说明和公司名：
+每个子 Agent 都要设置自己标签页的标题，让用户一眼看出还需要做什么；因为单页应用会重置标题，要用定时器保持。按下表优先顺序选第一个符合的状态，用用户的语言写标题，后接公司名。每解决一个待办就重新选择；还有其他待办时不能标为待提交：
 
 | 标题 | 含义 |
 |---|---|
-| `🔑待登录 <公司>` | 需要登录、注册账号、输入密码或邮件验证码 |
-| `🤖待验证 <公司>` | 需要完成 CAPTCHA 或机器人检查 |
-| `❓待回答 <公司>` | 答案表里没有的必填题 |
-| `👆待点击 <公司>` | 需要用户勾同意框、授权或操作时确认签名，或点一个写着 Submit* 的中间步骤按钮 |
-| `✅待提交 <公司>` | 其余内容都已填好，停在最终提交前 |
+| `🆕 先注册 <公司>` | 需要用户创建账号 |
+| `🔑 先登录 <公司>` | 需要登录、输入密码或邮件验证码 |
+| `🤖 人机验证 <公司>` | 需要完成 CAPTCHA 或机器人检查 |
+| `❓ 有问题 <公司>` | 答案表里没有的必填题 |
+| `✍️ 要写作文 <公司>` | 作文、求职信或补充问答需要用户自己的文字 |
+| `📎 要成绩单/推荐人 <公司>` | 缺少必填的成绩单或推荐人资料 |
+| `🧪 测评链接 <公司>` | 测评链接需要用户处理；不得替用户做测评 |
+| `👆 要你点 <公司>` | 需要用户勾同意框、授权或操作时确认签名，或点一个写着 Submit* 的中间步骤按钮 |
+| `✅ 待提交 <公司>` | 其余内容都已填好，停在最终提交前 |
 
 ## 边投边问
 
-- 遇到答案表没有覆盖的必填题时，子 Agent 留空，把标题设为 `❓`，并报告原题、选项、是否必填和字数限制。
+- 遇到答案表没有覆盖的必填题时，子 Agent 留空，选第一个符合的标题（没有更早的待办时为 `❓`），并报告原题、选项、是否必填和字数限制。
 - 主 Agent 汇总各标签页的问题，每次最多问用户 4 个，给出网站原有的选项再加“其他”。用户可以跳过；跳过的必填题让该标签页继续停在 `❓`。
 - 每个回答都用 `profile answer --question "<原题>" --answer "<用户的回答>" --source user` 保存。它会追加到 `## Learned while applying` 下，注明日期和来源，下次直接使用。然后继续这个标签页。
-- 遇到作文题时，报告题目、是否必填和字数限制。用户给出自己的文字后，只做整理（排版、按字数删减），不添加内容，并在填入前把最终文本给用户确认。
+- 遇到作文题时，报告题目、是否必填和字数限制；它是第一个待办时使用 `✍️`。用户给出自己的文字后，只做整理（排版、按字数删减），不添加内容，并在填入前把最终文本给用户确认。
 - 拿不准的对应关系（例如某道少见的题该用哪条答案）交给判断路由；置信度低于阈值时留空并询问用户。
 
 ## 向用户汇报
 
-每收到一个子 Agent 的报告，就用一句话告诉用户该标签页需要做什么，例如：“`✅待提交 ExampleCorp`：在 Review 页勾选两个同意框，然后点 Submit。”留空或不确定的字段按原题列出。不得把任何标签页说成已提交。
+每收到一个子 Agent 的报告，就用一句话告诉用户该标签页需要做什么，例如：“`👆 要你点 Example Corp`：在 Review 页勾选两个同意框，然后点 Submit。”`✅ 待提交 Example Corp` 只剩最终检查和提交。留空或不确定的字段按原题列出。不得把任何标签页说成已提交。
 
 ## 用户提交之后
 
@@ -85,7 +89,7 @@
 ## 用到的命令
 
 - `profile show|questions|set|answer|skip|status`
-- `queue list|verify`；队列为空且用户要找新岗位时用 `scan run`
+- `queue list|verify`；队列为空且用户要找新岗位时先用 `scan run`，再用 `review run`；暂留岗位用 `review list --held`
 - `application list --json`
 - `event add --status-after applied`
 - `task add --due-at --due-note --link`

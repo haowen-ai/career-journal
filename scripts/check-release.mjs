@@ -279,7 +279,7 @@ export async function checkRelease(root) {
     ];
     const hardRules = ['SKILL.md', 'references/fill-brief.md'].every((file) => englishRules.every((rule) => rule.test(texts[file])))
       && ['SKILL.zh-CN.md', 'references/fill-brief.zh-CN.md'].every((file) => chineseRules.every((rule) => rule.test(texts[file])));
-    const tabTitles = ['SKILL.md', 'SKILL.zh-CN.md'].every((file) => ['🔑', '🤖', '❓', '👆', '✅'].every((mark) => texts[file].includes(mark)));
+    const tabTitles = ['SKILL.md', 'SKILL.zh-CN.md'].every((file) => ['🆕', '🔑', '🤖', '❓', '✍️', '📎', '🧪', '👆', '✅'].every((mark) => texts[file].includes(mark)));
     const atsCoverage = ['references/ats-tips.md', 'references/ats-tips.zh-CN.md'].every((file) => ['Workday', 'Oracle', 'iCIMS', 'Greenhouse', 'Ashby', 'Lever', 'Yello', 'SuccessFactors']
       .every((name) => new RegExp(`^## [^\\n]*${name}`, 'm').test(texts[file])));
     const routed = [orchestratorEn, orchestratorZh, agentInstructions].every((text) => /career-journal-apply/.test(text));
