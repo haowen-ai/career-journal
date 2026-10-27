@@ -1,4 +1,4 @@
-// Volume regressions from the 2026-10-26 real-data rehearsal of the screening funnel (rulings V1–V3).
+// Volume regressions from the 2026-10-26 real-data rehearsal of the screening funnel (rulings V1–V3; rulings U1–U2 from the third rehearsal are at the end).
 // A census of 22,736 raw CareerOps records (company-wide boards, mostly senior and full-time roles) put
 // 8,896 reviews in lane `new` because the no-student-signal lane required a full description and generic
 // description words ("students") counted as a signal, and ingest spent 50+ minutes in per-record
@@ -9,6 +9,7 @@ import { performance } from 'node:perf_hooks';
 import { freshDb, load, reviewOf, insertPosting, insertReview, fakeJudge, fakeFetcher, T0, at } from '../../test-utils/funnel-v3.mjs';
 import { record, PROFILE, SCREENING_POLICY, SNAPSHOTS, JUDGMENTS, page, snapshotTitle, reviewInputs } from '../../test-utils/funnel-v3-fixtures.mjs';
 import { parseCareerOpsRoles } from '../../src/scan/sources/careerops.mjs';
+import { parseSimplify } from '../../src/scan/sources/simplify.mjs';
 
 const classify = () => load('L1', './src/funnel/classify.mjs', ['classifyRole']);
 const ingest = () => load('L1', './src/funnel/ingest.mjs', ['ingestBatch']);
@@ -325,4 +326,213 @@ test('[A] ingestBatch of 5,000 records into 5,000 postings and 1,000 application
   assert.equal(db.prepare('SELECT COUNT(*) n FROM postings').get().n, EXISTING + 4_000);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM reviews').get().n, EXISTING + 4_000, 'every posting has exactly one review');
   assert.ok(counts.reused >= 200, 'postings bound to submitted applications are reused');
+});
+
+// ===================================================================== U1
+// Rulings U1–U2 come from the third real-data rehearsal census (2026-10-27): of 14,201 due reviews in lane `new`,
+// 10,016 belonged to postings whose only observations were unlisted (Simplify `active: false` / `is_visible: false`),
+// and 1,047 listed Simplify records were category Hardware. Synthetic data only.
+
+const postingFor = (db, alias) => db.prepare('SELECT posting_id FROM posting_aliases WHERE alias = ?').get(alias)?.posting_id;
+const PENDING = ['due', 'leased', 'held', 'failed'];
+const simplifyListing = (id, overrides = {}) => ({ id, company_name: 'Synthetic Devices', title: 'Data Science Intern', url: `https://careers.synthetic.test/jobs/${id}`,
+  locations: ['Chicago, IL'], terms: ['Summer 2027'], active: true, is_visible: true, date_posted: 1793000000, ...overrides });
+const census = (ingestBatch, db, { runId, partition = 'simplify:1', listings, now = T0, profile = PROFILE }) =>
+  ingestBatch(db, { runId, source: 'simplify', partition, records: parseSimplify(listings, { partition }), now, policy: SCREENING_POLICY, profile });
+
+test('[A] a first-seen unlisted record keeps its posting and observation but opens no due review until a later census lists it (volume U1)', async () => {
+  const { ingestBatch } = await ingest();
+  const db = freshDb();
+  const unlisted = [
+    simplifyListing('u-inactive', { title: 'Machine Learning Intern', active: false }),
+    simplifyListing('u-hidden', { title: 'Data Analyst Intern', is_visible: false }),
+    simplifyListing('u-both', { title: 'Product Analytics Co-op', active: false, is_visible: false }),
+  ];
+  const listed = simplifyListing('l-open', { title: 'Data Engineering Intern' });
+  const first = census(ingestBatch, db, { runId: 'scan-1', listings: [...unlisted, listed] });
+  assert.equal(first.observed, 4);
+  assert.equal(first.quarantined, 0);
+  // Any source: an Ashby isListed=false (or Greenhouse inactive) record follows the same rule.
+  ingestBatch(db, { runId: 'scan-1', source: 'ashby', partition: 'ashby:examplecorp', now: T0, policy: SCREENING_POLICY, profile: PROFILE,
+    records: [record({ source: 'ashby', sourceId: 'a-hidden', url: 'https://jobs.ashbyhq.com/examplecorp/a-hidden', partition: 'ashby:examplecorp', listed: false })] });
+  const unlistedIds = [...unlisted.map((item) => postingFor(db, `source:simplify:${item.id}`)), postingFor(db, 'source:ashby:a-hidden')];
+  for (const id of unlistedIds) {
+    assert.ok(id, 'conservation: the unlisted record still resolves to a posting');
+    assert.equal(db.prepare('SELECT listed FROM postings WHERE id = ?').get(id).listed, 0, `${id}: posting kept as unlisted`);
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM observations WHERE posting_id = ? AND listed = 0').get(id).n, 1, `${id}: observation kept`);
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM observation_sightings WHERE posting_id = ? AND run_id = 'scan-1'").get(id).n, 1, `${id}: sighting kept`);
+    const review = reviewOf(db, id);
+    assert.ok(!review || !PENDING.includes(review.state),
+      `${id}: an unlisted-only posting with no prior review never opens a pending review (got ${JSON.stringify(review && { state: review.state, lane: review.lane })})`);
+  }
+  const open = reviewOf(db, postingFor(db, `source:simplify:${listed.id}`));
+  assert.deepEqual([open?.state, open?.lane], ['due', 'new'], 'a listed record in the same census opens its review normally');
+
+  // A later census that lists the same postings opens their due reviews normally.
+  census(ingestBatch, db, { runId: 'scan-2', now: at(1), listings: [...unlisted.map((item) => ({ ...item, active: true, is_visible: true })), listed] });
+  ingestBatch(db, { runId: 'scan-2', source: 'ashby', partition: 'ashby:examplecorp', now: at(1), policy: SCREENING_POLICY, profile: PROFILE,
+    records: [record({ source: 'ashby', sourceId: 'a-hidden', url: 'https://jobs.ashbyhq.com/examplecorp/a-hidden', partition: 'ashby:examplecorp', listed: true })] });
+  for (const id of unlistedIds) {
+    const review = reviewOf(db, id);
+    assert.equal(review?.state, 'due', `${id}: listed=true in a later census opens a due review`);
+    assert.equal(review.lane, 'new', `${id}: student title, lane new`);
+    assert.ok(review.next_due <= at(1), `${id}: due now`);
+    assert.equal(db.prepare('SELECT listed FROM postings WHERE id = ?').get(id).listed, 1);
+  }
+});
+
+test('[A] a posting listed in any partition of the census opens its review; an existing review keeps today\'s closure rules when later seen unlisted (volume U1)', async () => {
+  const { ingestBatch } = await ingest();
+  const db = freshDb();
+  // The same posting in two Simplify lists of one census, unlisted in one and listed in the other, in both orders.
+  const shared = (id) => simplifyListing(id, { title: 'Data Science Intern' });
+  census(ingestBatch, db, { runId: 'scan-1', partition: 'simplify:1', listings: [{ ...shared('m-unlisted-first'), active: false }, shared('m-listed-first')] });
+  census(ingestBatch, db, { runId: 'scan-1', partition: 'simplify:2', listings: [shared('m-unlisted-first'), { ...shared('m-listed-first'), active: false }] });
+  for (const sourceId of ['m-unlisted-first', 'm-listed-first']) {
+    const review = reviewOf(db, postingFor(db, `source:simplify:${sourceId}`));
+    assert.deepEqual([review?.state, review?.lane], ['due', 'new'], `${sourceId}: listed in one partition, so the posting is not unlisted-only`);
+  }
+  // A posting that already has a review: an unlisted sighting does not close it; only absence from every partition does.
+  census(ingestBatch, db, { runId: 'scan-2', partition: 'simplify:1', now: at(1), listings: [shared('e-existing')] });
+  assert.equal(reviewOf(db, postingFor(db, 'source:simplify:e-existing'))?.state, 'due');
+  census(ingestBatch, db, { runId: 'scan-3', partition: 'simplify:1', now: at(2), listings: [{ ...shared('e-existing'), active: false }] });
+  const existing = reviewOf(db, postingFor(db, 'source:simplify:e-existing'));
+  assert.equal(existing?.state, 'due', 'an existing review is not closed by an unlisted sighting (closure stays absence-based)');
+  // The rule never applies to a first-seen unlisted-only posting: it stays without a pending review.
+  census(ingestBatch, db, { runId: 'scan-3', partition: 'simplify:1', now: at(2), listings: [{ ...shared('n-new-unlisted'), is_visible: false }] });
+  const fresh = reviewOf(db, postingFor(db, 'source:simplify:n-new-unlisted'));
+  assert.ok(!fresh || !PENDING.includes(fresh.state), `first-seen unlisted-only posting: ${JSON.stringify(fresh && fresh.state)}`);
+});
+
+test('[B] the worker never fetches or judges an unlisted-only posting, and the receipt backlog does not count it (volume U1)', async () => {
+  const { ingestBatch } = await ingest();
+  const { runReview } = await worker();
+  const db = freshDb();
+  const listings = [];
+  for (let i = 0; i < 6; i += 1) listings.push(simplifyListing(`w-unlisted-${i}`, { title: `Data Science Intern ${i}`, active: i % 2 === 0 ? false : true, is_visible: i % 2 === 0 }));
+  for (let i = 0; i < 3; i += 1) listings.push(simplifyListing(`w-listed-${i}`, { title: `Data Analyst Intern ${i}` }));
+  census(ingestBatch, db, { runId: 'scan-1', listings });
+  const unlistedIds = new Set(listings.filter((item) => item.id.startsWith('w-unlisted')).map((item) => postingFor(db, `source:simplify:${item.id}`)));
+  const listedIds = listings.filter((item) => item.id.startsWith('w-listed')).map((item) => postingFor(db, `source:simplify:${item.id}`));
+  assert.equal(unlistedIds.size, 6);
+  const fetcher = fakeFetcher({});
+  const judges = eligibleJudges();
+  const receipt = await runReview({ db, runId: 'review-1', owner: 'worker-a', now: at(1), budget: 20, deadlineMs: 600_000, attemptDir: null, sleep: async () => {},
+    fetcher, judges, inputs: () => reviewInputs(), hooks: {} });
+  const fetched = new Set(fetcher.calls.map((call) => call.postingId));
+  for (const id of listedIds) assert.ok(fetched.has(id), `${id}: listed postings are worked normally`);
+  const wasted = [...unlistedIds].filter((id) => fetched.has(id) || judged(judges, id));
+  assert.deepEqual(wasted, [], 'no fetch or judgment is spent on an unlisted-only posting');
+  assert.equal(receipt.backlog?.due, listedIds.length, `the receipt backlog counts only listed postings: ${JSON.stringify(receipt.backlog)}`);
+});
+
+// ===================================================================== U2
+
+const POSITIVE_HARDWARE_TITLES = ['Hardware Data Analyst Intern', 'AI Hardware Physical Design Engineer Intern', 'ML Systems Hardware Intern',
+  'Machine Learning Accelerator Intern', 'Hardware Analytics Intern', 'Hardware Product Engineering Intern', 'Program Management Intern - Hardware',
+  'Hardware Project Engineer Intern', 'Business Operations Intern, Devices', 'Hardware Insights Intern', 'Market Intelligence Intern - Devices',
+  'Hardware Solutions Engineering Intern', 'Hardware Strategy Intern', 'BI Developer Intern - Hardware', 'Quant Hardware Research Intern',
+  'hardware data platform co-op'];
+// No positive token as a word: "Maintenance" contains "ai", "Reliability" and "Mobility" contain "bi".
+const OUT_OF_DIRECTION_TITLES = ['Hardware Engineer Intern', 'Hardware Test Engineering Intern', 'Embedded Systems and Hardware Co-Op',
+  'Software Engineer Intern', 'Firmware Validation Intern', 'Hardware Maintenance Technician Intern', 'Hardware Reliability Engineering Intern',
+  'Mobility Systems Hardware Intern', 'Electrical Engineering Co-op - Power Electronics'];
+
+test('[A] an internship or co-op Simplify record categorised only Hardware with no positive title token goes to lane out_of_direction; positive titles stay new (volume U2)', async () => {
+  const { classifyRole } = await classify();
+  const simplify = (title, category, active = true) => parseSimplify([simplifyListing('hw-1', { title, category, active })])[0];
+  const laneFor = (title, category, profile = PROFILE) => classifyRole(simplify(title, category), { policy: SCREENING_POLICY, profile });
+  for (const profile of [PROFILE, CO_OP]) {
+    for (const category of ['Hardware', 'Hardware Engineering']) {
+      for (const title of OUT_OF_DIRECTION_TITLES) {
+        const result = laneFor(title, category, profile);
+        assert.equal(result.kind, 'review', `${title} [${category}]: never dropped`);
+        assert.equal(result.lane, 'out_of_direction', `${profile.search.jobType} / ${title} [${category}]: Hardware-only category, no positive direction token`);
+      }
+      for (const title of POSITIVE_HARDWARE_TITLES) {
+        assert.equal(laneFor(title, category, profile).lane, 'new', `${profile.search.jobType} / ${title} [${category}]: a positive title token keeps it in lane new`);
+      }
+    }
+  }
+  // Scope: Simplify only, categories only Hardware, internship/co-op searches only.
+  assert.equal(laneFor('Hardware Engineer Intern', 'Software').lane, 'new', 'a non-Hardware category is not out of direction');
+  assert.equal(laneFor('Hardware Engineer Intern', undefined).lane, 'new', 'no category is not out of direction');
+  const mixed = classifyRole({ ...simplify('Hardware Engineer Intern', 'Hardware'), categories: ['Hardware', 'Software'] }, { policy: SCREENING_POLICY, profile: PROFILE });
+  assert.equal(mixed.lane, 'new', 'Hardware plus another category is not "only Hardware"');
+  const greenhouse = classifyRole(record({ title: 'Hardware Engineer Intern', categories: ['Hardware'] }), { policy: SCREENING_POLICY, profile: PROFILE });
+  assert.equal(greenhouse.lane, 'new', 'the rule reads the Simplify category, not other sources\' departments');
+  assert.notEqual(laneFor('Hardware Engineer Intern', 'Hardware', FULL_TIME).lane, 'out_of_direction', 'full-time searches have no out_of_direction lane');
+
+  // Ingest keeps every record and stores the lane on a due review that the worker samples.
+  const { ingestBatch } = await ingest();
+  const db = freshDb();
+  const listings = [
+    simplifyListing('hw-out', { title: 'Hardware Engineer Intern', category: 'Hardware' }),
+    simplifyListing('hw-in', { title: 'Hardware Data Analyst Intern', category: 'Hardware' }),
+    simplifyListing('sw-in', { title: 'Software Engineer Intern', category: 'Software' }),
+  ];
+  const counts = census(ingestBatch, db, { runId: 'scan-u2', listings });
+  assert.equal(counts.observed, 3);
+  assert.equal(counts.review, 3, 'out_of_direction records are reviewed, never dropped');
+  const lane = (id) => reviewOf(db, postingFor(db, `source:simplify:${id}`));
+  assert.deepEqual([lane('hw-out')?.state, lane('hw-out')?.lane], ['due', 'out_of_direction']);
+  assert.deepEqual([lane('hw-in')?.state, lane('hw-in')?.lane], ['due', 'new']);
+  assert.deepEqual([lane('sw-in')?.state, lane('sw-in')?.lane], ['due', 'new']);
+});
+
+test('[B] out_of_direction is never promoted by age and shares the no_student_signal exploration reservation oldest-first; the receipt reports its backlog (volume U2)', async () => {
+  const { LANES } = await load('L1', './src/funnel/contract.mjs', ['LANES']);
+  assert.ok(LANES.includes('out_of_direction'), `the review lane out_of_direction exists: ${JSON.stringify(LANES)}`);
+  const { runReview } = await worker();
+  const OOD = { lane: 'out_of_direction', flags: [] };
+  const NS = { lane: 'no_student_signal', flags: ['no_student_signal'] };
+
+  // Budget 10: one shared exploration attempt; the oldest across both lanes is an out_of_direction item.
+  {
+    const db = freshDb();
+    const q = queue(db);
+    const now = at(30);
+    const oodOldest = q.add({ id: 'p-ood-30', now: at(0), ...OOD });
+    const nsMiddle = q.add({ id: 'p-ns-25', now: at(5), ...NS });
+    const oodMiddle = q.add({ id: 'p-ood-20', now: at(10), ...OOD });
+    const nsNewest = q.add({ id: 'p-ns-18', now: at(12), ...NS });
+    const agedNew = q.add({ id: 'p-new-aged', now: at(27) });
+    for (let i = 0; i < 12; i += 1) q.add({ id: `p-new-${String(i).padStart(2, '0')}`, now });
+    const judges = eligibleJudges();
+    const receipt = await runReview(runOptions(db, { now, runId: 'review-30', budget: 10, pages: q.pages, judges }));
+    assert.ok(judged(judges, oodOldest), 'the oldest item across both exploration lanes receives the one exploration attempt');
+    for (const id of [nsMiddle, oodMiddle, nsNewest]) assert.ok(!judged(judges, id), `${id}: one shared exploration share per run, and age gives these lanes no aged priority`);
+    assert.ok(judged(judges, agedNew), 'other lanes keep their aged reserve');
+    assert.deepEqual([reviewOf(db, oodMiddle).lane, reviewOf(db, oodMiddle).state], ['out_of_direction', 'due'], 'kept in its lane, waiting');
+    assert.equal(receipt.backlog?.out_of_direction?.due, 1, `the receipt counts the waiting out_of_direction items: ${JSON.stringify(receipt.backlog)}`);
+    assert.equal(Math.round(receipt.backlog?.out_of_direction?.oldest_days), 20, 'the receipt reports the oldest waiting out_of_direction age in days');
+    assert.equal(receipt.backlog?.no_student_signal?.due, 2);
+  }
+
+  // Budget 20: two shared attempts go to the two oldest across both lanes, not two per lane.
+  {
+    const db = freshDb();
+    const q = queue(db);
+    const now = at(30);
+    const ns0 = q.add({ id: 'p-ns-a', now: at(0), ...NS });
+    const ood2 = q.add({ id: 'p-ood-b', now: at(2), ...OOD });
+    const ns4 = q.add({ id: 'p-ns-c', now: at(4), ...NS });
+    const ood6 = q.add({ id: 'p-ood-d', now: at(6), ...OOD });
+    for (let i = 0; i < 25; i += 1) q.add({ id: `p-fresh-${String(i).padStart(2, '0')}`, now });
+    const judges = eligibleJudges();
+    await runReview(runOptions(db, { now, runId: 'review-30b', budget: 20, pages: q.pages, judges }));
+    assert.ok(judged(judges, ns0) && judged(judges, ood2), 'the two oldest across both lanes are sampled');
+    assert.ok(!judged(judges, ns4) && !judged(judges, ood6), 'the reservation is shared, not granted per lane');
+  }
+
+  // However old, an out_of_direction item is never promoted by age.
+  {
+    const db = freshDb();
+    const q = queue(db);
+    const id = q.add({ id: 'p-ood-old', ...OOD });
+    for (const day of [15, 30, 60]) {
+      await runReview(runOptions(db, { now: at(day), runId: `review-ood-${day}`, budget: 0, pages: q.pages }));
+      assert.deepEqual([reviewOf(db, id).lane, reviewOf(db, id).state], ['out_of_direction', 'due'], `day ${day}`);
+    }
+  }
 });

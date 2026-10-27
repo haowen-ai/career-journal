@@ -107,9 +107,12 @@ test('[L1] ingestBatch conserves every record and is idempotent on identical inp
   assert.equal(first.reused + Object.values(first.dropped).reduce((sum, n) => sum + n, 0) + first.review + first.quarantined, 4, JSON.stringify(first));
   assert.equal(first.quarantined, 1);
   assert.equal(first.dropped.company_excluded, 1);
+  // Amended by volume ruling U1 (2026-10-27): this used to require a due review for a first-seen unlisted record.
+  // U1 retains the posting but opens no pending review until a later census lists it; that behaviour is asserted
+  // in test/funnel-v3/volume-regressions.test.mjs ("(volume U1)").
+  assert.ok(postingFor(db, 'source:greenhouse:4'), 'first-seen inactive/unlisted record is retained');
   const unlisted = reviewOf(db, postingFor(db, 'source:greenhouse:4'));
-  assert.equal(unlisted.state, 'due', 'first-seen inactive/unlisted record gets pending verification, not just retention');
-  assert.ok(JSON.parse(unlisted.flags_json).includes('listed_false'));
+  if (unlisted) assert.ok(JSON.parse(unlisted.flags_json).includes('listed_false'));
   const reviews = JSON.stringify(db.prepare('SELECT * FROM reviews ORDER BY posting_id').all());
   const observations = db.prepare('SELECT COUNT(*) n FROM observations').get().n;
   const again = ingestBatch(db, { runId: 'run-1', source: 'greenhouse', partition: 'greenhouse:examplecorp', records, now: T0, policy: SCREENING_POLICY });
