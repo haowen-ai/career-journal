@@ -26,6 +26,9 @@ import { isLiveVerifiedEmailAccount, listEmailAccounts } from '../email/accounts
 import { configuredDecisionAdapters } from './email.mjs';
 import { loadScanProfile } from '../scan/profile-input.mjs';
 import { scanFailed, scanWithContext } from './scan.mjs';
+import { loadReviewInputs } from '../review/inputs.mjs';
+import { reviewWithContext } from './review.mjs';
+import { reviewExitCode } from '../review/receipt.mjs';
 
 const HOST_SYNC_RUN_MAX_AGE_MS = 30 * 60 * 1000;
 
@@ -191,15 +194,21 @@ export async function automationCommand(parsed, io, runtime) {
           const profile = await loadScanProfile(context.root);
           const summary = await scanWithContext(context, profile, runtime);
           if (scanFailed(summary)) throw new Error('Every role-scan source failed; nothing new was queued');
-          const queuedIds = summary.queued.map((item) => item.id).filter(Boolean);
+          let configured = true;
+          try { await loadReviewInputs(context.root); }
+          catch (error) { if (error.cause?.code === 'ENOENT') configured = false; else throw error; }
+          const reviewed = configured ? await reviewWithContext(context, runtime) : null;
+          if (reviewed?.status === 'failed' || reviewed?.status === 'busy') throw new Error(`Role review ${reviewed.status}: ${reviewed.errors?.join('; ') ?? ''}`);
+          const queuedIds = reviewed ? context.db.prepare("SELECT DISTINCT p.application_id id FROM postings p JOIN attempts a ON a.posting_id=p.id WHERE a.run_id=? AND p.application_id IS NOT NULL").all(reviewed.run_id).map((r) => r.id) : [];
           return {
             cursor: `sha256:${createHash('sha256').update(JSON.stringify({ type: 'role-scan', at: summary.scannedAt, queuedIds })).digest('hex')}`,
             changed: queuedIds.length,
-            message: queuedIds.length ? `${queuedIds.length} new role(s) queued` : 'No new roles matched the profile',
+            message: !configured ? 'Scan complete; review not configured' : `${queuedIds.length} role(s) delivered; review ${reviewed.status}`,
             counts: summary.counts,
             dropReasons: summary.dropReasons,
             sources: summary.sources,
-            queued: summary.queued,
+            queued: queuedIds,
+            review: reviewed,
           };
         },
         'daily-consolidation': async (task) => runDailyConsolidation(context.db, task, { home: context.root }),
@@ -220,8 +229,8 @@ export async function automationCommand(parsed, io, runtime) {
         },
       });
       if (parsed.options['dry-run'] !== true) await persistAutomationState(context);
-      if (result.changed || parsed.options['dry-run']) io.out(JSON.stringify(result, null, 2));
-      return 0;
+      if (result.changed || parsed.options['dry-run'] || Object.hasOwn(result, 'review')) io.out(JSON.stringify(result, null, 2));
+      return result.review ? reviewExitCode(result.review) : 0;
     }
     if (parsed.subcommand === 'install') {
       const tasks = listTasks(context.db);

@@ -1,3 +1,4 @@
+import { redact } from '../runtime/redact.mjs';
 // Savepoints also work inside a caller's transaction (delivery/recovery).
 export function atomic(db, work) {
   const outer = !db.isTransaction;
@@ -34,7 +35,7 @@ export function heartbeat(db, lease, { now }) {
 
 export function finishRun(db, lease, { status, receipt, now }) {
   const changed = db.prepare("UPDATE runs SET status=?,receipt_json=?,finished_at=?,heartbeat_at=? WHERE run_id=? AND owner=? AND status='running'")
-    .run(status, JSON.stringify(receipt), now, now, lease.runId, lease.owner).changes;
+    .run(status, redact(JSON.stringify(receipt)), now, now, lease.runId, lease.owner).changes;
   if (!changed) throw new StaleLeaseError(lease.runId);
 }
 

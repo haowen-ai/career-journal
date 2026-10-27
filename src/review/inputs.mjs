@@ -57,7 +57,17 @@ export function judgeDependencies({ inputs, adapter, skeletonVersion, schemaHash
 
 export function evalCurrent(record, deps) {
   const currentParts = deps?.parts ?? deps ?? {};
-  const previous = record?.deps?.parts ?? record?.deps;
+  const recorded = record?.deps?.parts ?? record?.deps;
+  // Evaluations may cover several profiles and both judge tiers. Flat B1
+  // records retain their original shape and comparison semantics.
+  const candidates = [];
+  const visit = (value) => {
+    if (!value || typeof value !== 'object') return;
+    if (Object.keys(currentParts).every((key) => typeof value[key] === 'string')) candidates.push(value);
+    else for (const part of Object.values(value)) visit(part);
+  };
+  visit(recorded);
+  const previous = candidates.sort((a, b) => Object.keys(currentParts).filter((k) => a[k] !== currentParts[k]).length - Object.keys(currentParts).filter((k) => b[k] !== currentParts[k]).length)[0] ?? recorded;
   const changed = Object.keys(currentParts).filter((part) => !previous || previous[part] !== currentParts[part]);
   return { current: Boolean(previous) && changed.length === 0, changed };
 }

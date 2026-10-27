@@ -4,13 +4,14 @@ import { bindApplication } from '../funnel/identity.mjs';
 import { SUBMITTED_STATUSES } from '../funnel/contract.mjs';
 import { recordEvent } from '../domain/events.mjs';
 import { atomic, assertFence } from './lease.mjs';
+import { redact } from '../runtime/redact.mjs';
 
 const key = (value) => String(value ?? '').normalize('NFKD').toLowerCase().replace(/[^a-z0-9]/g, '');
 const words = (value) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
 export const parseJson = (value, fallback = {}) => { try { return JSON.parse(value); } catch { return fallback; } };
 export function logReview(db, postingId, { now, stage = 'deliver', kind = 'outcome', attemptId = null, payload = {} }) {
   db.prepare('INSERT INTO review_log(posting_id,at,stage,kind,attempt_id,payload_json) VALUES (?,?,?,?,?,?)')
-    .run(postingId, now, stage, kind, attemptId, JSON.stringify(payload));
+    .run(postingId, now, stage, kind, attemptId, redact(JSON.stringify(payload)));
 }
 
 // Resolve a wall clock in an IANA zone without inventing a time for date-only cutoffs.
@@ -67,9 +68,17 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
     const lastEvent = app && db.prepare('SELECT * FROM application_events WHERE application_id=? ORDER BY recorded_at DESC,rowid DESC LIMIT 1').get(app.id);
     const lastStatus = app && db.prepare('SELECT * FROM application_events WHERE application_id=? AND status_after IS NOT NULL ORDER BY recorded_at DESC,rowid DESC LIMIT 1').get(app.id);
     const automated = oldEvidence.provenance === 'automated';
-    const canRestore = lastStatus && parseJson(lastStatus.source_json).actor === 'review-worker' || automated;
-    const protectedApp = app && (app.applied_at || SUBMITTED_STATUSES.includes(app.status) || ['user','legacy'].includes(app.skip_owner) && !automated
-      || app.status === 'withdrawn' && !canRestore || lastEvent && parseJson(lastEvent.source_json).actor === 'user' && lastEvent.recorded_at > review.updated_at);
+    const isUserEvent = (event) => {
+      if (!event) return false;
+      const source = parseJson(event.source_json);
+      return source.actor === 'user' || source.actor !== 'review-worker'
+        && (['user','manual','event-command'].includes(source.kind) || /^(?:manual_|user_)/.test(event.event_type));
+    };
+    const userWithdrawal = app?.status === 'withdrawn' && isUserEvent(lastStatus);
+    const canRestore = !userWithdrawal && (lastStatus && parseJson(lastStatus.source_json).actor === 'review-worker' || automated);
+    const stageStart = parseJson(review.dep_hashes_json).stageStartedAt ?? review.updated_at;
+    const protectedApp = app && (app.applied_at || SUBMITTED_STATUSES.includes(app.status) || ['user','legacy'].includes(app.skip_owner)
+      || app.status === 'withdrawn' && !canRestore || isUserEvent(lastEvent) && lastEvent.recorded_at > stageStart);
     let value = verdict.decision === 'eligible' ? companyVerdict(posting, verdict, policy) : verdict;
     // Exclusions are rechecked at delivery even if the inputs changed while judging.
     if ((policy.userExcludedCompanies ?? []).some((c) => key(c) === key(posting.company))) value = { ...value, decision: 'not_eligible', code: 'company_excluded' };

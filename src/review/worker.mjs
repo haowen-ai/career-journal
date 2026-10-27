@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +15,7 @@ import { decide } from './decide.mjs';
 import { validateSnapshot } from './fetch.mjs';
 import { deliver, logReview, parseJson } from './deliver.mjs';
 import { scheduleRefresh, recheckHolds } from './freshness.mjs';
+import { redact } from '../runtime/redact.mjs';
 export { scheduleRefresh } from './freshness.mjs';
 
 const DAY = 86400000;
@@ -21,7 +23,8 @@ const factsMap = (facts) => Object.fromEntries(facts.map((fact) => [fact.id, dep
 function inputState(inputs) {
   return { facts: factsMap(inputs.facts), rules: dependencyHash(inputs.rules), policy: dependencyHash(inputs.policy),
     screening: dependencyHash(inputs.screeningPolicy), provenance: dependencyHash(inputs.provenance), resume: dependencyHash(inputs.resume?.text ?? null),
-    windowsAreas: dependencyHash({ windows: inputs.policy.windows, areas: inputs.policy.areas }) };
+    windowsAreas: dependencyHash({ windows: inputs.policy.windows, areas: inputs.policy.areas }),
+    code: dependencyHash(Object.fromEntries(['prompt.mjs','schema/judgment.schema.json','decide.mjs','clauses.mjs'].map((file) => [file, readFileSync(new URL(file, import.meta.url), 'utf8')]))) };
 }
 function userDecided(db, row) {
   const app = row.application_id && db.prepare('SELECT * FROM applications WHERE id=?').get(row.application_id);
@@ -43,12 +46,11 @@ export function replan(db, { inputs, now }) {
       const evidence = parseJson(row.evidence_json);
       const used = new Set([...(evidence.factsUsed ?? []), ...current.facts.filter((f) => f.polarity === 'constraint').map((f) => f.id)]);
       const usedChanged = [...used].some((id) => old.facts?.[id] !== state.facts[id]);
-      const otherChanged = ['rules','policy','screening','provenance','resume'].some((part) => old[part] !== state[part]);
+      const otherChanged = ['rules','policy','screening','provenance','resume','code'].some((part) => old[part] !== state[part]);
       const windowsChanged = old.windowsAreas !== state.windowsAreas;
       const answered = Boolean(db.prepare("SELECT 1 FROM review_log WHERE posting_id=? AND kind='user'").get(row.posting_id));
       const relevantFacts = factsChanged && (usedChanged || row.decision === 'not_eligible' || row.code === 'missing_fact' && !answered);
       const relevantOther = otherChanged && (row.decision !== 'eligible' || windowsChanged);
-      if (row.hold_owner === 'user' && row.code !== 'missing_fact') continue;
       if (relevantFacts || relevantOther) {
         db.prepare("UPDATE reviews SET state='due',stage='judge',next_due=?,hold_owner=NULL,hold_since=NULL,lease_owner=NULL,lease_until=NULL,dep_hashes_json=?,updated_at=? WHERE posting_id=?")
           .run(now, JSON.stringify({ ...stored, inputs: state, invalidated: true }), now, row.posting_id);
@@ -96,6 +98,19 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   if (!lease) return { ...receipt, status: 'busy' };
   receipt.previous_run_interrupted = lease.previousRunInterrupted;
   const start = clock();
+  let leaseError;
+  const keepAlive = () => {
+    try {
+      const wallNow = new Date(Date.parse(now) + clock() - start).toISOString();
+      atomic(db, () => {
+        heartbeat(db, lease, { now: wallNow });
+        db.prepare("UPDATE reviews SET lease_until=? WHERE state='leased' AND lease_owner=?")
+          .run(new Date(Date.parse(wallNow) + 1800000).toISOString(), owner);
+      });
+    } catch (error) { leaseError = error; }
+  };
+  const heartbeatTimer = setInterval(keepAlive, 60000); heartbeatTimer.unref?.();
+  try {
   const duration = Math.min(deadlineMs ?? Infinity, deadlineAt ? Date.parse(deadlineAt) - Date.parse(now) : Infinity);
   if (!(duration >= 0)) throw new Error('Invalid review deadline');
   const expired = () => clock() - start >= duration;
@@ -105,9 +120,24 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   receipt.counts.attempts_lost = recovered.lost;
   db.prepare("UPDATE reviews SET state='due',lease_owner=NULL,lease_until=NULL WHERE state='leased' AND (lease_until<=? OR ?)").run(now, lease.previousRunInterrupted ? 1 : 0);
   let current = await inputs();
-  const initialRequest = await buildJudgeRequest({ posting: {}, snapshot: { text: '' }, sections: [], inputs: current, adapter: judges.primary, tier: 'primary' });
-  if (!evalCurrent(current.evalRecord, initialRequest.deps).current) receipt.warnings.push('eval_stale');
+  const runtimeDeps = {};
+  for (const tier of ['primary','escalation']) {
+    const request = await buildJudgeRequest({ posting: {}, snapshot: { text: '' }, sections: [], inputs: current, adapter: judges[tier], tier });
+    runtimeDeps[tier] = request.deps.parts;
+    if (!evalCurrent(current.evalRecord, request.deps).current && !receipt.warnings.includes('eval_stale')) receipt.warnings.push('eval_stale');
+  }
   scheduleRefresh(db, { now, policy: current.policy }); recheckHolds(db, { now, screeningPolicy: current.screeningPolicy }); replan(db, { inputs: current, now });
+  // Actual adapter/CLI dependencies are available only after adapter.ready.
+  atomic(db, () => {
+    for (const row of db.prepare('SELECT r.*,p.application_id FROM reviews r JOIN postings p ON p.id=r.posting_id').all()) {
+      if (userDecided(db, row) || row.decision === 'eligible' || row.decision === 'reused' || row.decision === 'dropped') continue;
+      const old = parseJson(row.dep_hashes_json);
+      if (!old.runtime || dependencyHash(old.runtime) === dependencyHash(runtimeDeps)) continue;
+      db.prepare("UPDATE reviews SET state='due',stage='judge',next_due=?,hold_owner=NULL,hold_since=NULL,lease_owner=NULL,lease_until=NULL,dep_hashes_json=?,updated_at=? WHERE posting_id=?")
+        .run(now, JSON.stringify({ ...old, runtime: runtimeDeps, invalidated: true }), now, row.posting_id);
+      logReview(db, row.posting_id, { now, stage: 'judge', kind: 'replan', payload: { reason: 'judge dependencies changed' } });
+    }
+  });
   db.prepare("UPDATE reviews SET state='due',stage='fetch',hold_owner=NULL WHERE state='held' AND code='unavailable' AND next_due<=?").run(now);
   db.prepare("UPDATE reviews SET lane='aged' WHERE lane='no_student_signal' AND first_seen<=?").run(new Date(Date.parse(now) - NO_SIGNAL_PROMOTE_DAYS * DAY).toISOString());
   attemptDir ??= await mkdtemp(path.join(os.tmpdir(), 'cj-review-attempts-'));
@@ -116,7 +146,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   const failures = {};
   let primaryStopped = false;
   let lastHeartbeat = start;
-  const tick = () => { if (clock() - lastHeartbeat >= 60000) { heartbeat(db, lease, { now: new Date(Date.parse(now) + clock() - start).toISOString() }); lastHeartbeat = clock(); } };
+  const tick = () => { if (leaseError) throw leaseError; if (clock() - lastHeartbeat >= 60000) { keepAlive(); if (leaseError) throw leaseError; lastHeartbeat = clock(); } };
   const release = (id, fence, { stage, nextDue = now } = {}) => atomic(db, () => {
     assertFence(db, id, fence);
     db.prepare("UPDATE reviews SET state='due',stage=COALESCE(?,stage),next_due=?,lease_owner=NULL,lease_until=NULL WHERE posting_id=?").run(stage ?? null, nextDue, id);
@@ -136,7 +166,9 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     const url = /^https?:/.test(posting.canonical_url) ? posting.canonical_url : `https://${posting.canonical_url}`;
     const alias = db.prepare("SELECT alias FROM posting_aliases WHERE posting_id=? AND kind IN ('req','company_req') ORDER BY CASE kind WHEN 'req' THEN 0 ELSE 1 END LIMIT 1").get(id);
     const requisition = alias?.alias.split(':').at(-1) ?? providerRequisition(url)?.id ?? null;
-    const result = await fetcher.fetch({ postingId: id, url, known: { company: posting.company, title: posting.title, requisition } });
+    let result;
+    try { result = await fetcher.fetch({ postingId: id, url, known: { company: posting.company, title: posting.title, requisition } }); }
+    catch (error) { result = { ok: false, error: error.message }; }
     receipt.counts.fetched += 1;
     tick();
     const validation = validateSnapshot({ ...posting, url, requisition }, result);
@@ -144,7 +176,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     atomic(db, () => {
       assertFence(db, id, fence);
       db.prepare('UPDATE reviews SET attempts=attempts+1 WHERE posting_id=?').run(id);
-      if (result.closedWording || validation.reason === 'not_found' && absentFromCensuses(db, id)) {
+      if (result.closedWording && (validation.identityOk || validation.reason === 'too_short') || validation.reason === 'not_found' && absentFromCensuses(db, id)) {
         db.prepare("UPDATE postings SET availability='closed_verified',updated_at=? WHERE id=?").run(now, id);
         deliver(db, { postingId: id, fence, verdict: { decision: 'not_eligible', code: 'closed_verified' }, now, policy: current.screeningPolicy });
         seen.add(id); return;
@@ -179,7 +211,11 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     const startState = inputState(stageInputs);
     const stored = parseJson(row.dep_hashes_json);
     // Persist dependencies before dispatch so recovered output has a known context.
-    db.prepare('UPDATE reviews SET dep_hashes_json=? WHERE posting_id=?').run(JSON.stringify({ ...stored, inputs: startState, snapshot: snapshot.content_hash, invalidated: false }), id);
+    atomic(db, () => {
+      assertFence(db, id, fence);
+      db.prepare('UPDATE reviews SET dep_hashes_json=? WHERE posting_id=?').run(JSON.stringify({ ...stored, inputs: startState, runtime: runtimeDeps,
+        stageStartedAt: now, snapshot: snapshot.content_hash, invalidated: false }), id);
+    });
     let final;
     for (const tier of ['primary','escalation']) {
       if (expired()) { receipt.stop_reason = 'deadline'; break; }
@@ -190,16 +226,24 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       const raw = db.prepare("SELECT * FROM review_log WHERE posting_id=? AND kind='llm_raw' ORDER BY id DESC").all(id)
         .map((entry) => ({ entry, payload: parseJson(entry.payload_json) }))
         .find(({ payload, entry }) => (payload.tier ?? db.prepare('SELECT tier FROM attempts WHERE id=?').get(entry.attempt_id)?.tier) === tier
-          && (!payload.snapshotHash || payload.snapshotHash === snapshot.content_hash)
-          && (!payload.depsHash || payload.depsHash === depsHash) && !stored.invalidated);
+          && payload.snapshotHash === snapshot.content_hash
+          && payload.depsHash === depsHash && !stored.invalidated);
       let output = raw?.payload.output;
       if (!output) {
         if (tier === 'primary' && primaryStopped) break;
         if (activeCooldown(db, `judge:${tier}`, { now })) { receipt.stop_reason ??= 'quota_cooldown'; if (tier === 'primary') primaryStopped = true; break; }
-        const attempt = spending.reserve({ postingId: id, stage: 'judge', runner: adapter.runner, model: adapter.model, tier, now });
+        const attempt = atomic(db, () => {
+          assertFence(db, id, fence);
+          return spending.reserve({ postingId: id, stage: 'judge', runner: adapter.runner, model: adapter.model, tier, now });
+        });
         if (!attempt) { receipt.stop_reason ??= 'budget'; break; }
         const outputPath = path.join(attemptDir, `${attempt.id}.json`); attempt.outputPath = outputPath;
-        db.prepare('UPDATE attempts SET output_path=? WHERE id=?').run(outputPath, attempt.id);
+        atomic(db, () => {
+          assertFence(db, id, fence);
+          db.prepare('UPDATE attempts SET output_path=? WHERE id=?').run(outputPath, attempt.id);
+          logReview(db, id, { now, stage: 'judge', kind: 'outcome', attemptId: attempt.id,
+            payload: { attemptContext: { tier, depsHash, snapshotHash: snapshot.content_hash } } });
+        });
         await hooks.afterDispatch?.({ attempt, outputPath });
         const controller = new AbortController();
         const timeLeft = duration - (clock() - start);
@@ -242,13 +286,17 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     const commitInputs = await refreshInputs();
     if (dependencyHash(inputState(commitInputs)) !== dependencyHash(startState)) {
       logReview(db, id, { now, stage: 'judge', kind: 'replan', payload: { reason: 'inputs changed during judgment' } });
-      db.prepare('UPDATE reviews SET dep_hashes_json=? WHERE posting_id=?').run(JSON.stringify({ inputs: inputState(commitInputs), invalidated: true }), id);
+      atomic(db, () => {
+        assertFence(db, id, fence);
+        db.prepare('UPDATE reviews SET dep_hashes_json=? WHERE posting_id=?').run(JSON.stringify({ inputs: inputState(commitInputs), runtime: runtimeDeps, invalidated: true }), id);
+      });
       release(id, fence, { stage: 'judge' }); return;
     }
     if (final) await commitVerdict(id, fence, final);
     else release(id, fence, { stage: 'judge' });
   }
 
+  let drainingCycle = false;
   try {
     for (;;) {
       tick();
@@ -258,13 +306,14 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       const firstNeedsFetch = ['fetch','scan'].includes(candidates[0].stage);
       const canFetch = !primaryStopped && spending.remaining() >= 1 && receipt.counts.fetched < maxFetches
         && clock() - start < duration * JUDGE_TIME_SHARE;
-      if (ready.length && !(firstNeedsFetch && canFetch)) {
+      if (ready.length && (drainingCycle || !(firstNeedsFetch && canFetch))) {
         if (primaryStopped && receipt.stop_reason !== 'quota') break;
         const batch = ready.slice(0, concurrency);
         await Promise.all(batch.map(judgeItem));
         if (primaryStopped && !due().some((r) => r.stage === 'judge')) break;
         continue;
       }
+      drainingCycle = false;
       if (primaryStopped || spending.remaining() < 1) { receipt.stop_reason ??= 'budget'; break; }
       if (receipt.counts.fetched >= maxFetches) { receipt.stop_reason ??= 'fetch_budget'; break; }
       if (clock() - start >= duration * JUDGE_TIME_SHARE && receipt.counts.fetched) { receipt.stop_reason ??= 'deadline'; break; }
@@ -272,8 +321,10 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       if (!batch.length) break;
       for (const row of batch) {
         if (expired()) { receipt.stop_reason = 'deadline'; break; }
+        if (clock() - start >= duration * JUDGE_TIME_SHARE && due().some((r) => !['scan','fetch'].includes(r.stage))) break;
         await fetchItem(row);
       }
+      drainingCycle = true;
     }
     receipt.counts.attempts = db.prepare('SELECT COUNT(*) n FROM attempts WHERE run_id=?').get(runId).n;
     receipt.counts.escalations = db.prepare("SELECT COUNT(*) n FROM attempts WHERE run_id=? AND tier='escalation'").get(runId).n;
@@ -291,7 +342,9 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     if (receipt.status !== 'failed' && (receipt.stop_reason || receipt.breaches.length || pending.some((r) => r.state === 'failed'))) receipt.status = 'partial';
     await hooks.beforeFinish?.();
     receipt.finished = now;
-    finishRun(db, lease, { status: receipt.status, receipt, now });
-    return receipt;
+    const safeReceipt = JSON.parse(redact(JSON.stringify(receipt)));
+    finishRun(db, lease, { status: receipt.status, receipt: safeReceipt, now });
+    return safeReceipt;
   } catch (error) { throw error; } // Crash hooks intentionally leave durable run/item state for recovery.
+  } finally { clearInterval(heartbeatTimer); }
 }

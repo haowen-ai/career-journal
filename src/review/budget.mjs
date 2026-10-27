@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { atomic } from './lease.mjs';
+import { redact } from '../runtime/redact.mjs';
 
 export function createBudget(db, { runId, limit, concurrency = 1, maxTransportRetries = 2 }) {
   if (!Number.isInteger(limit) || limit < 0 || !Number.isInteger(concurrency) || concurrency < 1 || !Number.isInteger(maxTransportRetries) || maxTransportRetries < 0) throw new Error('Invalid attempt budget');
@@ -34,14 +35,19 @@ export async function recoverLost(db, { attemptDir, now }) {
   for (const row of db.prepare("SELECT * FROM attempts WHERE state='dispatched'").all()) {
     let output = null;
     if (row.output_path && attemptDir) {
-      try { const parsed = JSON.parse(await readFile(row.output_path, 'utf8')); output = parsed.output ?? parsed; } catch { /* absent or incomplete output is lost */ }
+      try {
+        if ((await stat(row.output_path)).size > 2_000_000) throw new Error('too_large');
+        const parsed = JSON.parse(await readFile(row.output_path, 'utf8')); output = parsed.output ?? parsed;
+      } catch { /* absent or incomplete output is lost */ }
       if (!output || typeof output !== 'object' || !Array.isArray(output.alternatives) || !Array.isArray(output.criteria)) output = null;
     }
     atomic(db, () => {
       if (output) {
+        const contextRow = db.prepare("SELECT payload_json FROM review_log WHERE attempt_id=? AND kind='outcome' ORDER BY id DESC LIMIT 1").get(row.id);
+        const context = contextRow ? JSON.parse(contextRow.payload_json).attemptContext : null;
         db.prepare("UPDATE attempts SET state='adopted',finished_at=? WHERE id=?").run(now, row.id);
         db.prepare("INSERT INTO review_log(posting_id,at,stage,kind,attempt_id,payload_json) VALUES (?,?,?,'llm_raw',?,?)")
-          .run(row.posting_id, now, row.stage, row.id, JSON.stringify({ output, tier: row.tier }));
+          .run(row.posting_id, now, row.stage, row.id, redact(JSON.stringify({ output, tier: row.tier, ...context })));
         adopted += 1;
       } else {
         db.prepare("UPDATE attempts SET state='lost',finished_at=?,error='response not recoverable' WHERE id=?").run(now, row.id);

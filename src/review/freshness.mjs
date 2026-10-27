@@ -20,8 +20,8 @@ export function scheduleRefresh(db, { now, policy }) {
     const age = (Date.parse(now) - Date.parse(row.updated_at)) / days;
     const deadline = parseJson(row.deadline_json);
     const near = deadline.kind === 'cutoff' && Date.parse(deadline.date) - Date.parse(now) <= 3 * days;
-    const every = row.decision === 'eligible' ? (near ? 1 : policy.freshness?.activeDays ?? 7) : policy.freshness?.rejectedDays ?? 14;
-    if (row.decision !== 'eligible' && (Date.parse(now) - Date.parse(row.first_seen)) / days > (policy.freshness?.rejectedHorizonDays ?? 60)) continue;
+    const every = row.decision === 'eligible' ? (near ? 1 : policy.freshness?.activeDays ?? 7) : policy.freshness?.negativeRecheckDays ?? 14;
+    if (row.decision !== 'eligible' && (Date.parse(now) - Date.parse(row.first_seen)) / days > (policy.freshness?.negativeHorizonDays ?? 60)) continue;
     if (age < every) continue;
     db.prepare("UPDATE reviews SET state='due',stage='fetch',lane='refresh',next_due=?,updated_at=? WHERE posting_id=?").run(now, now, row.posting_id);
     requeued += 1;

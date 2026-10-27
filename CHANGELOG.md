@@ -12,7 +12,7 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Changed
 
-- None
+- Maintainers must run the judgment evaluation gate before every release that changes screening rules, prompt, judgment schema, decision code, or judge models (`node scripts/judge-gate.mjs --home <data-home>`).
 
 ### Fixed
 
