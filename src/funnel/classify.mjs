@@ -13,16 +13,22 @@ for (const [name, code] of Object.entries({ 'united states of america': 'US', 'u
 const stateNames = new Set(Object.values(countries.usStates).map(normalized));
 
 function countryOf(location) {
+  // Explicit structured country context takes precedence over ambiguous place names.
+  const explicit = typeof location === 'object' && (location?.countryCode ?? location?.country);
+  if (typeof explicit === 'string' && names.has(normalized(explicit))) return names.get(normalized(explicit));
   const raw = typeof location === 'string' ? location : location?.location ?? location?.name ?? location?.place ?? '';
   const value = normalized(raw);
-  if (names.has(value)) return names.get(value);
+  if (names.has(value) && !stateNames.has(value) && !Object.hasOwn(countries.usStates, raw)) return names.get(value);
   // Country/state tokens are interpreted only at location boundaries, never as substrings of city names.
   const pieces = String(raw).split(/[,;|/]|\s+-\s+/).map((piece) => piece.trim()).filter(Boolean);
   const resolved = new Set();
   for (const piece of pieces) {
     const key = normalized(piece.replace(/^remote\s+(?:in\s+)?/i, ''));
-    if (names.has(key)) resolved.add(names.get(key));
-    if (stateNames.has(key) || Object.hasOwn(countries.usStates, piece)) resolved.add('US');
+    const country = names.get(key);
+    const state = stateNames.has(key) || Object.hasOwn(countries.usStates, piece);
+    if (country && state && country !== 'US') continue;
+    if (country) resolved.add(country);
+    if (state) resolved.add('US');
   }
   return resolved.size === 1 ? [...resolved][0] : null;
 }

@@ -55,12 +55,15 @@ const shaped = (id) => /^[A-Za-z]{0,4}[-_]?\d{3,}(?:-\d+)?$/.test(id) ? id.toUpp
 export function aliasesFor(record, { companyAliases } = {}) {
   const aliases = [];
   const add = (kind, alias) => { if (!aliases.some((item) => item.alias === alias)) aliases.push({ alias, kind }); };
-  if (record.source && record.sourceId != null && record.sourceId !== '') add('source', `source:${record.source}:${record.sourceId}`);
   const req = providerRequisition(record.url);
+  if (record.source && record.sourceId != null && record.sourceId !== '') {
+    // CareerOps combines providers whose local ids are only unique within a tenant.
+    const namespace = record.source === 'careerops' && !parseUrl(record.sourceId)
+      ? `${req ? `${req.provider}:${req.tenant}` : record.partition && record.partition !== 'all' ? record.partition : `${parseUrl(record.url)?.host ?? 'unknown'}:${companyKey(record.company, companyAliases)}`}:` : '';
+    add('source', `source:${record.source}:${namespace}${record.sourceId}`);
+  }
   if (req) add('req', `req:${req.provider}:${req.tenant || '-'}:${req.id}`);
-  const compact = (name) => String(name).normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '');
-  const configured = Object.entries(companyAliases ?? {}).find(([name]) => compact(name) === compact(record.company ?? ''))?.[1];
-  const company = compact(configured ?? record.company ?? '');
+  const company = companyKey(record.company ?? '', companyAliases);
   const ids = [req?.id, record.requisitionId, record.externalId].filter((id) => id != null && id !== '' && !String(id).startsWith('posting:'));
   for (const id of ids) {
     const normalized = req?.provider === 'generic' && id === req.id ? id : shaped(String(id));
@@ -117,6 +120,30 @@ function conflict(db, from, to, now) {
   return { action: 'quarantined', postingId: from };
 }
 
+function authority(db, postingId) {
+  return db.prepare(`WITH RECURSIVE members(id) AS (SELECT ? UNION SELECT p.id FROM postings p JOIN members m ON p.merged_into=m.id)
+    SELECT alias,kind FROM posting_aliases WHERE posting_id IN (SELECT id FROM members) AND kind IN ('req','company_req')`).all(postingId);
+}
+function contradicts(left, right) {
+  const authoritative = (items) => items.filter((item) => ['req', 'company_req'].includes(item.kind));
+  left = authoritative(left); right = authoritative(right);
+  if (!left.length || !right.length) return false;
+  const rightAliases = new Set(right.map((item) => item.alias));
+  if (!left.some((item) => rightAliases.has(item.alias))) return true;
+  // A shared company requisition must not mask different ids in the same ATS tenant.
+  const scopes = (items) => {
+    const groups = new Map();
+    for (const { alias } of items) {
+      const scope = alias.slice(0, alias.lastIndexOf(':'));
+      if (!groups.has(scope)) groups.set(scope, new Set());
+      groups.get(scope).add(alias);
+    }
+    return groups;
+  };
+  const other = scopes(right);
+  return [...scopes(left)].some(([scope, ids]) => other.has(scope) && ![...ids].some((id) => other.get(scope).has(id)));
+}
+
 export function reconcileAliases(db, postingId, aliases, { now, fence } = {}) {
   const originalId = postingId;
   if (fence) {
@@ -127,17 +154,21 @@ export function reconcileAliases(db, postingId, aliases, { now, fence } = {}) {
   }
   postingId = effective(db, postingId)?.id;
   if (!postingId) throw new Error('Posting not found');
+  const currentPosting = effective(db, postingId);
   const targets = [...new Map(aliases.map((item) => owned(db, item.alias)).filter((p) => p && p.id !== postingId).map((p) => [p.id, p])).values()];
   for (const target of targets) {
-    const current = db.prepare("SELECT alias FROM posting_aliases WHERE posting_id=? AND kind IN ('req','company_req')").all(postingId);
-    const authority = new Set(db.prepare("SELECT alias FROM posting_aliases WHERE posting_id=? AND kind IN ('req','company_req')").all(target.id).map((a) => a.alias));
-    for (const a of aliases) if (['req', 'company_req'].includes(a.kind) && owned(db, a.alias)?.id === target.id) authority.add(a.alias);
-    if (current.length && !current.some((a) => authority.has(a.alias))) return conflict(db, postingId, target.id, now);
+    if ((currentPosting.application_id && target.application_id && currentPosting.application_id !== target.application_id)
+        || contradicts(authority(db, postingId), authority(db, target.id))) return conflict(db, postingId, target.id, now);
   }
   if (targets.length > 1) return conflict(db, postingId, targets[1].id, now);
+  if (contradicts(authority(db, postingId), aliases)) return conflict(db, postingId, targets[0]?.id ?? postingId, now);
   if (targets.length) {
     const target = targets[0];
-    db.prepare('UPDATE postings SET merged_into=?,updated_at=? WHERE id=?').run(target.id, now, postingId);
+    if (!target.application_id && currentPosting.application_id) {
+      db.prepare('UPDATE postings SET application_id=?,updated_at=? WHERE id=?').run(currentPosting.application_id, now, target.id);
+      target.application_id = currentPosting.application_id;
+    }
+    db.prepare('UPDATE postings SET merged_into=?,application_id=NULL,updated_at=? WHERE id=?').run(target.id, now, postingId);
     const fromReview = db.prepare('SELECT * FROM reviews WHERE posting_id=?').get(postingId);
     const code = reusedApplication(db, target);
     if (code) markReview(db, target.id, { now, state: 'done', decision: 'reused', code });
@@ -158,19 +189,25 @@ export function reconcileAliases(db, postingId, aliases, { now, fence } = {}) {
   return { action: 'added', postingId };
 }
 
-export function resolvePosting(db, record, { now }) {
-  const aliases = aliasesFor(record);
+export function resolvePosting(db, record, { now, companyAliases } = {}) {
+  const aliases = aliasesFor(record, { companyAliases });
   const matches = aliases.map((item) => ({ ...item, posting: owned(db, item.alias) })).filter((item) => item.posting);
   if (matches.length) {
     const hit = matches.find((item) => item.kind === 'req' || item.kind === 'company_req') ?? matches[0];
-    reconcileAliases(db, hit.posting.id, aliases, { now });
-    return { postingId: effective(db, hit.posting.id).id, created: false, matchedBy: hit.kind, links: [] };
+    // Source and URL hits cannot grant unowned, contradictory authoritative aliases to an old posting.
+    const separate = contradicts(authority(db, hit.posting.id), aliases);
+    const postingId = separate ? newPosting(db, record, now) : hit.posting.id;
+    if (separate) {
+      conflict(db, postingId, hit.posting.id, now);
+      for (const item of aliases) if (!owned(db, item.alias)) db.prepare('INSERT INTO posting_aliases (alias,posting_id,kind,created_at) VALUES (?,?,?,?)').run(item.alias, postingId, item.kind, now);
+    } else reconcileAliases(db, postingId, aliases, { now });
+    return { postingId: effective(db, postingId).id, created: separate, matchedBy: hit.kind, links: [] };
   }
   const postingId = newPosting(db, record, now);
   reconcileAliases(db, postingId, aliases, { now });
   const links = [];
   for (const candidate of db.prepare('SELECT * FROM postings WHERE id<>? AND merged_into IS NULL').all(postingId)) {
-    if (companyKey(candidate.company) !== companyKey(record.company ?? '')) continue;
+    if (companyKey(candidate.company, companyAliases) !== companyKey(record.company ?? '', companyAliases)) continue;
     if (Math.max(titleSimilarity(candidate.title, record.title), titleContainment(candidate.title, record.title)) < 0.6) continue;
     link(db, postingId, candidate.id, 'maybe_same', 'similar title; identity not established', now);
     links.push({ postingId: candidate.id, kind: 'maybe_same' });
@@ -184,11 +221,11 @@ function applicationRecord(app) {
     sourceId: app.source_id ?? (prefix?.[1] !== 'posting' ? prefix?.[2] : null), externalId: prefix ? null : app.external_id };
 }
 
-export function bindApplication(db, applicationId, { now }) {
+export function bindApplication(db, applicationId, { now, companyAliases } = {}) {
   const app = db.prepare('SELECT * FROM applications WHERE id=?').get(applicationId);
   if (!app) throw new Error('Application not found');
   const record = applicationRecord(app);
-  const aliases = aliasesFor(record);
+  const aliases = aliasesFor(record, { companyAliases });
   const prior = db.prepare('SELECT id FROM postings WHERE application_id=? AND merged_into IS NULL').get(applicationId);
   const explicit = app.external_id?.startsWith('posting:') ? effective(db, app.external_id.slice(8)) : null;
   const hits = [...new Map(aliases.map((a) => owned(db, a.alias)).filter(Boolean).map((p) => [p.id, p])).values()];
@@ -202,15 +239,16 @@ export function bindApplication(db, applicationId, { now }) {
     conflict(db, postingId, posting.id, now);
     return { postingId, action: 'conflict' };
   }
-  db.prepare('UPDATE postings SET application_id=? WHERE id=?').run(applicationId, postingId);
+  db.prepare('UPDATE postings SET application_id=? WHERE id=? AND (application_id IS NULL OR application_id=?)').run(applicationId, postingId, applicationId);
   const reconciled = reconcileAliases(db, postingId, aliases, { now });
   if (reconciled.action === 'quarantined') return { postingId, action: 'conflict' };
   postingId = effective(db, postingId).id;
-  db.prepare('UPDATE postings SET application_id=? WHERE id=?').run(applicationId, postingId);
+  const bound = db.prepare('UPDATE postings SET application_id=? WHERE id=? AND (application_id IS NULL OR application_id=?)').run(applicationId, postingId, applicationId);
+  if (!bound.changes) throw new Error('Application binding conflict');
   return { postingId, action: created ? 'created' : 'bound' };
 }
 
-export function duplicateGroups(db, { since } = {}) {
+export function duplicateGroups(db, { since, companyAliases } = {}) {
   const apps = db.prepare('SELECT * FROM applications').all();
   const parents = new Map(apps.map((app) => [app.id, app.id]));
   const root = (id) => { while (parents.get(id) !== id) id = parents.get(id); return id; };
@@ -220,7 +258,7 @@ export function duplicateGroups(db, { since } = {}) {
     const ids = db.prepare('SELECT id FROM postings WHERE application_id=?').all(app.id).map((p) => effective(db, p.id)?.id).filter(Boolean);
     if (app.external_id?.startsWith('posting:') && effective(db, app.external_id.slice(8))) ids.push(effective(db, app.external_id.slice(8)).id);
     postings.set(app.id, [...new Set(ids)]);
-    const aliases = aliasesFor(applicationRecord(app));
+    const aliases = aliasesFor(applicationRecord(app), { companyAliases });
     for (const id of ids) aliases.push(...db.prepare('SELECT alias,kind FROM posting_aliases WHERE posting_id=?').all(id));
     for (const item of aliases.filter((a) => ['req', 'company_req', 'url'].includes(a.kind))) {
       if (keys.has(item.alias)) parents.set(root(app.id), root(keys.get(item.alias)));

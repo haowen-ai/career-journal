@@ -45,6 +45,7 @@ export function assessSourceHealth(db, { runId, now, manifest, reported, baselin
     const count = item.count ?? 0;
     if (item.truncated || item.capDetected) { status = 'partial'; alert = 'cap'; }
     else if (status === 'error') alert = 'error';
+    else if (item.quarantined > 0) { status = 'partial'; alert = 'partial'; }
     else if (status === 'partial') alert = 'partial';
     else if (['disabled', 'skipped'].includes(status)) { if (isExpected) { status = 'disabled'; alert = 'disabled'; } }
     else if (status === 'stale') alert = history.some((row) => ['ok', 'empty'].includes(row.status)) ? 'missing' : 'never_reported';

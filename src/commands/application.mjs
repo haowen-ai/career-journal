@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { openHomeDatabase } from '../runtime/home.mjs';
 import { applicationStatuses } from '../domain/status-machine.mjs';
-import { bindApplication } from '../funnel/identity.mjs';
+import { bindApplication, resolvePosting } from '../funnel/identity.mjs';
 
 const required = (value, name) => {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required`);
@@ -20,8 +20,33 @@ function safeUrl(value) {
 export function createApplication(db, input, now = new Date().toISOString()) {
   db.exec('SAVEPOINT application_writer');
   try {
+    const hasPostings = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='postings'").get();
+    if (hasPostings && (input.jobUrl || input.externalId)) {
+      const record = { company: required(input.company, 'company'), title: required(input.role, 'role'),
+        url: safeUrl(input.jobUrl), externalId: input.externalId };
+      let resolved;
+      if (String(input.externalId ?? '').startsWith('posting:')) {
+        let id = input.externalId.slice(8);
+        const seen = new Set();
+        for (;;) {
+          if (seen.has(id)) throw new Error('Posting merge cycle');
+          seen.add(id);
+          const posting = db.prepare('SELECT id,merged_into FROM postings WHERE id=?').get(id);
+          if (!posting) throw new Error('Posting not found');
+          if (!posting.merged_into) { resolved = { postingId: posting.id }; break; }
+          id = posting.merged_into;
+        }
+      } else resolved = resolvePosting(db, record, { now, companyAliases: input.companyAliases });
+      const posting = db.prepare('SELECT application_id FROM postings WHERE id=?').get(resolved.postingId);
+      if (db.prepare("SELECT 1 FROM reviews WHERE posting_id=? AND code='identity_conflict'").get(resolved.postingId)) throw new Error('Application identity conflict');
+      if (posting.application_id) {
+        const existing = db.prepare('SELECT * FROM applications WHERE id=?').get(posting.application_id);
+        db.exec('RELEASE application_writer');
+        return existing;
+      }
+    }
     const application = insertApplication(db, input, now);
-    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='postings'").get()) bindApplication(db, application.id, { now });
+    if (hasPostings && bindApplication(db, application.id, { now, companyAliases: input.companyAliases }).action === 'conflict') throw new Error('Application binding conflict');
     db.exec('RELEASE application_writer');
     return application;
   } catch (error) {
@@ -35,21 +60,23 @@ function insertApplication(db, input, now) {
   const company = required(input.company, 'company');
   const role = required(input.role, 'role');
   const externalId = input.externalId ? String(input.externalId).trim() : null;
+  const jobUrl = safeUrl(input.jobUrl);
   const existing = db.prepare(`SELECT * FROM applications WHERE company = ? AND role = ?
-    AND ((external_id IS NULL AND ? IS NULL) OR external_id = ?)`)
-    .get(company, role, externalId, externalId);
+    AND ((external_id IS NULL AND ? IS NULL) OR external_id = ?)
+    AND ((job_url IS NULL AND ? IS NULL) OR job_url = ?)`)
+    .get(company, role, externalId, externalId, jobUrl, jobUrl);
   if (existing) return existing;
   const status = input.status ?? 'lead';
   if (!applicationStatuses.includes(status)) throw new Error(`Unknown application status: ${status}`);
   const base = slug([company, role, externalId].filter(Boolean).join('-'));
   let id = base;
   if (db.prepare('SELECT 1 FROM applications WHERE id = ?').get(id)) {
-    id = `${base.slice(0, 51)}-${createHash('sha256').update(`${company}\0${role}\0${externalId ?? ''}`).digest('hex').slice(0, 8)}`;
+    id = `${base.slice(0, 51)}-${createHash('sha256').update(`${company}\0${role}\0${externalId ?? ''}\0${jobUrl ?? ''}`).digest('hex').slice(0, 8)}`;
   }
   db.prepare(`INSERT INTO applications
     (id, company, role, external_id, job_url, status, stage, applied_at, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(id, company, role, externalId, safeUrl(input.jobUrl), status, input.stage ?? null, input.appliedAt ?? null, now, now);
+    .run(id, company, role, externalId, jobUrl, status, input.stage ?? null, input.appliedAt ?? null, now, now);
   return db.prepare('SELECT * FROM applications WHERE id = ?').get(id);
 }
 

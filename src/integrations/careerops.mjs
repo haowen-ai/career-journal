@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { access, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { executeCareerOpsProcess } from './careerops-process.mjs';
 import { fileURLToPath } from 'node:url';
 
 const MAX_REQUEST_BYTES = 1_000_000;
@@ -39,40 +39,7 @@ export async function detectCareerOps(config = {}) {
   return { ok: true, code: 'ready', installedVersion: metadata.version, entrypoint, root, detail: `CareerOps ${metadata.version} is ready` };
 }
 
-function executeProcess({ command, args, cwd, stdin, timeoutMs, maxBytes = 50_000_000 }) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-    let tooLarge = false;
-    let killTimer;
-    const stop = () => { child.kill('SIGTERM'); killTimer ??= setTimeout(() => child.kill('SIGKILL'), 5000); };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      stop();
-    }, timeoutMs);
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-    let bytes = 0;
-    const append = (chunk, stream) => {
-      bytes += Buffer.byteLength(chunk);
-      if (bytes > maxBytes) { tooLarge = true; stop(); return; }
-      if (stream === 'stdout') stdout += chunk; else stderr += chunk;
-    };
-    child.stdout.on('data', (chunk) => append(chunk, 'stdout'));
-    child.stderr.on('data', (chunk) => append(chunk, 'stderr'));
-    child.stdin.on('error', (error) => { if (error.code !== 'EPIPE') stop(); });
-    child.once('error', (error) => { clearTimeout(timer); clearTimeout(killTimer); reject(error); });
-    child.once('close', (exitCode) => {
-      clearTimeout(timer); clearTimeout(killTimer);
-      if (tooLarge) reject(new Error('CareerOps output exceeds byte limit'));
-      else if (timedOut) reject(new Error(`CareerOps request timed out after ${timeoutMs}ms`));
-      else resolve({ exitCode, stdout, stderr });
-    });
-    child.stdin.end(stdin);
-  });
-}
+const executeProcess = executeCareerOpsProcess;
 
 function validateRequest(request) {
   if (!ACTIONS.has(request?.action)) throw new Error(`Unsupported CareerOps action: ${request?.action ?? 'missing'}`);

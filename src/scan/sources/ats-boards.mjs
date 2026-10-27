@@ -113,6 +113,8 @@ export async function fetchAtsBoard(entry, fetchImpl, options = {}) {
   if (!endpoint) throw new Error(`Unsupported job board: ${entry.ats}`);
   const url = endpoint(entry.board);
   const payload = await fetchSourceJson(fetchImpl, url, options);
+  const valid = entry.ats === 'lever' ? Array.isArray(payload) || Array.isArray(payload?.data) : Array.isArray(payload?.jobs);
+  if (!valid) throw new Error(`Malformed ${entry.ats} response: missing job collection array`);
   return { url, roles: PARSERS[entry.ats](payload, entry) };
 }
 

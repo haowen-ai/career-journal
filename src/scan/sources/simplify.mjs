@@ -58,7 +58,9 @@ export async function fetchSimplify(settings, fetchImpl, options = {}) {
   for (const [index, url] of urls.entries()) {
     const partition = `simplify:${index + 1}`;
     try {
-      const listRoles = parseSimplify(await fetchSourceJson(fetchImpl, url, options), { partition });
+      const payload = await fetchSourceJson(fetchImpl, url, options);
+      if (!Array.isArray(payload) && !Array.isArray(payload?.listings)) throw new Error('Malformed Simplify response: missing listing array');
+      const listRoles = parseSimplify(payload, { partition });
       batches.push({ source: 'simplify', partition, rawCount: listRoles.length, records: listRoles });
       roles.push(...listRoles);
       sources.push({ source: 'simplify', partition, url, status: 'ok', count: listRoles.length, rawCount: listRoles.length, truncated: false });

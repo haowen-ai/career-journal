@@ -3,6 +3,7 @@ import { canonicalUrl, resolvePosting } from './identity.mjs';
 import { classifyRole } from './classify.mjs';
 import { SUBMITTED_STATUSES } from './contract.mjs';
 import { redact } from '../runtime/redact.mjs';
+import { assertScanOwner } from './scan-lease.mjs';
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const stable = (value) => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object'
@@ -18,16 +19,17 @@ function quarantine(db, record, reason, now) {
   }
 }
 
-export function ingestBatch(db, { runId, source, partition, records, now, policy = {}, profile }) {
+export function ingestBatch(db, { runId, source, partition, records, now, policy = {}, profile, runOwner }) {
   const counts = { observed: 0, newPostings: 0, reused: 0, dropped: {}, review: 0, quarantined: 0 };
   db.exec('BEGIN IMMEDIATE');
   try {
+    if (runOwner) assertScanOwner(db, runId, runOwner);
     for (const raw of records) {
       counts.observed += 1;
       const record = { ...raw, source: raw?.source ?? source, partition };
       const invalid = record.invalid || (!record.title?.trim() ? 'missing title' : !canonicalUrl(record.url) ? 'missing http(s) URL' : null);
       if (invalid) { quarantine(db, record, invalid, now); counts.quarantined += 1; continue; }
-      const resolved = resolvePosting(db, record, { now });
+      const resolved = resolvePosting(db, record, { now, companyAliases: policy.companyAliases });
       const id = resolved.postingId;
       if (resolved.created) counts.newPostings += 1;
       const posting = db.prepare('SELECT * FROM postings WHERE id=?').get(id);

@@ -34,7 +34,8 @@ export function parseCareerOpsRaw(result) {
   for (const role of roles) if (!sources.some((part) => part.partition === role.partition)) sources.push({ source: 'careerops', partition: role.partition,
     status: 'partial', count: roles.filter((r) => r.partition === role.partition).length, rawCount: roles.filter((r) => r.partition === role.partition).length,
     truncated: false, detail: 'legacy display-line bridge; missing partition health' });
-  return { roles, sources, status: sources.every((p) => p.status === 'error') ? 'failed' : sources.some((p) => p.status !== 'ok') ? 'partial' : 'ok' };
+  return { roles, sources, ...(Array.isArray(result?.configuredPartitions) ? { configuredPartitions: result.configuredPartitions } : {}),
+    status: sources.every((p) => p.status === 'error') ? 'failed' : sources.some((p) => p.status !== 'ok') ? 'partial' : 'ok' };
 }
 
 export async function fetchCareerOpsRoles(enabled, careerOpsConfig, dependencies = {}) {
