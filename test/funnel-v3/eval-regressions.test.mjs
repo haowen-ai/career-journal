@@ -269,3 +269,39 @@ test('[B] "What You Need to Succeed" and "Required Knowledge, Skills and Experie
   }
   assert.equal(segmentSections(textUnder('Preferred Knowledge, Skills and Experience')).at(-1).kind, 'preferred', 'the preferred variant stays preferred');
 });
+
+// ===================================================================== R11
+
+test('[B] at the escalation tier, out-of-policy alternatives and confirmed conflicts reject before unclear-criterion holds (eval R11)', async () => {
+  // Captured shape: the only office is quoted and outside every area, and the model also marks an unrelated
+  // logistics requirement "unclear" with no fact to cite. The quoted location already decides the posting.
+  const commute = 'Reliable transportation is required to reach the plant each work day.';
+  const undergrad = "Be enrolled as a junior undergraduate student pursuing a Bachelor's degree.";
+  const outsideText = posting({ location: 'Location: Riverton, NJ', heading: 'Minimum Qualifications', bullets: [undergrad, commute] });
+  const insideText = posting({ heading: 'Minimum Qualifications', bullets: [undergrad, commute] });
+  const unclearCommute = { key: 'requirement', status: 'unclear', quote: commute, clause_alternatives: [], fact_ids: [] };
+  const unclearDegree = { key: 'degree', status: 'unclear', quote: undergrad, clause_alternatives: [], fact_ids: ['degree'] };
+  const confirmed = { key: 'degree', status: 'conflicts', quote: undergrad, clause_alternatives: [], fact_ids: ['degree'] };
+  const riverton = { term: summer2027, offices: [{ place: 'Riverton, NJ', area: 'outside', quote: 'Location: Riverton, NJ' }], remote: none };
+  const valid = { term: summer2027, offices: [chicago], remote: none };
+
+  // Validated alternatives, all outside the policy areas: an unclear criterion does not turn the rejection into a hold.
+  for (const [name, criteria] of [['an unclear commute requirement', [unclearCommute]], ['an unclear criterion citing a constraint', [unclearDegree, unclearCommute]]]) {
+    const verdict = await decideWith({ text: outsideText, judged: decided([riverton], criteria) });
+    assert.deepEqual([verdict.decision, verdict.code], ['not_eligible', 'outside_area'], `${name}: Riverton, NJ is quoted and outside every area: ${why(verdict)}`);
+  }
+
+  // A confirmed conflict rejects even when an unrelated unclear criterion is listed before it.
+  const conflict = await decideWith({ text: insideText, judged: decided([valid], [unclearCommute, confirmed]) });
+  assert.deepEqual([conflict.decision, conflict.code], ['not_eligible', 'degree'], `the confirmed degree conflict decides before the commute question: ${why(conflict)}`);
+
+  // Guards: an in-policy alternative with an unclear mandatory criterion still holds; one unvalidated alternative
+  // keeps the posting unclear; the primary tier still only proposes the rejection.
+  const held = await decideWith({ text: insideText, judged: decided([valid], [unclearCommute]) });
+  assert.deepEqual([held.decision, held.code], ['unclear', 'missing_fact'], `Chicago qualifies, so the commute question holds: ${why(held)}`);
+  const unvalidated = { term: summer2027, offices: [{ place: 'Chicago, IL', area: 'chicago', quote: 'Location: Chicago, Illinois' }], remote: none };
+  const mixed = await decideWith({ text: outsideText, judged: decided([riverton, unvalidated], [unclearCommute]) });
+  assert.equal(mixed.decision, 'unclear', `an unvalidated alternative may still be allowed: ${why(mixed)}`);
+  const primary = await decideWith({ text: outsideText, judged: decided([riverton], [unclearCommute]), tier: 'primary' });
+  assert.deepEqual([primary.decision, primary.escalate], ['unclear', true], why(primary));
+});
