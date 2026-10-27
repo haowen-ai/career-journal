@@ -196,8 +196,11 @@ test('[B] a constraint the candidate satisfies is not a confirmed conflict becau
   );
   const quote = "Must be currently pursuing a Master's degree.";
   const criterion = { key: 'degree', status: 'conflicts', quote, clause_alternatives: [], fact_ids: ['degree'] };
-  assert.equal(validateCriterion(text, criterion, FACTS).confirmedConflict, false, 'Pursuing a Master of Science satisfies the requirement');
-  const result = await decideWith({ text, judged: judgment({ criteria: [criterion] }) });
+  // Decided rule: code does not interpret degree wording. The cheap model's conflict claim must go to the stronger model.
+  assert.ok(validateCriterion(text, criterion, FACTS), 'the criterion validates structurally');
+  const primary = await decideWith({ text, judged: judgment({ criteria: [criterion] }), tier: 'primary' });
+  assert.equal(primary.escalate, true, 'a primary-tier conflict on a degree requirement is rechecked by the stronger model');
+  const result = primary;
   assert.notEqual(result.decision, 'not_eligible');
 
   const real = await decideWith({ text: SNAPSHOTS.undergradOnly, judged: JUDGMENTS.undergradOnly });

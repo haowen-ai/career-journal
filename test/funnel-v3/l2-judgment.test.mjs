@@ -39,16 +39,17 @@ test('[L2] eligible: allowed office, 2027 term, no confirmed conflict → eligib
 });
 
 test('[L2] an OR clause quoted only on the branch the candidate lacks is not a conflict', async () => {
-  for (const judgment of ['orClauseCppOnly', 'orClauseWholeButOneBranch']) {
-    const result = await decideOn('orClause', judgment);
-    assert.notEqual(result.decision, 'not_eligible', judgment);
-  }
+  const partial = await decideOn('orClause', 'orClauseCppOnly');
+  assert.notEqual(partial.decision, 'not_eligible', 'a quote covering only one OR branch is a partial clause');
+  // Decided rule: whole-clause OR reasoning is the model's job; the cheap model's negative is rechecked.
+  const whole = await decideOn('orClause', 'orClauseWholeButOneBranch', 'primary');
+  assert.equal(whole.escalate, true, 'a primary-tier OR-clause conflict escalates');
 });
 
-test('[L2] "or equivalent practical experience" never yields not_eligible; it asks the user', async () => {
-  const result = await decideOn('equivalent', 'equivalent');
-  assert.equal(result.decision, 'unclear');
-  assert.equal(result.nextAction, 'user_review');
+test('[L2] "or equivalent practical experience" is rechecked by the stronger model, never rejected at the primary tier', async () => {
+  // Decided rule: the screening rules tell the model that experience-based equivalence counts as met.
+  const result = await decideOn('equivalent', 'equivalent', 'primary');
+  assert.equal(result.escalate, true);
 });
 
 test('[L2] a preferred-section quote mislabeled required by the model never blocks', async () => {
