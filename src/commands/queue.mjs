@@ -1,7 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { needsFromVerdict, tabTitle } from '../apply/tab-title.mjs';
 import { recordEvent } from '../domain/events.mjs';
 import { normalizeDueAt } from '../domain/tasks.mjs';
+import { SUBMITTED_STATUSES } from '../funnel/contract.mjs';
 import { openHomeDatabase } from '../runtime/home.mjs';
+import { companyKey } from '../scan/dedupe.mjs';
 import { rankLocation } from '../scan/filter.mjs';
 import { scoreFit } from '../scan/fit.mjs';
 import { loadScanProfile } from '../scan/profile-input.mjs';
@@ -12,7 +15,8 @@ const usage = 'Usage: career-journal queue list [--json] [--profile <path>] | qu
 const FIT_ORDER = Object.freeze({ high: 0, medium: 1, low: 2 });
 
 const queueSelect = `SELECT id, company, role, job_url jobUrl, status, source, source_id sourceId, location,
-  posted_at postedAt, deadline_at deadlineAt, fit, fit_confidence fitConfidence, fit_note fitNote,
+  posted_at postedAt, deadline_at deadlineAt, deadline_precision deadlinePrecision, posting_end_at postingEndAt,
+  fit, fit_confidence fitConfidence, fit_note fitNote,
   verified_at verifiedAt, skip_reason skipReason, created_at createdAt, updated_at updatedAt
   FROM applications`;
 
@@ -30,21 +34,63 @@ export function locationRank(location, profile) {
   return rankLocation({ locations: String(location).split(/\s*;\s*/).filter(Boolean) }, profile).locRank ?? null;
 }
 
-// Queue order: fit (high first), then the earliest deadline, then the best
-// location rank, then the most recently posted role.
-export function compareQueueItems(left, right) {
+// Only the sorting key gains an end-of-day time. The stored/displayed cutoff
+// stays date-only; Intl uses the host timezone for callers without a config.
+function cutoffTime(value, timezone) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value ?? '')) return time(value);
+  const wallClock = time(`${value}T23:59:59Z`);
+  if (wallClock === null) return null;
+  const format = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  });
+  let instant = wallClock;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const parts = Object.fromEntries(format.formatToParts(instant).map(({ type, value: part }) => [type, part]));
+    const seen = time(`${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}Z`);
+    const correction = wallClock - seen;
+    instant += correction;
+    if (correction === 0) break;
+  }
+  return instant + 999;
+}
+
+// Fit, cutoff, location, company load, newest posting, creation time, id.
+function compareInTimezone(left, right, timezone) {
   return last(FIT_ORDER[left.fit]) - last(FIT_ORDER[right.fit])
-    || last(time(left.deadlineAt)) - last(time(right.deadlineAt))
+    || last(cutoffTime(left.deadlineAt, timezone)) - last(cutoffTime(right.deadlineAt, timezone))
     || last(left.locRank) - last(right.locRank)
+    || (left.companyLoad ?? 0) - (right.companyLoad ?? 0)
     || (time(right.postedAt) ?? Number.NEGATIVE_INFINITY) - (time(left.postedAt) ?? Number.NEGATIVE_INFINITY)
     || String(left.createdAt).localeCompare(String(right.createdAt))
     || String(left.id).localeCompare(String(right.id));
 }
 
+export function compareQueueItems(left, right) {
+  return compareInTimezone(left, right);
+}
+
 export function listQueue(db, profile = null) {
+  const statuses = ['prepared', ...SUBMITTED_STATUSES];
+  const companyLoads = new Map();
+  for (const { company, count } of db.prepare(`SELECT company, COUNT(*) count FROM applications
+    WHERE status IN (${statuses.map(() => '?').join(',')}) GROUP BY company`).all(...statuses)) {
+    const key = companyKey(company);
+    companyLoads.set(key, (companyLoads.get(key) ?? 0) + count);
+  }
+  const reviewEvidence = db.prepare(`SELECT r.evidence_json FROM postings p JOIN reviews r ON r.posting_id = p.id
+    WHERE p.application_id = ? AND p.merged_into IS NULL ORDER BY r.updated_at DESC, p.id LIMIT 1`);
   return db.prepare(`${queueSelect} WHERE status = 'lead' AND skip_reason IS NULL`).all()
-    .map((row) => ({ ...row, locRank: locationRank(row.location, profile) }))
-    .sort(compareQueueItems);
+    .map((row) => {
+      const evidence = JSON.parse(reviewEvidence.get(row.id)?.evidence_json ?? '{}');
+      return {
+        ...row,
+        locRank: locationRank(row.location, profile),
+        companyLoad: companyLoads.get(companyKey(row.company)) ?? 0,
+        tabHint: tabTitle({ company: row.company, needs: needsFromVerdict(evidence?.needs) }),
+      };
+    })
+    .sort((left, right) => compareInTimezone(left, right, profile?.timezone));
 }
 
 function required(value, name) {
@@ -187,7 +233,7 @@ export async function queueCommand(parsed, io, runtime = {}) {
       return 0;
     }
     if (parsed.subcommand === 'list') {
-      const items = listQueue(context.db, profile);
+      const items = listQueue(context.db, { ...profile, timezone: context.config.timezone });
       if (parsed.options.json) io.out(JSON.stringify(items, null, 2));
       else for (const item of items) {
         io.out([item.fit ?? '-', item.deadlineAt ?? '-', item.location ?? '-', item.company, item.role, item.id].join('\t'));
