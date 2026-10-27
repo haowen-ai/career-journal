@@ -35,7 +35,7 @@ export async function recoverLost(db, { attemptDir, now }) {
     let output = null;
     if (row.output_path && attemptDir) {
       try { const parsed = JSON.parse(await readFile(row.output_path, 'utf8')); output = parsed.output ?? parsed; } catch { /* absent or incomplete output is lost */ }
-      if (!output || typeof output !== 'object' || !output.eligibility) output = null;
+      if (!output || typeof output !== 'object' || !Array.isArray(output.alternatives) || !Array.isArray(output.criteria)) output = null;
     }
     atomic(db, () => {
       if (output) {
