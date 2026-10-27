@@ -8,7 +8,7 @@ import { aliasesFor, reconcileAliases, providerRequisition } from '../funnel/ide
 import { createBudget, recoverLost } from './budget.mjs';
 import { acquireRunLease, heartbeat, finishRun, claimItem, assertFence, atomic } from './lease.mjs';
 import { activeCooldown, setCooldown } from './cooldown.mjs';
-import { buildJudgeRequest, buildForcedDecisionRequest } from './prompt.mjs';
+import { buildJudgeRequest, buildForcedDecisionRequest, normalPromptDependencies } from './prompt.mjs';
 import { validForcedDecision } from './judge.mjs';
 import { dependencyHash, evalCurrent, screeningPolicyParts } from './inputs.mjs';
 import { segmentSections } from './clauses.mjs';
@@ -23,13 +23,13 @@ import { cachedJudgment, judgmentEnvelope, rememberJudgment } from './judgment-c
 import { postingPartitions } from '../funnel/membership.mjs';
 import { awaitingUserSummary } from './awaiting-user.mjs';
 import { releaseHolds, MODEL_HOLD_CODES, releasedInputsHash } from './release-holds.mjs';
+import { dependencyComparison } from './dependency-compat.mjs';
 export { scheduleRefresh } from './freshness.mjs';
 
 const DAY = 86400000;
 const explorationLane = (row) => ['no_student_signal', 'out_of_direction'].includes(row.lane);
 const postingUrl = (posting) => /^https?:/.test(posting.canonical_url) ? posting.canonical_url : `https://${posting.canonical_url}`;
 const factsMap = (facts) => Object.fromEntries(facts.map((fact) => [fact.id, dependencyHash(fact)]));
-const judgmentInputsHash = (parts) => dependencyHash(Object.fromEntries(Object.entries(parts).filter(([key]) => key !== 'decide')));
 
 function opinionState(inputs, snapshotText, firstSeen) {
   return {
@@ -90,10 +90,11 @@ export function inputState(inputs) {
   return { facts: factsMap(inputs.facts), rules: dependencyHash(inputs.rules), policy: dependencyHash({ policy: screeningPolicyParts(inputs.policy), jobType: inputs.profile?.search?.jobType ?? null }),
     screening: dependencyHash(inputs.screeningPolicy), provenance: dependencyHash(inputs.provenance), resume: dependencyHash(inputs.resume?.text ?? null),
     windowsAreas: dependencyHash({ windows: inputs.policy.windows, areas: inputs.policy.areas, jobType: inputs.profile?.search?.jobType ?? null }),
-    code: dependencyHash(Object.fromEntries(['prompt.mjs','schema/judgment.schema.json','decide.mjs','clauses.mjs','deadline.mjs'].map((file) => [file, readFileSync(new URL(file, import.meta.url), 'utf8')]))) };
+    code: dependencyHash({ ...normalPromptDependencies(),
+      decide: Object.fromEntries(['decide.mjs','clauses.mjs','deadline.mjs'].map((file) => [file, readFileSync(new URL(file, import.meta.url), 'utf8')])) }) };
 }
 
-export function replan(db, { inputs, now }) {
+export function replan(db, { inputs, now, runtimeDeps, comparison }) {
   const current = typeof inputs === 'function' ? inputs() : inputs;
   const state = inputState(current);
   let requeued = 0;
@@ -101,13 +102,33 @@ export function replan(db, { inputs, now }) {
     for (const row of db.prepare(`SELECT r.*,p.application_id FROM reviews r JOIN postings p ON p.id=r.posting_id
       ${reviewOwnershipJoins} WHERE NOT ${userDecisionSql}`).all()) {
       const stored = parseJson(row.dep_hashes_json);
+      // Persist exact legacy-policy witnesses separately from the immutable
+      // judgment parts, so later budget/runner changes cannot lose that proof.
+      if (comparison) {
+        let migrated = false;
+        for (const parts of [...Object.values(stored.runtime ?? {}), ...Object.values(stored.decisionRuntime ?? {})]) {
+          const alias = comparison.policyAlias(parts.policy);
+          if (alias && alias !== parts.policy && stored.policyAliases?.[parts.policy] !== alias) {
+            stored.policyAliases = { ...stored.policyAliases, [parts.policy]: alias }; migrated = true;
+          }
+        }
+        if (stored.inputs && stored.inputs.policy !== state.policy && comparison.inputPolicyMatches(stored.inputs.policy, state.policy)) {
+          stored.inputs = { ...stored.inputs, policy: state.policy }; migrated = true;
+        }
+        if (migrated) db.prepare('UPDATE reviews SET dep_hashes_json=? WHERE posting_id=?').run(JSON.stringify(stored), row.posting_id);
+      }
       const old = stored.inputs;
       if (!old) continue;
       const factsChanged = dependencyHash(old.facts) !== dependencyHash(state.facts);
       const evidence = parseJson(row.evidence_json);
       const used = new Set([...(evidence.factsUsed ?? []), ...current.facts.filter((f) => f.polarity === 'constraint').map((f) => f.id)]);
       const usedChanged = [...used].some((id) => old.facts?.[id] !== state.facts[id]);
-      const otherChanged = ['rules','policy','screening','provenance','resume','code'].some((part) => old[part] !== state[part]);
+      const lastDecision = stored.decisionRuntime ?? stored.runtime;
+      const codeChanged = old.code !== state.code && (!runtimeDeps || !comparison?.legacyCode(old.code) || !lastDecision
+        || Object.entries(lastDecision).some(([tier, parts]) => dependencyHash(comparison.parts(parts, runtimeDeps[tier], { omit: ['model'], policyAliases: stored.policyAliases }))
+          !== dependencyHash(comparison.parts(runtimeDeps[tier], runtimeDeps[tier], { omit: ['model'] }))));
+      const policyChanged = comparison ? !comparison.inputPolicyMatches(old.policy, state.policy) : old.policy !== state.policy;
+      const otherChanged = codeChanged || policyChanged || ['rules','screening','provenance','resume'].some((part) => old[part] !== state[part]);
       const windowsChanged = old.windowsAreas !== state.windowsAreas;
       const relevantFacts = factsChanged && (usedChanged || row.decision === 'not_eligible' || row.code === 'missing_fact');
       const relevantOther = otherChanged && (row.decision !== 'eligible' || windowsChanged);
@@ -163,6 +184,8 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   receipt.counts.attempts_lost = recovered.lost;
   db.prepare("UPDATE reviews SET state='due',lease_owner=NULL,lease_until=NULL,lease_generation=lease_generation+1 WHERE state='leased' AND (lease_until<=? OR ?)").run(now, lease.previousRunInterrupted ? 1 : 0);
   let current = await inputs();
+  const comparison = dependencyComparison(db, current);
+  const settled = new Set(db.prepare("SELECT posting_id FROM reviews WHERE state IN ('done','held')").all().map((r) => r.posting_id));
   if (current.policy.judge?.secondOpinion) receipt.counts.secondOpinion = { asked: 0, agreed: 0, escalated: 0, errors: 0 };
   const runtimeDeps = {};
   for (const tier of ['primary','escalation']) {
@@ -171,7 +194,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     if (!evalCurrent(current.evalRecord, request.deps).current && !receipt.warnings.includes('eval_stale')) receipt.warnings.push('eval_stale');
   }
   releaseHolds(db, { now, provenance: current.provenance, inputs: current, codes: ['provenance_unknown'] });
-  scheduleRefresh(db, { now, policy: current.policy }); recheckHolds(db, { now, screeningPolicy: current.screeningPolicy }); replan(db, { inputs: current, now });
+  scheduleRefresh(db, { now, policy: current.policy }); recheckHolds(db, { now, screeningPolicy: current.screeningPolicy }); replan(db, { inputs: current, now, runtimeDeps, comparison });
   // Actual adapter/CLI dependencies are available only after adapter.ready.
   atomic(db, () => {
     for (const row of db.prepare(`SELECT r.* FROM reviews r JOIN postings p ON p.id=r.posting_id
@@ -179,9 +202,10 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       if (row.decision === 'eligible' || row.decision === 'reused' || row.decision === 'dropped') continue;
       const old = parseJson(row.dep_hashes_json);
       const lastDecision = old.decisionRuntime ?? old.runtime;
-      const comparable = (parts) => ['done', 'held'].includes(row.state)
-        ? Object.fromEntries(Object.entries(parts ?? {}).filter(([key]) => key !== 'model')) : parts;
-      if (!lastDecision || Object.entries(lastDecision).every(([tier, parts]) => dependencyHash(comparable(parts)) === dependencyHash(comparable(runtimeDeps[tier])))) continue;
+      if (!lastDecision || Object.entries(lastDecision).every(([tier, parts]) => {
+        const options = { omit: settled.has(row.posting_id) ? ['model'] : [], policyAliases: old.policyAliases };
+        return dependencyHash(comparison.parts(parts, runtimeDeps[tier], options)) === dependencyHash(comparison.parts(runtimeDeps[tier], runtimeDeps[tier], options));
+      })) continue;
       db.prepare("UPDATE reviews SET state='due',stage='judge',next_due=?,hold_owner=NULL,hold_since=NULL,lease_owner=NULL,lease_until=NULL,dep_hashes_json=?,updated_at=? WHERE posting_id=?")
         .run(now, JSON.stringify({ ...old, invalidated: true }), now, row.posting_id);
       logReview(db, row.posting_id, { now, stage: 'judge', kind: 'replan', payload: { reason: 'judge dependencies changed' } });
@@ -379,7 +403,8 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       let parts = request.deps.parts;
       let output = cachedJudgment(db, id, { tier, depsHash, snapshotHash: snapshot.content_hash });
       const previous = stored.runtime?.[tier];
-      if (!output && previous && (replayReleasedHold || judgmentInputsHash(previous) === judgmentInputsHash(parts))) {
+      const replayParts = (value) => comparison.parts(value, parts, { omit: settled.has(id) ? ['decide','model'] : ['decide'], policyAliases: stored.policyAliases });
+      if (!output && previous && (replayReleasedHold || dependencyHash(replayParts(previous)) === dependencyHash(replayParts(parts)))) {
         // A decision-code change can replay even an invalidated review. Look up
         // the original hash, never relabel an old judgment with today's hash.
         output = cachedJudgment(db, id, { tier, depsHash: dependencyHash(previous), snapshotHash: snapshot.content_hash });
@@ -407,12 +432,10 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       if (tier === 'primary' && final.escalate) { final = null; continue; }
       if (tier === 'escalation' && final.decision === 'unclear' && MODEL_HOLD_CODES.includes(final.code) && !explorationLane(row)) {
         const question = final.question;
-        const context = { tier, depsHash, snapshotHash: snapshot.content_hash, forceDecision: true, question };
+        const forcedRequest = buildForcedDecisionRequest(request, question);
+        const context = { tier, depsHash: dependencyHash(forcedRequest.deps.parts), snapshotHash: snapshot.content_hash, forceDecision: true, question };
         let forced = cachedJudgment(db, id, context);
-        if (!forced && previous && judgmentInputsHash(previous) === judgmentInputsHash(request.deps.parts)) {
-          forced = cachedJudgment(db, id, { ...context, depsHash: dependencyHash(previous) });
-        }
-        forced ??= await dispatchJudge(tier, buildForcedDecisionRequest(request, question), { forced: true, question });
+        forced ??= await dispatchJudge(tier, forcedRequest, { forced: true, question });
         final = forced ? await verifyForcedVerdict({ verdict: final, output: forced, inputs: stageInputs, snapshotText: snapshot.text,
           firstSeen: posting.first_seen, secondOpinion, counts: receipt.counts.secondOpinion }) : null;
       }
@@ -471,6 +494,9 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     try {
       for (;;) {
         if (poolFailure) break;
+        // A zero-budget deploy check still replans, but must not replay cached
+        // primary outputs into a second-opinion/model call.
+        if (budget === 0) { receipt.stop_reason = 'budget'; break; }
         tick();
         const fetchingAllowed = canFetch();
         const { rows: available, pending } = scheduler.refill({ seen, fetching, queued: queue, policy: current.policy,
