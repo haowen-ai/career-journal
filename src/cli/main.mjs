@@ -22,6 +22,7 @@ Commands:
   backup        Create a secret-free local backup
   scan          Scan official job boards for roles that match the profile
   queue         List or verify queued roles before applying
+  prune         Report retention changes, or apply them with --apply
 
 Options:
   -h, --help     Show this help
