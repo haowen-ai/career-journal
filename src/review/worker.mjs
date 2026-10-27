@@ -24,6 +24,7 @@ export { scheduleRefresh } from './freshness.mjs';
 
 const DAY = 86400000;
 const explorationLane = (row) => ['no_student_signal', 'out_of_direction'].includes(row.lane);
+const postingUrl = (posting) => /^https?:/.test(posting.canonical_url) ? posting.canonical_url : `https://${posting.canonical_url}`;
 const factsMap = (facts) => Object.fromEntries(facts.map((fact) => [fact.id, dependencyHash(fact)]));
 function inputState(inputs) {
   return { facts: factsMap(inputs.facts), rules: dependencyHash(inputs.rules), policy: dependencyHash({ policy: inputs.policy, jobType: inputs.profile?.search?.jobType ?? null }),
@@ -189,13 +190,14 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     const id = row.posting_id;
     const fence = claimItem(db, id, { owner, now }); if (!fence) return;
     const posting = db.prepare('SELECT * FROM postings WHERE id=?').get(id);
-    const url = /^https?:/.test(posting.canonical_url) ? posting.canonical_url : `https://${posting.canonical_url}`;
+    const url = postingUrl(posting);
     const alias = db.prepare("SELECT alias FROM posting_aliases WHERE posting_id=? AND kind IN ('req','company_req') ORDER BY CASE kind WHEN 'req' THEN 0 ELSE 1 END LIMIT 1").get(id);
     const requisition = alias?.alias.split(':').at(-1) ?? providerRequisition(url)?.id ?? null;
     let result;
+    // Count dispatches synchronously so concurrent starts see the exact fetch cap.
+    receipt.counts.fetched += 1;
     try { result = await fetcher.fetch({ postingId: id, url, known: { company: posting.company, title: posting.title, requisition } }); }
     catch (error) { result = { ok: false, error: error.message }; }
-    receipt.counts.fetched += 1;
     tick();
     const validation = validateSnapshot({ ...posting, url, requisition }, result);
     await refreshInputs();
@@ -225,6 +227,30 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         VALUES (?,?,?,?,?,?,?,1,?,?,?)`).run(randomUUID(), id, hash, now, result.finalUrl ?? url, result.httpStatus ?? 200, result.method ?? 'html', JSON.stringify({ ...result, text: undefined }), JSON.stringify(segmentSections(result.text)), result.text);
       release(id, fence, { stage: 'judge' });
     });
+  }
+
+  async function fetchBatch(batch) {
+    const pending = batch.map((row) => ({ row, host: new URL(postingUrl(db.prepare('SELECT canonical_url FROM postings WHERE id=?').get(row.posting_id))).host }));
+    const activeHosts = new Set();
+    let failure;
+    await Promise.all(Array.from({ length: Math.min(concurrency, pending.length) }, async () => {
+      try {
+        while (pending.length && !failure) {
+          if (expired()) { receipt.stop_reason = 'deadline'; return; }
+          if (clock() - start >= duration * JUDGE_TIME_SHARE && due().some((r) => !['scan','fetch'].includes(r.stage))) return;
+          if (primaryStopped || spending.remaining() < 1 || receipt.counts.fetched >= maxFetches) return;
+          // Skip busy hosts rather than occupying a worker with a queued request.
+          const index = pending.findIndex(({ host }) => !activeHosts.has(host));
+          if (index < 0) return; // Active workers will drain their hosts' remaining rows.
+          const [{ row, host }] = pending.splice(index, 1);
+          activeHosts.add(host);
+          try { await fetchItem(row); }
+          finally { activeHosts.delete(host); }
+        }
+      } catch (error) { failure ??= { error }; }
+    }));
+    // Let every started fetch settle before propagating an error or finishing the run.
+    if (failure) throw failure.error;
   }
 
   async function judgeItem(row) {
@@ -351,13 +377,9 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       if (primaryStopped || spending.remaining() < 1) { receipt.stop_reason ??= 'budget'; break; }
       if (receipt.counts.fetched >= maxFetches) { receipt.stop_reason ??= 'fetch_budget'; break; }
       if (clock() - start >= duration * JUDGE_TIME_SHARE && receipt.counts.fetched) { receipt.stop_reason ??= 'deadline'; break; }
-      const batch = candidates.filter((r) => ['scan','fetch'].includes(r.stage)).slice(0, Math.min(Math.max(concurrency, FETCH_BATCH_MIN), maxFetches - receipt.counts.fetched));
+      const batch = candidates.filter((r) => ['scan','fetch'].includes(r.stage)).slice(0, Math.min(Math.max(concurrency * 2, FETCH_BATCH_MIN), maxFetches - receipt.counts.fetched));
       if (!batch.length) break;
-      for (const row of batch) {
-        if (expired()) { receipt.stop_reason = 'deadline'; break; }
-        if (clock() - start >= duration * JUDGE_TIME_SHARE && due().some((r) => !['scan','fetch'].includes(r.stage))) break;
-        await fetchItem(row);
-      }
+      await fetchBatch(batch);
       drainingCycle = true;
     }
     receipt.counts.attempts = db.prepare('SELECT COUNT(*) n FROM attempts WHERE run_id=?').get(runId).n;
