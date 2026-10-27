@@ -799,11 +799,14 @@ test('[B] adding the missing fact re-queues a missing_fact hold', async () => {
   const id = q.add(db, { snapshot: 'missingFact' });
   const judges = {
     primary: fakeJudge({ tier: 'primary', answers: () => ({ output: JUDGMENTS.missingFact }) }),
-    escalation: fakeJudge({ tier: 'escalation', answers: () => ({ output: JUDGMENTS.missingFact }) }),
+    // Amended for model-decides H1 (2026-10-27): the hold goes to one forced-decision call, which keeps the hold code.
+    escalation: fakeJudge({ tier: 'escalation', answers: (request) => (request.forceDecision === true
+      ? { output: { decision: 'not_eligible', assumption: 'Assumed Kubernetes experience is required and missing' } }
+      : { output: JUDGMENTS.missingFact }) }),
   };
   await runReview(runOptions(db, { pages: q.pages, judges }));
   const held = reviewOf(db, id);
-  assert.deepEqual([held.state, held.code, held.hold_owner], ['held', 'missing_fact', 'user']);
+  assert.deepEqual([held.state, held.decision, held.code, held.hold_owner], ['done', 'not_eligible', 'missing_fact', null]);
   const facts = [...FACTS, { id: 'kubernetes', statement: 'Operates Kubernetes clusters at work', polarity: 'has' }];
   const result = replan(db, { inputs: () => reviewInputs({ facts }), now: at(1) });
   assert.ok(result.requeued >= 1);
@@ -996,12 +999,14 @@ test('[B] the ledger reports sightings, attempts, quotes, visibility and termina
   const db = freshDb();
   const q = queue();
   const delivered = q.add(db, { id: 'p-led' });
-  const held = q.add(db, { id: 'p-held', snapshot: 'sales' });
+  // Amended for model-decides H1 (2026-10-27): an escalation-tier user_review is no longer held, so the held
+  // posting is a system hold instead (a full company quota at delivery).
+  const held = q.add(db, { id: 'p-held', company: 'Quota Full Example' });
   db.prepare("INSERT INTO observations (id, posting_id, source, source_id, partition, first_run_id, observed_at, fields_json, completeness_json, listed, content_hash) VALUES ('o-led', 'p-led', 'simplify', 's-led', 'simplify:1', 'scan-1', ?, '{}', '{}', 1, 'h-led')").run(T0);
   for (const partition of ['simplify:1', 'simplify:2']) {
     db.prepare("INSERT INTO observation_sightings (run_id, posting_id, observation_id, source, partition, seen_at) VALUES ('scan-1', 'p-led', 'o-led', 'simplify', ?, ?)").run(partition, T0);
   }
-  const answers = { 'p-led': { output: JUDGMENTS.eligible }, 'p-held': { output: JUDGMENTS.sales } };
+  const answers = { 'p-led': { output: JUDGMENTS.eligible }, 'p-held': { output: JUDGMENTS.eligible } };
   await runReview(runOptions(db, { pages: q.pages, judges: { primary: fakeJudge({ tier: 'primary', answers }), escalation: fakeJudge({ tier: 'escalation', answers }) } }));
   const ledger = postingLedger(db, [delivered, held]);
   const one = ledger.find((entry) => entry.postingId === delivered);

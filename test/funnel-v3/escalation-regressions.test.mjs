@@ -230,8 +230,11 @@ test('[B] a primary unclear always escalates without asking the second opinion (
   const { receipt, called } = await review(db, { ...q, policy: withSecondOpinion, secondOpinion: jev });
 
   assert.equal(asked(jev), 0, 'a primary unclear is never put to the second opinion');
-  assert.deepEqual(called('escalation'), ['p-unclear'], 'a primary unclear escalates');
-  assert.deepEqual(outcome(db, 'p-unclear'), POSTINGS.unclear.final, 'the escalation tier decides, as today');
+  // Amended for model-decides H1: the escalation tier may also receive the forced-decision call for this posting.
+  assert.deepEqual([...new Set(called('escalation'))], ['p-unclear'], 'a primary unclear escalates');
+  // Amended for model-decides H1 (2026-10-27): the escalation tier's missing_fact no longer becomes a user hold; it
+  // goes to a forced-decision call (scripted in model-decides-regressions). Only "never held for the user" is kept here.
+  assert.notEqual(reviewOf(db, 'p-unclear').hold_owner, 'user', 'the escalation tier decides; nothing is held for the user (model-decides H1)');
   assert.deepEqual(receipt.counts.secondOpinion, { asked: 0, agreed: 0, escalated: 0, errors: 0 },
     `a configured second opinion is reported even when it was never asked: ${JSON.stringify(receipt.counts)}`);
 });

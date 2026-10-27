@@ -139,10 +139,11 @@ test('[B] exploration-lane items are never held for the user: eligible is delive
     assert.equal(/^待核/.test(app?.skip_reason ?? ''), false, `${id} leaves no held application: ${app?.skip_reason}`);
   }
 
+  // Amended for model-decides H1 (2026-10-27): an ordinary-lane missing fact is no longer held for the user either; it
+  // goes to a forced-decision call (scripted in model-decides-regressions), so nothing awaits the user.
   const control = reviewOf(db, 'p-control');
-  assert.deepEqual({ state: control.state, code: control.code, hold_owner: control.hold_owner }, { state: 'held', code: 'missing_fact', hold_owner: 'user' },
-    'an ordinary-lane missing fact is still held for the user');
-  assert.deepEqual(receipt.awaiting_user.map((item) => item.postingId), ['p-control'], 'only the ordinary-lane item awaits the user');
+  assert.notEqual(control.hold_owner, 'user', 'an ordinary-lane missing fact is not held for the user (model-decides H1)');
+  assert.deepEqual(receipt.awaiting_user.map((item) => item.postingId), [], 'nothing awaits the user');
   assert.deepEqual(receipt.sampling ?? receipt.counts?.sampling, { judged: 4, found: 1 }, `receipt counts sampling: ${JSON.stringify(receipt)}`);
 
   const awaiting = awaitingSection(reviewReport(db, { receipt }));
@@ -177,7 +178,18 @@ test('[B] the report and the receipt group awaiting-user holds by missing fact (
     answers[id] = { output: JUDGMENTS.sales };
   }
 
-  const receipt = await runReview(runOptions(db, { budget: 20, answers, pages: q.pages }));
+  // Amended for model-decides H1 (2026-10-27): a run no longer creates these holds (it asks the model to decide), so
+  // they are the holds a release before H1 delivered (escalation-tier decide, then normal delivery). Such holds are
+  // still listed and grouped; the run below (budget 0) only writes the receipt.
+  const { decide } = await load('B6', './src/review/decide.mjs', ['decide']);
+  const { deliver } = await load('B6', './src/review/deliver.mjs', ['deliver']);
+  const { claimItem } = await load('B6', './src/review/lease.mjs', ['claimItem']);
+  const inputs = reviewInputs();
+  for (const [id, { output }] of Object.entries(answers)) {
+    const verdict = decide({ snapshotText: q.pages[urls[id]].text, judgment: output, facts: inputs.facts, policy: inputs.policy, tier: 'escalation', firstSeen: T0 });
+    deliver(db, { postingId: id, verdict, fence: claimItem(db, id, { owner: 'older-release', now: T0 }), now: T0, policy: inputs.screeningPolicy });
+  }
+  const receipt = await runReview(runOptions(db, { budget: 0, answers, pages: q.pages }));
   assert.equal(receipt.awaiting_user.length, 6, `fixture sanity: six holds await the user: ${JSON.stringify(receipt.awaiting_user)}`);
 
   const SALES_QUESTION = 'would you like to consider this sales role';

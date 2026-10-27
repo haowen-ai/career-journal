@@ -335,10 +335,9 @@ function rewriteJudgeDeps(db, postingId, tier, change, { inputsCode = null } = {
 const olderDecide = (db, postingId) => rewriteJudgeDeps(db, postingId, 'primary', { decide: 'sha256:older-decide-release' }, { inputsCode: 'sha256:older-code-release' });
 
 // The hold an older decide release delivered for this posting (review row and application, as deliver writes them).
-function heldByOlderDecide(db, postingId) {
+function heldByOlderDecide(db, postingId, { question = 'Proficiency in Python or R for data analysis.', holdFactIds = ['python'] } = {}) {
   const row = db.prepare('SELECT evidence_json FROM reviews WHERE posting_id = ?').get(postingId);
-  const question = 'Proficiency in Python or R for data analysis.';
-  const evidence = { ...parse(row.evidence_json), question, holdFactIds: ['python'] };
+  const evidence = { ...parse(row.evidence_json), question, holdFactIds };
   db.prepare("UPDATE reviews SET state = 'held', decision = 'unclear', code = 'missing_fact', hold_owner = 'user', hold_since = ?, evidence_json = ?, updated_at = ? WHERE posting_id = ?")
     .run(NOW, JSON.stringify(evidence), NOW, postingId);
   const app = applicationRow(db, postingId);
@@ -364,13 +363,19 @@ test('[B] review redecide --held re-decides held reviews from stored judgments w
     add('p-new-snapshot', 'eligible', JUDGMENTS.eligible); // the page changed since the judgment
     add('p-new-model', 'eligible', JUDGMENTS.eligible); // judged by another model
     add('p-done', 'eligible', JUDGMENTS.eligible); // done, not held: --held leaves it alone
-    const judges = { primary: fakeJudge({ tier: 'primary', answers }), escalation: fakeJudge({ tier: 'escalation', answers }) };
+    // Amended for model-decides H1 (2026-10-27): a run no longer holds p-real-hold for the user; its forced decision
+    // is scripted, and the genuine hold is then written as an older release delivered it (like the stale hold).
+    const escalationAnswers = (request) => (request.forceDecision === true
+      ? { output: { decision: 'eligible', assumption: 'Assumed Kubernetes experience can be learned on the job' } }
+      : answers[request.postingId]);
+    const judges = { primary: fakeJudge({ tier: 'primary', answers }), escalation: fakeJudge({ tier: 'escalation', answers: escalationAnswers }) };
     const run = await cli(['review', 'run', '--home', home, '--budget', '20'], { now: () => NOW, review: { judges, fetcher: fakeFetcher(pages) } });
     assert.equal(run.code, 0, `${run.stderr}${run.stdout}`);
     for (const id of Object.keys(answers)) {
       const row = reviewRow(db, id);
-      assert.deepEqual([row.state, row.decision], id === 'p-real-hold' ? ['held', 'unclear'] : ['done', 'eligible'], `${id} after the judging run`);
+      assert.deepEqual([row.state, row.decision], ['done', 'eligible'], `${id} after the judging run`);
     }
+    heldByOlderDecide(db, 'p-real-hold', { question: '• Hands-on experience operating Kubernetes clusters.', holdFactIds: ['kubernetes'] });
 
     // Emulate the live data home: holds and a rejection delivered by an older decide release from unchanged judgments.
     for (const id of ['p-stale-hold', 'p-user-resolved', 'p-submitted', 'p-new-snapshot']) { olderDecide(db, id); heldByOlderDecide(db, id); }
@@ -444,7 +449,11 @@ test('[B] a decision-code-only change re-decides from cached judgments with zero
     add('p-decide-stale-hold', 'eligible', JUDGMENTS.eligible);
     add('p-prompt', 'undergradOnly', JUDGMENTS.undergradOnly);
     add('p-schema', 'undergradOnly', JUDGMENTS.undergradOnly);
-    const judgesWith = () => ({ primary: fakeJudge({ tier: 'primary', answers }), escalation: fakeJudge({ tier: 'escalation', answers }) });
+    // Amended for model-decides H1 (2026-10-27): p-decide-hold's escalation-tier hold goes to a forced decision.
+    const escalationAnswers = (request) => (request.forceDecision === true
+      ? { output: { decision: 'eligible', assumption: 'Assumed Kubernetes experience can be learned on the job' } }
+      : answers[request.postingId]);
+    const judgesWith = () => ({ primary: fakeJudge({ tier: 'primary', answers }), escalation: fakeJudge({ tier: 'escalation', answers: escalationAnswers }) });
     const calledFor = (judges) => [...judges.primary.calls, ...judges.escalation.calls].map((call) => call.request.postingId);
     const reviewRun = (judges, now) => cli(['review', 'run', '--home', home, '--budget', '20'], { now: () => now, review: { judges, fetcher: fakeFetcher(pages) } });
 
@@ -452,7 +461,7 @@ test('[B] a decision-code-only change re-decides from cached judgments with zero
     assert.equal(first.code, 0, `${first.stderr}${first.stdout}`);
     const expected = {
       'p-decide-rejected': ['done', 'not_eligible', 'degree'],
-      'p-decide-hold': ['held', 'unclear', 'missing_fact'],
+      'p-decide-hold': ['done', 'eligible', 'missing_fact'], // model-decides H1: forced eligible, hold code kept
       'p-decide-stale-hold': ['done', 'eligible', null],
       'p-prompt': ['done', 'not_eligible', 'degree'],
       'p-schema': ['done', 'not_eligible', 'degree'],

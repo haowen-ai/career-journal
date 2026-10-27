@@ -161,7 +161,8 @@ test('[A] legacy applications on a Workday requisition and its -1 posting bind t
   assert.ok(one && two && one !== two, 'each application keeps its own posting');
   assert.equal(identityHolds(db), 0, 'two ATS postings of one requisition are not an identity conflict');
   assert.equal(conflictLinks(db), 0);
-  assert.equal(userHolds(db), 1, 'only the withdrawal of unknown provenance waits for the user');
+  // Amended for model-decides H2 (2026-10-27): the withdrawal of unknown provenance is re-queued as system work.
+  assert.equal(userHolds(db), 0, 'nothing waits for the user (model-decides H2)');
   assert.equal(reviewOf(db, two).state, 'due', 'the lead is refreshed');
   assert.ok(linked(db, one, two));
 });

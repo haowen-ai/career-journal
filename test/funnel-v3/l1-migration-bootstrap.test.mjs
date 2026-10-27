@@ -87,13 +87,15 @@ test('[L1] bootstrap re-queues automated withdrawals and held leads, preserves u
   assert.equal(r(automated).lane, 'bootstrap');
   assert.equal(r(declined).decision, 'reused');
   assert.equal(r(declined).code, 'user_declined');
-  assert.equal(r(unknown).state, 'held');
-  assert.equal(r(unknown).code, 'provenance_unknown');
-  assert.equal(r(unknown).hold_owner, 'user');
+  // Amended for model-decides H2 (2026-10-27): unknown provenance is system work, re-queued instead of held for the
+  // user (fetch and judgment of these rows are covered in model-decides-regressions).
+  assert.equal(r(unknown).state, 'due');
+  assert.notEqual(r(unknown).code, 'provenance_unknown');
+  assert.equal(r(unknown).hold_owner, null);
   assert.equal(r(heldAuto).state, 'due');
   assert.equal(db.prepare('SELECT skip_owner FROM applications WHERE id = ?').get(heldAuto.id).skip_owner, 'review');
-  assert.equal(r(heldOther).state, 'held');
-  assert.equal(db.prepare('SELECT skip_owner FROM applications WHERE id = ?').get(heldOther.id).skip_owner, 'legacy');
+  assert.equal(r(heldOther).state, 'due');
+  assert.equal(r(heldOther).hold_owner, null);
   assert.equal(r(visible).lane, 'refresh');
   assert.equal(applicationsCount(db), before, 'bootstrap never creates applications');
   const declinedRow = db.prepare('SELECT status, skip_reason FROM applications WHERE id = ?').get(declined.id);
