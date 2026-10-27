@@ -412,3 +412,82 @@ test('[B] review redecide --held re-decides held reviews from stored judgments w
     }
   });
 });
+
+// ===================================================================== T7
+
+// A release whose code differs from the one that judged: every tier's stored runtime parts carry `change`
+// (cached envelopes and raw logs follow, as in rewriteJudgeDeps) and the stored inputs carry another `code` hash.
+function olderRelease(db, postingId, change, inputsCode) {
+  for (const tier of ['primary', 'escalation']) {
+    if (parse(reviewRow(db, postingId).evidence_json).judgments?.[tier]) { rewriteJudgeDeps(db, postingId, tier, change, { inputsCode }); continue; }
+    const deps = parse(db.prepare('SELECT dep_hashes_json FROM reviews WHERE posting_id = ?').get(postingId).dep_hashes_json);
+    assert.ok(deps.runtime?.[tier], `${postingId}: ${tier} runtime dependencies were stored`);
+    deps.runtime[tier] = { ...deps.runtime[tier], ...change };
+    deps.inputs = { ...deps.inputs, code: inputsCode };
+    db.prepare('UPDATE reviews SET dep_hashes_json = ? WHERE posting_id = ?').run(JSON.stringify(deps), postingId);
+  }
+}
+
+test('[B] a decision-code-only change re-decides from cached judgments with zero judge calls; a prompt/schema change still re-judges (live T7)', async () => {
+  await withHome(async ({ home, db }) => {
+    const pages = {};
+    const answers = {};
+    const add = (id, snapshot, judged) => {
+      const url = `https://job-boards.greenhouse.io/examplecorp/jobs/${id}`;
+      insertPosting(db, { id, url, title: snapshotTitle(SNAPSHOTS[snapshot]), firstSeen: SEEN });
+      insertReview(db, { postingId: id, stage: 'fetch', firstSeen: SEEN, nextDue: SEEN });
+      pages[url] = page(url, SNAPSHOTS[snapshot]);
+      answers[id] = { output: judged };
+    };
+    add('p-decide-rejected', 'undergradOnly', JUDGMENTS.undergradOnly);
+    add('p-decide-hold', 'missingFact', JUDGMENTS.missingFact);
+    add('p-decide-stale-hold', 'eligible', JUDGMENTS.eligible);
+    add('p-prompt', 'undergradOnly', JUDGMENTS.undergradOnly);
+    add('p-schema', 'undergradOnly', JUDGMENTS.undergradOnly);
+    const judgesWith = () => ({ primary: fakeJudge({ tier: 'primary', answers }), escalation: fakeJudge({ tier: 'escalation', answers }) });
+    const calledFor = (judges) => [...judges.primary.calls, ...judges.escalation.calls].map((call) => call.request.postingId);
+    const reviewRun = (judges, now) => cli(['review', 'run', '--home', home, '--budget', '20'], { now: () => now, review: { judges, fetcher: fakeFetcher(pages) } });
+
+    const first = await reviewRun(judgesWith(), NOW);
+    assert.equal(first.code, 0, `${first.stderr}${first.stdout}`);
+    const expected = {
+      'p-decide-rejected': ['done', 'not_eligible', 'degree'],
+      'p-decide-hold': ['held', 'unclear', 'missing_fact'],
+      'p-decide-stale-hold': ['done', 'eligible', null],
+      'p-prompt': ['done', 'not_eligible', 'degree'],
+      'p-schema': ['done', 'not_eligible', 'degree'],
+    };
+    for (const [id, outcome] of Object.entries(expected)) {
+      const row = reviewRow(db, id);
+      assert.deepEqual([row.state, row.decision, row.code], outcome, `${id} after the judging run`);
+    }
+
+    // The live deploy: only post-model decision code (decide/clauses/deadline) differs from the release that judged.
+    const decisionOnly = ['p-decide-rejected', 'p-decide-hold', 'p-decide-stale-hold'];
+    for (const id of decisionOnly) olderRelease(db, id, { decide: 'sha256:older-decide-release' }, 'sha256:older-code-release');
+    heldByOlderDecide(db, 'p-decide-stale-hold'); // the older decision code delivered a hold the current one does not
+    // Model inputs differ: the prompt renderer, or the judgment schema.
+    olderRelease(db, 'p-prompt', { prompt: 'sha256:older-prompt-release' }, 'sha256:older-prompt-code');
+    olderRelease(db, 'p-schema', { schema: 'sha256:older-schema-release' }, 'sha256:older-schema-code');
+
+    const judges = judgesWith();
+    const second = await reviewRun(judges, '2026-10-21T12:00:00.000Z');
+    assert.equal(second.code, 0, `${second.stderr}${second.stdout}`);
+    const called = calledFor(judges);
+    assert.deepEqual(called.filter((id) => decisionOnly.includes(id)), [],
+      `a decision-code-only change never re-judges (no paid calls); it re-decides from the cached judgment: called ${JSON.stringify(called)}`);
+    for (const id of ['p-prompt', 'p-schema']) assert.ok(called.includes(id), `${id}: a model-input change still re-judges: called ${JSON.stringify(called)}`);
+    for (const [id, outcome] of Object.entries(expected)) {
+      const row = reviewRow(db, id);
+      assert.deepEqual([row.state, row.decision, row.code], outcome, `${id} after the run following the deploy`);
+    }
+    const app = applicationRow(db, 'p-decide-stale-hold');
+    assert.deepEqual([app.skip_reason, app.skip_owner], [null, null], 'the stale hold is re-decided and delivered (application no longer hidden)');
+
+    // Settled: a further run judges nothing.
+    const idle = judgesWith();
+    const third = await reviewRun(idle, '2026-10-21T13:00:00.000Z');
+    assert.equal(third.code, 0, `${third.stderr}${third.stdout}`);
+    assert.deepEqual(calledFor(idle), [], 'after re-deciding and re-judging, the stored dependencies are current');
+  });
+});
