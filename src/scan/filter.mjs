@@ -140,7 +140,7 @@ export function checkSeason(role, profile) {
 
 // -------------------------------------------------------------- job type
 
-const INTERNSHIP = /(?<![a-z])(interns?|internships?|co-?ops?|apprentices?|apprenticeships?|summer analysts?|summer associates?|working students?|placement year|industrial placement)(?![a-z])/;
+const INTERNSHIP = /(?<![a-z])(interns?|internships?|co-?ops?|apprentices?|apprenticeships?|summer analysts?|summer associates?|working students?|placements?|industrial placement|students?|fellows?|fellowships?|residents?|residency|graduate program|early career|university program|campus program|summer 20\d\d program|currently enrolled|class of 20\d\d)(?![a-z])/;
 
 export function checkJobType(role, profile) {
   const jobType = normalizeText(profile?.search?.jobType);

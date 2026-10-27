@@ -58,7 +58,9 @@ export function aliasesFor(record, { companyAliases } = {}) {
   if (record.source && record.sourceId != null && record.sourceId !== '') add('source', `source:${record.source}:${record.sourceId}`);
   const req = providerRequisition(record.url);
   if (req) add('req', `req:${req.provider}:${req.tenant || '-'}:${req.id}`);
-  const company = companyKey(record.company ?? '', companyAliases);
+  const compact = (name) => String(name).normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const configured = Object.entries(companyAliases ?? {}).find(([name]) => compact(name) === compact(record.company ?? ''))?.[1];
+  const company = compact(configured ?? record.company ?? '');
   const ids = [req?.id, record.requisitionId, record.externalId].filter((id) => id != null && id !== '' && !String(id).startsWith('posting:'));
   for (const id of ids) {
     const normalized = req?.provider === 'generic' && id === req.id ? id : shaped(String(id));
