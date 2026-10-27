@@ -736,7 +736,9 @@ test('[B] a completed-degree requirement the candidate satisfies is not a confli
   const text = SNAPSHOTS.eligible.replace("• Currently pursuing a Bachelor's or Master's degree in Statistics, Computer Science, or a related field.", `• ${quote}`);
   // The conflict claim cites the completed bachelor's (a fact the candidate has); only the code's degree-word
   // comparison against the master's constraint could turn it into a conflict.
-  const claimed = { key: 'degree', status: 'conflicts', quote, clause_alternatives: [], fact_ids: ['degree', 'bachelor'] };
+  // Amended for live L4: a claim that also cites a lacks/constraint fact now ignores its extra has facts and is confirmed,
+  // so this claim cites only the satisfying has fact (previously ['degree', 'bachelor']).
+  const claimed = { key: 'degree', status: 'conflicts', quote, clause_alternatives: [], fact_ids: ['bachelor'] };
   assert.equal(validateCriterion(text, claimed, DEGREE_FACTS).confirmedConflict, false, 'a claim that cites a satisfying fact is not a confirmed conflict');
   const contested = await decideWith({ text, facts: DEGREE_FACTS, judged: judgment({ criteria: [claimed] }) });
   assert.notEqual(contested.decision, 'not_eligible', `a completed bachelor's satisfies "${quote}"`);
