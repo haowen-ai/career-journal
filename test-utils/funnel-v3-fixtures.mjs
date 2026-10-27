@@ -140,9 +140,14 @@ export const JUDGMENTS = Object.freeze({
   lowFit: judgment({ fit: { level: 'low', strengths: [], gaps: ['forecasting'] } }),
 });
 
+// The title a snapshot's official page shows (its first line).
+export function snapshotTitle(text) {
+  return String(text).split('\n')[0];
+}
+
 // Official fetch results (spec section 6.1) for the R1 fetcher boundary.
 export function page(url, text, extra = {}) {
-  return { ok: true, httpStatus: 200, finalUrl: url, method: 'ats_api', title: text.split('\n')[0], requisitionId: null, company: null, locations: [], offices: [], remote: null, workplaceType: null, employmentType: null, text, jsonLd: false, closedWording: false, ...extra };
+  return { ok: true, httpStatus: 200, finalUrl: url, method: 'ats_api', title: snapshotTitle(text), requisitionId: null, company: null, locations: [], offices: [], remote: null, workplaceType: null, employmentType: null, text, jsonLd: false, closedWording: false, ...extra };
 }
 
 // Source records as adapters hand them to ingestBatch (spec section 4.1).

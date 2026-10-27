@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { freshDb, load, insertPosting, insertReview, reviewOf, fakeJudge, fakeFetcher, T0, at } from '../../test-utils/funnel-v3.mjs';
-import { FACTS, REVIEW_POLICY, SCREENING_POLICY, SNAPSHOTS, JUDGMENTS, page, reviewInputs } from '../../test-utils/funnel-v3-fixtures.mjs';
+import { FACTS, REVIEW_POLICY, SCREENING_POLICY, SNAPSHOTS, JUDGMENTS, page, snapshotTitle, reviewInputs } from '../../test-utils/funnel-v3-fixtures.mjs';
 
 const worker = () => load('L2', './src/review/worker.mjs', ['runReview']);
 const budgetModule = () => load('L2', './src/review/budget.mjs', ['createBudget']);
@@ -18,7 +18,7 @@ function arrive(db, { now, deadline = null, snapshot = 'eligible' } = {}) {
   serial += 1;
   const id = `p-${String(serial).padStart(4, '0')}`;
   const url = `https://job-boards.greenhouse.io/examplecorp/jobs/${id}`;
-  insertPosting(db, { id, url, firstSeen: now });
+  insertPosting(db, { id, url, title: snapshotTitle(SNAPSHOTS[snapshot]), firstSeen: now });
   insertReview(db, { postingId: id, stage: 'fetch', firstSeen: now, nextDue: now, lane: deadline ? 'deadline' : 'new', deadline: deadline ? { kind: 'cutoff', date: deadline } : null });
   pages[url] = page(url, SNAPSHOTS[snapshot]);
   return id;
