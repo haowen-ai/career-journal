@@ -182,7 +182,7 @@ test('queue verify --result skip withdraws the lead with an event carrying the r
     const event = db.prepare("SELECT event_type, note, source_json, status_after FROM application_events WHERE application_id = ? AND event_type = 'queue_skipped'").get(first.id);
     assert.equal(event.note, reason);
     assert.equal(event.status_after, 'withdrawn');
-    assert.deepEqual(JSON.parse(event.source_json), { kind: 'queue-verify', reason, result: 'skip' });
+    assert.deepEqual(JSON.parse(event.source_json), { kind: 'queue-verify', reason, result: 'skip', actor: 'user' });
   } finally { db.close(); }
   const queue = await json(['queue', 'list', '--home', home]);
   assert.equal(queue.some((item) => item.id === first.id), false);
