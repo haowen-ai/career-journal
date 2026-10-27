@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { defaultConfig, validateTimezone } from '../config/defaults.mjs';
 import { loadConfig, saveConfig } from '../config/store.mjs';
-import { openDatabase, openReadOnlyDatabase, migrate, pendingMigrationError } from '../storage/database.mjs';
+import { openDatabase, openReadOnlyDatabase, migrate, pendingMigrationError, assertSchemaNotNewer } from '../storage/database.mjs';
 import { assertPublicEmailAddress, configureEmailAccount, listEmailAccounts, emailSetupState } from '../email/accounts.mjs';
 import { upsertTask, listTasks, automationSetupState, taskEmailAccountIds } from '../automation/registry.mjs';
 import { validSecretReference } from '../secrets/reference.mjs';
@@ -92,6 +92,11 @@ export async function setup(home, answers = {}) {
     created = true;
   }
   if (answers.timezone !== undefined) config.timezone = validateTimezone(answers.timezone);
+  const existingDatabase = path.resolve(home, config.data.database);
+  if (existsSync(existingDatabase)) {
+    const inspect = openReadOnlyDatabase(existingDatabase);
+    try { assertSchemaNotNewer(inspect); } finally { inspect.close(); }
+  }
   if (answers.email?.mode === 'skip') {
     config.email.setupState = 'skipped';
   } else if (answers.email?.mode === 'configure') {

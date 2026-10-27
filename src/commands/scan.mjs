@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { loadConfig } from '../config/store.mjs';
 import { openHomeDatabase } from '../runtime/home.mjs';
-import { migrate, openDatabase, openReadOnlyDatabase, pendingMigrationError } from '../storage/database.mjs';
+import { migrate, openDatabase, openReadOnlyDatabase, pendingMigrationError, assertSchemaNotNewer } from '../storage/database.mjs';
 import { loadScanProfile } from '../scan/profile-input.mjs';
 import { runScan } from '../scan/run.mjs';
 import { configuredDecisionAdapters } from './email.mjs';
@@ -27,6 +27,7 @@ async function openDryRunDatabase(home) {
     return { root, config, db };
   }
   const db = openReadOnlyDatabase(databasePath);
+  assertSchemaNotNewer(db);
   const pending = migrate(db, { dryRun: true }).pending;
   if (pending.length) {
     db.close();

@@ -45,6 +45,7 @@ export function defaultProfile() {
       season: null,
       directions: { primary: [], secondary: [] },
       locations: [],
+      countries: [],
       remoteOk: null,
       exclusions: [],
     },
@@ -61,6 +62,7 @@ export function defaultProfile() {
     },
     pace: { batchSize: 5, scanTime: '08:00', notify: 'desktop' },
     sources: {
+      expected: [],
       atsBoards: [],
       careerOps: false,
       simplify: { enabled: false, url: null },
@@ -200,6 +202,7 @@ const fieldRules = Object.freeze({
   'search.directions.primary': list(oneOf(directionIds)),
   'search.directions.secondary': list(oneOf(directionIds)),
   'search.locations': list(location, { identity: (item) => item.label.trim().toLowerCase() }),
+  'search.countries': list(pattern(/^[A-Z]{2}$/, 'an ISO 3166 alpha-2 country code')),
   'search.remoteOk': nullable(boolean),
   'search.exclusions': list(nonEmptyText(200), { identity: (item) => item.trim().toLowerCase() }),
   'candidate.degree.level': nullable(oneOf(degreeLevels)),
@@ -218,6 +221,7 @@ const fieldRules = Object.freeze({
   'pace.scanTime': pattern(/^(?:[01]\d|2[0-3]):[0-5]\d$/, 'a 24-hour time in HH:MM form, such as 08:00'),
   'pace.notify': oneOf(notifyChannels),
   'sources.atsBoards': list(atsBoard, { identity: (item) => `${item.ats}:${item.board.toLowerCase()}` }),
+  'sources.expected': list(oneOf(['atsBoards', 'careerops', 'simplify'])),
   'sources.careerOps': boolean,
   'sources.simplify.enabled': boolean,
   'sources.simplify.url': nullable(webUrl({ httpsOnly: true })),
@@ -236,7 +240,7 @@ const textFields = new Set([
 ]);
 const materialFileFields = Object.freeze(['materials.resumePath', 'materials.transcriptPath']);
 const managedFields = new Set(['schemaVersion', 'updatedAt']);
-const optionalFields = new Set(['interview.asked', 'sources.simplify.urls']);
+const optionalFields = new Set(['interview.asked', 'sources.simplify.urls', 'search.countries', 'sources.expected']);
 
 export const profileFields = Object.freeze(Object.keys(fieldRules).filter((field) => !managedFields.has(field)));
 
@@ -321,6 +325,8 @@ export function normalizeProfile(profile) {
   const next = tidy(profile);
   if (!isObject(next)) return next;
   const defaults = defaultProfile();
+  if (isObject(next.search)) next.search.countries ??= [];
+  if (isObject(next.sources)) next.sources.expected ??= [];
   for (const field of Object.keys(fieldRules)) {
     if (getPath(next, field) !== '' || getPath(defaults, field) !== null) continue;
     const parts = field.split('.');
