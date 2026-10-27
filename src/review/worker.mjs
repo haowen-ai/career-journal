@@ -237,9 +237,9 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       if (!output) {
         if (tier === 'primary' && primaryStopped) break;
         if (activeCooldown(db, `judge:${tier}`, { now })) { receipt.stop_reason ??= 'quota_cooldown'; if (tier === 'primary') primaryStopped = true; break; }
-        // Reservations are paid attempts, including escalations and retries.
+        // Hold the full retry allowance while exploration is outstanding.
         // Higher lanes may continue next run after exploration has been served.
-        if (!exploration.has(id) && explorationReserved() > 0 && spending.remaining() <= explorationReserved()) break;
+        if (!exploration.has(id) && explorationReserved() > 0 && spending.remaining() <= explorationReserved() * (1 + maxRetries)) break;
         const attempt = atomic(db, () => {
           assertFence(db, id, fence);
           return spending.reserve({ postingId: id, stage: 'judge', runner: adapter.runner, model: adapter.model, tier, now });

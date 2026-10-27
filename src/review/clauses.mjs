@@ -96,49 +96,9 @@ export function normalizeQuote(text) { return normalizedWithOffsets(text).value;
 
 export function findQuote(text, quote) {
   if (typeof quote !== 'string' || !quote.trim()) return null;
-  const haystack = normalizedWithOffsets(text);
-  const needle = normalizeQuote(quote);
-  const position = haystack.value.indexOf(needle);
+  const position = String(text).indexOf(quote);
   if (position < 0) return null;
-  return { start: haystack.starts[position], end: haystack.ends[position + needle.length - 1], text: String(text).slice(haystack.starts[position], haystack.ends[position + needle.length - 1]) };
-}
-
-function words(text) {
-  return normalizeQuote(text).toLowerCase().replace(/[^\p{L}\p{N}+#]+/gu, ' ').trim();
-}
-
-function relatedFact(fact, text) {
-  if (!fact || fact.polarity !== 'lacks') return false;
-  const branch = words(text);
-  const identity = words(`${fact.id} ${fact.statement} ${JSON.stringify(fact.value ?? '')}`);
-  const tokens = branch.split(' ').filter((word) => word.length > 2 && !['the','and','for','with','from','experience','programming','proficiency','required','must','have','one','any','such','including','skills'].includes(word));
-  return tokens.some((token) => identity.split(' ').includes(token));
-}
-
-function incompatibleConstraint(fact, text) {
-  if (fact?.polarity !== 'constraint') return false;
-  const level = words(fact.value?.level ?? '');
-  const clause = words(text);
-  // A level constraint describes current enrolment. A matching category or a
-  // higher completed degree alone cannot prove a mandatory conflict.
-  const levels = [
-    ['bachelors', /\b(?:undergraduate|bachelor(?:s)?)\b/],
-    ['masters', /\bmaster(?:s)?\b/],
-    ['doctoral', /\b(?:doctoral|doctorate|phd|ph d)\b/],
-  ];
-  const actual = levels.find(([name, pattern]) => name === level || pattern.test(level))?.[0];
-  const required = levels.filter(([, pattern]) => pattern.test(clause)).map(([name]) => name);
-  return Boolean(actual && required.length && !required.includes(actual)
-    && /\b(?:pursuing|enrolled|standing|students?|only|exclusively)\b/.test(clause));
-}
-
-const conflictsWith = (fact, text) => relatedFact(fact, text) || incompatibleConstraint(fact, text);
-
-function alternativeBranches(clause) {
-  const text = normalizeQuote(clause).replace(BULLET, '').replace(/[.!?]+$/, '');
-  if (!/\bor\b|\/|\bone of\b|\bany of\b|\bsuch as\b|\be\.g\.|\bincluding\b/i.test(text)) return [];
-  const list = text.split(/\b(?:one of|any of|such as|including)\b|\be\.g\.,?/i).at(-1);
-  return list.split(/\s+or\s+|\/|,|\s+and\s+/i).map((part) => words(part)).filter(Boolean);
+  return { start: position, end: position + quote.length, text: quote };
 }
 
 export function validateCriterion(text, criterion, facts) {
@@ -148,31 +108,15 @@ export function validateCriterion(text, criterion, facts) {
   const section = segmentSections(text).find((item) => item.start <= found.start && found.start < item.end)?.kind ?? 'unknown';
   const clause = clauseAt(text, found.start);
   const result = { ...base, valid: true, reason: null, section, clause };
-  if (/\b(?:preferred|optional|nice.to.have|bonus(?: points)?|not required)\b/i.test(clause.text)) return { ...result, reason: 'non_mandatory' };
+  if (section === 'preferred' || /\b(?:preferred|optional|nice.to.have|bonus(?: points)?|not required)\b/i.test(clause.text)) return { ...result, reason: 'non_mandatory' };
   if (criterion.status !== 'conflicts') return result;
-  if (!['required', 'eligibility'].includes(section)) return { ...result, reason: 'non_mandatory' };
-  if (/\bor\s+equivalent(?:\s+practical)?\s+experience\b/i.test(clause.text)) return { ...result, reason: 'equivalent_experience' };
-  const body = normalizeQuote(clause.text.replace(BULLET, ''));
-  const quote = normalizeQuote(criterion.quote.replace(BULLET, ''));
-  if (found.end > clause.end || quote.length < body.length * 0.9) return { ...result, valid: false, reason: 'partial_clause' };
+  const body = normalizeQuote(clause.text.replace(BULLET, '')).trim();
+  const quote = normalizeQuote(criterion.quote.replace(BULLET, '')).trim();
+  if (found.end > clause.end || quote !== body) return { ...result, valid: false, reason: 'partial_clause' };
   const cited = (criterion.fact_ids ?? []).map((id) => facts.find((fact) => fact.id === id));
-  const branches = alternativeBranches(clause.text);
-  if (branches.length) {
-    const supplied = (criterion.clause_alternatives ?? []).map((item) => words(item));
-    const complete = branches.every((branch) => supplied.some((item) => item && (` ${branch} `.includes(` ${item} `) || ` ${item} `.includes(` ${branch} `))));
-    if (!complete) return { ...result, reason: 'incomplete_alternatives' };
-    // Shared framing (e.g. "a degree in") cannot establish a distinct qualification.
-    const tokens = branches.map((branch) => branch.split(' ').filter((token) => token.length > 2));
-    const shared = tokens[0].filter((token) => tokens.every((branch) => branch.includes(token)));
-    const branchFact = (fact, index) => {
-      if (!fact) return false;
-      const distinctive = tokens[index].filter((token) => !shared.includes(token));
-      if (!distinctive.length) return false;
-      const identity = words(`${fact.id} ${fact.statement} ${JSON.stringify(fact.value ?? '')}`).split(' ');
-      return distinctive.every((token) => identity.includes(token));
-    };
-    if (!branches.every((branch, index) => !facts.some((fact) => fact.polarity === 'has' && branchFact(fact, index))
-      && cited.some((fact) => fact?.polarity === 'lacks' && branchFact(fact, index) || incompatibleConstraint(fact, branch)))) return { ...result, reason: 'missing_fact' };
-  } else if (!cited.some((fact) => conflictsWith(fact, clause.text))) return { ...result, reason: 'missing_fact' };
+  if (cited.some((fact) => fact?.polarity === 'has')) return { ...result, reason: 'contradictory_fact' };
+  if (!cited.length || cited.some((fact) => !fact || !['lacks', 'constraint'].includes(fact.polarity))) return { ...result, reason: 'missing_fact' };
+  // The model decides whether the cited facts contradict this whole requirement.
+  // Word overlap, degree levels and OR-branch semantics cannot validate that claim.
   return { ...result, confirmedConflict: true };
 }
