@@ -252,7 +252,9 @@ export function decide({ snapshotText, judgment, facts, policy, tier, firstSeen,
     return rejected(code, 'The quoted alternatives all fall outside your policy.');
   }
   const advisoryCriterion = ({ criterion, validation }) => {
-    if (criterion.status !== 'unclear' || !validation.valid || !criterion.fact_ids?.length) return false;
+    if (criterion.status !== 'unclear' || !validation.valid) return false;
+    // Without cited facts, only a required-section clause can raise a question.
+    if (!criterion.fact_ids?.length) return validation.section !== 'required';
     const cited = criterion.fact_ids.map((id) => facts.find((fact) => fact.id === id));
     return cited.every((fact) => fact && /^(?:availability|.+-availability)$/.test(fact.id)) || cited.every((fact) => fact?.polarity === 'has');
   };
