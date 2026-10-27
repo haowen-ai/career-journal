@@ -11,6 +11,11 @@ import { parseScanOutput, scanCareerOps, widenPortals } from '../../src/integrat
 import { htmlToText } from '../../src/scan/text.mjs';
 import { ATS_URLS, SIMPLIFY_URL, fixtureFetch, scanFixtures } from '../../test-utils/scan-fixtures.mjs';
 
+// Collector envelope (screening plan, frozen contract): { sources: [...], batches: [{ source, partition, rawCount, records }] }.
+const records = (result) => (result.batches ?? []).flatMap((batch) => batch.records);
+const valid = (items) => items.filter((item) => !item.invalid);
+const pick = (object, keys) => Object.fromEntries(keys.map((key) => [key, object[key]]));
+
 test('uses the official public job-board endpoints', () => {
   assert.equal(ATS_ENDPOINTS.greenhouse('examplecorp'), ATS_URLS.greenhouse);
   assert.equal(ATS_ENDPOINTS.lever('examplelabs'), ATS_URLS.lever);
@@ -19,9 +24,12 @@ test('uses the official public job-board endpoints', () => {
 
 test('Greenhouse parser decodes escaped HTML and normalises each job', async () => {
   const { greenhouse } = await scanFixtures();
-  const roles = parseGreenhouse(greenhouse, { ats: 'greenhouse', board: 'examplecorp' });
-  assert.equal(roles.length, 6, 'records without an id or an http(s) link are skipped');
-  assert.deepEqual({ ...roles[0], description: undefined }, {
+  const all = parseGreenhouse(greenhouse, { ats: 'greenhouse', board: 'examplecorp' });
+  assert.equal(all.length, 8, 'malformed records are emitted with a reason, never skipped');
+  assert.equal(all.filter((item) => typeof item.invalid === 'string' && item.invalid.length > 0).length, 2);
+  const roles = valid(all);
+  assert.equal(roles.length, 6);
+  assert.deepEqual(pick(roles[0], ['source', 'sourceId', 'company', 'title', 'locations', 'url', 'postedAt', 'categories', 'requisitionId', 'listed', 'invalid']), {
     source: 'greenhouse',
     sourceId: '4000001',
     company: 'Example Corp',
@@ -29,15 +37,18 @@ test('Greenhouse parser decodes escaped HTML and normalises each job', async () 
     locations: ['New York, NY'],
     url: 'https://job-boards.greenhouse.io/examplecorp/jobs/4000001',
     postedAt: '2026-09-28T18:00:00.000Z',
-    description: undefined,
     categories: ['Engineering'],
     requisitionId: 'REQ-1001',
+    listed: true,
+    invalid: null,
   });
   assert.match(roles[0].description, /Pursuing a Bachelor's or Master's degree/);
   assert.match(roles[0].description, /Python & SQL/);
   assert.doesNotMatch(roles[0].description, /[<>]|&lt;|&amp;/);
   assert.equal(roles[1].postedAt, '2026-09-20T10:00:00.000Z', 'falls back to updated_at');
   assert.equal(parseGreenhouse({ jobs: [{ id: 1, title: 'Intern', absolute_url: 'https://example.com/1' }] }, { board: 'example-corp' })[0].company, 'Example Corp');
+  const unioned = parseGreenhouse({ jobs: [{ id: 2, title: 'Intern', absolute_url: 'https://example.com/2', location: { name: 'New York, NY' }, offices: [{ name: 'Seattle', location: 'Seattle, WA' }] }] }, { board: 'examplecorp' })[0];
+  assert.deepEqual(unioned.locations, ['New York, NY', 'Seattle, WA'], 'Greenhouse unions the primary location with every office');
   assert.deepEqual(parseGreenhouse(null, { board: 'x' }), []);
 });
 
@@ -56,14 +67,15 @@ test('Lever parser reads categories, lists, timestamps, and remote workplace typ
   assert.equal(parseLever({ data: lever }, { board: 'examplelabs' }).length, 5, 'tolerates a wrapped list');
 });
 
-test('Ashby parser skips unlisted jobs and merges secondary locations', async () => {
+test('Ashby parser keeps unlisted jobs as unlisted records and merges secondary locations', async () => {
   const { ashby } = await scanFixtures();
   const roles = parseAshby(ashby, { ats: 'ashby', board: 'examplequant', company: 'Example Quant' });
-  assert.deepEqual(roles.map((item) => item.sourceId), ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'dddddddd-dddd-4ddd-8ddd-dddddddddddd']);
+  assert.deepEqual(roles.map((item) => item.sourceId), ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'dddddddd-dddd-4ddd-8ddd-dddddddddddd']);
+  assert.deepEqual(roles.map((item) => item.listed), [true, true, false, true]);
   assert.equal(roles[0].remote, true);
-  assert.deepEqual(roles[2].locations, ['Manhattan, New York', 'Seattle, WA']);
+  assert.deepEqual(roles[3].locations, ['Manhattan, New York', 'Seattle, WA']);
   assert.deepEqual(roles[0].categories, ['Research', 'Machine Learning', 'Intern']);
-  assert.equal(roles[2].description, "Open to students pursuing a Bachelor's, Master's, or PhD.");
+  assert.equal(roles[3].description, "Open to students pursuing a Bachelor's, Master's, or PhD.");
 });
 
 test('a failing board is reported without stopping the other boards', async () => {
@@ -74,7 +86,8 @@ test('a failing board is reported without stopping the other boards', async () =
     { ats: 'lever', board: 'examplelabs' },
     { ats: 'ashby', board: 'examplequant' },
   ], fixtureFetch({ [ATS_URLS.greenhouse]: greenhouse, [ATS_URLS.lever]: 404, [ATS_URLS.ashby]: new Error('socket hang up') }, calls));
-  assert.equal(result.roles.length, 6);
+  assert.equal(records(result).length, 8, 'the Greenhouse batch keeps its two malformed rows as invalid records');
+  for (const batch of result.batches) assert.equal(batch.rawCount, batch.records.length, `${batch.partition}: rawCount === records.length`);
   assert.deepEqual(result.sources.map((item) => [item.source, item.status, item.detail ?? null]), [
     ['greenhouse', 'ok', null],
     ['lever', 'error', 'HTTP 404'],
@@ -83,7 +96,7 @@ test('a failing board is reported without stopping the other boards', async () =
   assert.deepEqual(calls.sort(), Object.values(ATS_URLS).sort());
 });
 
-test('Simplify is skipped unless opted in with a URL, and only reads active listings', async () => {
+test('Simplify is skipped unless opted in with a URL, and keeps inactive and hidden listings as unlisted records', async () => {
   const { simplify } = await scanFixtures();
   const calls = [];
   const fetchImpl = fixtureFetch({ [SIMPLIFY_URL]: simplify }, calls);
@@ -93,13 +106,15 @@ test('Simplify is skipped unless opted in with a URL, and only reads active list
   const result = await fetchSimplify({ enabled: true, url: SIMPLIFY_URL }, fetchImpl);
   assert.deepEqual(calls, [SIMPLIFY_URL]);
   assert.equal(result.sources[0].status, 'ok');
-  assert.equal(result.roles.length, 6, 'inactive listings are skipped');
-  const [first, second] = result.roles;
+  const listed = records(result);
+  assert.equal(listed.length, 7, 'inactive listings are kept as unlisted records');
+  assert.deepEqual(listed.filter((item) => item.listed === false).map((item) => item.sourceId), ['f0000004-0000-4000-8000-000000000004']);
+  const [first, second] = listed;
   assert.equal(first.url, 'https://job-boards.greenhouse.io/examplecorp/jobs/4000001?ref=Simplify', 'utm parameters are removed');
   assert.deepEqual(first.terms, ['Summer 2027']);
   assert.equal(second.postedAt, new Date(1790697600 * 1000).toISOString());
   assert.match(parseSimplify(simplify).find((item) => item.company === 'Example Defense').description, /Sponsorship: U\.S\. Citizenship is Required/);
-  assert.equal(parseSimplify({ listings: simplify }).length, 6);
+  assert.equal(parseSimplify({ listings: simplify }).length, 7);
 });
 
 test('the Simplify module documents that it is opt-in with no redistribution', async () => {
@@ -126,10 +141,13 @@ test('CareerOps runs only when enabled and detected, through the read-only bridg
     });
     assert.deepEqual(invocation.args, [path.join(directory, 'career-journal-adapter.mjs'), 'scan']);
     assert.deepEqual(JSON.parse(invocation.stdin), { action: 'scan', readOnly: true });
-    assert.equal(result.sources[0].status, 'ok');
-    assert.equal(result.roles.length, 1, 'roles without a link are skipped');
-    assert.deepEqual(result.roles[0].locations, ['Seattle, WA']);
-    assert.equal(result.roles[0].source, 'careerops');
+    assert.equal(result.sources[0].status, 'partial', 'output without per-partition status is the legacy path');
+    assert.match(result.sources[0].detail, /legacy/);
+    assert.equal(records(result).length, 2, 'a role without a link is emitted as invalid, not skipped');
+    const [role] = valid(records(result));
+    assert.ok(role);
+    assert.deepEqual(role.locations, ['Seattle, WA']);
+    assert.equal(role.source, 'careerops');
 
     const failed = await fetchCareerOpsRoles(true, { root: directory, pinnedVersion: '1.32.0' }, {
       execute: async () => ({ exitCode: 1, stdout: '', stderr: 'portal unavailable' }),
@@ -144,7 +162,7 @@ test('HTML job descriptions become readable text', () => {
   assert.equal(htmlToText('<script>alert(1)</script><b>Bold</b>&nbsp;text&#x21;'), 'Bold text!');
 });
 
-test('Simplify reads every configured list once, keeps a listing once, and reports each list', async () => {
+test('Simplify reads every configured list once, keeps one record per list with a partition per list, and reports each list', async () => {
   const { simplify } = await scanFixtures();
   const SECOND = 'https://example.com/simplify/off-season.json';
   const THIRD = 'https://example.com/simplify/broken.json';
@@ -153,14 +171,20 @@ test('Simplify reads every configured list once, keeps a listing once, and repor
   const fetchImpl = fixtureFetch({ [SIMPLIFY_URL]: simplify, [SECOND]: [simplify[0], extra], [THIRD]: 500 }, calls);
   const result = await fetchSimplify({ enabled: true, url: SIMPLIFY_URL, urls: [SECOND, SIMPLIFY_URL, THIRD] }, fetchImpl);
   assert.deepEqual(calls, [SIMPLIFY_URL, SECOND, THIRD], 'a repeated link is read once');
-  assert.deepEqual(result.sources.map((item) => [item.url, item.status, item.count]), [[SIMPLIFY_URL, 'ok', 6], [SECOND, 'ok', 1], [THIRD, 'error', 0]]);
-  assert.equal(result.roles.length, 7, 'a listing on two lists is kept once');
-  assert.equal(result.roles.at(-1).sourceId, 'off-season-1');
+  assert.deepEqual(result.sources.map((item) => [item.url, item.status, item.count]), [[SIMPLIFY_URL, 'ok', 7], [SECOND, 'ok', 2], [THIRD, 'error', 0]]);
+  assert.equal(records(result).length, 9, 'a listing on two lists is one record per list; Simplify no longer dedupes across lists');
+  const partitions = result.batches.map((batch) => batch.partition);
+  assert.equal(new Set(partitions).size, partitions.length, 'each list is its own partition');
+  assert.ok(partitions.every((partition) => /^simplify:/.test(partition)), partitions.join(', '));
+  const shared = records(result).filter((item) => item.sourceId === simplify[0].id);
+  assert.equal(shared.length, 2);
+  assert.notEqual(shared[0].partition, shared[1].partition);
+  assert.equal(records(result).at(-1).sourceId, 'off-season-1');
   const onlyExtra = await fetchSimplify({ enabled: true, url: null, urls: [SECOND] }, fixtureFetch({ [SECOND]: [extra] }));
-  assert.equal(onlyExtra.roles.length, 1);
+  assert.equal(records(onlyExtra).length, 1);
 });
 
-test('without a CareerOps adapter the scan uses the built-in read-only bridge', async () => {
+test('without a CareerOps adapter the scan uses the built-in bridge in scan-raw mode; legacy output is partial', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'career-journal-careerops-builtin-'));
   try {
     await writeFile(path.join(directory, 'package.json'), JSON.stringify({ name: 'career-ops', version: '1.32.0' }));
@@ -168,12 +192,22 @@ test('without a CareerOps adapter the scan uses the built-in read-only bridge', 
     const result = await fetchCareerOpsRoles(true, { root: directory, pinnedVersion: '1.32.0' }, {
       execute: async (value) => {
         invocation = value;
-        return { exitCode: 0, stdout: JSON.stringify({ ok: true, roles: [{ id: 'a', company: 'Example Corp', title: 'Data Intern', url: 'https://example.com/a', location: 'Chicago, IL' }] }), stderr: '' };
+        return { exitCode: 0, stdout: JSON.stringify({ ok: true,
+          roles: [{ company: 'Example Corp', title: 'Data Intern', url: 'https://example.com/a', locations: ['Chicago, IL'], partition: 'greenhouse:Example Corp' }],
+          partitions: [{ partition: 'greenhouse:Example Corp', status: 'ok', count: 1, rawCount: 1, truncated: false }] }), stderr: '' };
       },
     });
-    assert.deepEqual(invocation.args, [BUILT_IN_SCAN_BRIDGE, 'scan']);
+    assert.deepEqual(invocation.args, [BUILT_IN_SCAN_BRIDGE, 'scan-raw']);
     assert.equal(invocation.cwd, directory);
-    assert.deepEqual(result.sources[0], { source: 'careerops', status: 'ok', count: 1, detail: 'built-in read-only bridge' });
+    const partition = result.sources.find((item) => item.partition === 'greenhouse:Example Corp');
+    assert.ok(partition, JSON.stringify(result.sources));
+    assert.deepEqual(pick(partition, ['source', 'status', 'count']), { source: 'careerops', status: 'ok', count: 1 });
+    assert.equal(records(result).length, 1);
+    const legacy = await fetchCareerOpsRoles(true, { root: directory, pinnedVersion: '1.32.0' }, {
+      execute: async () => ({ exitCode: 0, stdout: JSON.stringify({ ok: true, roles: [{ id: 'a', company: 'Example Corp', title: 'Data Intern', url: 'https://example.com/a', location: 'Chicago, IL' }] }), stderr: '' }),
+    });
+    assert.equal(legacy.sources[0].status, 'partial');
+    assert.match(legacy.sources[0].detail, /legacy display-line bridge/);
     const wrongVersion = await fetchCareerOpsRoles(true, { root: directory, pinnedVersion: '9.9.9' });
     assert.match(wrongVersion.sources[0].detail, /9\.9\.9 is required/, 'the pinned version is still required');
   } finally { await rm(directory, { recursive: true, force: true }); }

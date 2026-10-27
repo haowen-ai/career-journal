@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "httpStatus": 200,
+  "finalUrl": "https://job-boards.greenhouse.io/examplemedia/jobs/900632",
+  "method": "ats_api",
+  "title": "Staff Data Scientist, Experimentation",
+  "requisitionId": "R900632",
+  "company": "Example Media Group",
+  "locations": [],
+  "offices": [],
+  "remote": null,
+  "workplaceType": null,
+  "employmentType": null,
+  "text": "Staff Data Scientist, Experimentation\nLocation: New York, NY\n\nThis is a full-time, permanent position starting in February 2027; the role may be based in New York, NY or remote within the United States.\n\nAbout the role\nYou will join an analytics group that builds models and dashboards, writes SQL and Python, and presents findings to product and operations leaders. The team reviews each other's work, shares notebooks, and keeps a weekly written update for partner teams. You will own several projects end to end and mentor newer teammates.\n\nResponsibilities\n• Build and maintain data pipelines for weekly reporting.\n• Design experiments and explain results to partner teams.\n• Document data definitions so others can reuse them.\n\nRequired Qualifications\n• At least five years of professional data science experience.\n• Experience designing controlled experiments.\n\nPreferred Qualifications\n• PhD in a quantitative field.\n",
+  "jsonLd": false,
+  "closedWording": false
+}

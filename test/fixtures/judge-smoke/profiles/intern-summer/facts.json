@@ -1,0 +1,31 @@
+[
+  {
+    "id": "degree",
+    "statement": "Pursuing a Master of Science in Statistics; expected graduation May 2028; not enrolled in any bachelor's program",
+    "polarity": "constraint",
+    "value": {
+      "level": "masters",
+      "graduation": "2028-05"
+    }
+  },
+  {
+    "id": "python",
+    "statement": "Uses Python daily for analysis",
+    "polarity": "has"
+  },
+  {
+    "id": "sql",
+    "statement": "Writes SQL for analytics",
+    "polarity": "has"
+  },
+  {
+    "id": "scala",
+    "statement": "Has no Scala experience",
+    "polarity": "lacks"
+  },
+  {
+    "id": "auth",
+    "statement": "US citizen; needs no visa sponsorship",
+    "polarity": "has"
+  }
+]

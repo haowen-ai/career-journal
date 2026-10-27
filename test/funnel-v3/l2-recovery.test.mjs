@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { freshDb, tempDb, load, insertPosting, insertReview, reviewOf, applicationsCount, fakeJudge, fakeFetcher, Crash, T0, at, seedApplication } from '../../test-utils/funnel-v3.mjs';
-import { FACTS, REVIEW_POLICY, SCREENING_POLICY, SNAPSHOTS, JUDGMENTS, page, record } from '../../test-utils/funnel-v3-fixtures.mjs';
+import { FACTS, REVIEW_POLICY, SCREENING_POLICY, SNAPSHOTS, JUDGMENTS, page, record, reviewInputs } from '../../test-utils/funnel-v3-fixtures.mjs';
 
 const worker = () => load('L2', './src/review/worker.mjs', ['runReview', 'replan']);
 const lease = () => load('L2', './src/review/lease.mjs', ['acquireRunLease', 'claimItem', 'StaleLeaseError']);
@@ -33,7 +33,7 @@ function options(db, parts, overrides = {}) {
   return {
     db, runId: overrides.runId ?? 'review-1', owner: overrides.owner ?? 'worker-a', now: overrides.now ?? T0, budget: overrides.budget ?? 10, deadlineMs: 600_000,
     fetcher: parts.fetcher, judges: parts.judges, attemptDir: overrides.attemptDir ?? null, sleep: async () => {},
-    inputs: overrides.inputs ?? (() => ({ facts: FACTS, policy: REVIEW_POLICY, screeningPolicy: SCREENING_POLICY })),
+    inputs: overrides.inputs ?? (() => reviewInputs()),
     hooks: overrides.hooks ?? {},
   };
 }
@@ -160,7 +160,7 @@ test('[L2] a facts change during R3 invalidates the result at commit; nothing is
   const one = item(db, 'p-facts');
   let facts = FACTS;
   const parts = harness([one], { judgeHook: () => { facts = [...FACTS, { id: 'new', statement: 'Completed a statistics course', polarity: 'has' }]; } });
-  await runReview(options(db, parts, { inputs: () => ({ facts, policy: REVIEW_POLICY, screeningPolicy: SCREENING_POLICY }) }));
+  await runReview(options(db, parts, { inputs: () => reviewInputs({ facts }) }));
   const review = reviewOf(db, 'p-facts');
   assert.ok(review.state === 'due' || (review.state === 'done' && parts.judges.primary.calls.length === 2), `stale result was not delivered as-is (state ${review.state})`);
   if (review.state === 'due') assert.equal(applicationsCount(db), 0);
@@ -246,7 +246,7 @@ test('[L2] replan after a facts change re-queues only R3-dependent held/not_elig
   await runReview(options(db, parts));
   assert.equal(reviewOf(db, 'p-neg').decision, 'not_eligible');
   const facts2 = [...FACTS, { id: 'extra', statement: 'Took an operations research course', polarity: 'has' }];
-  const inputs = () => ({ facts: facts2, policy: REVIEW_POLICY, screeningPolicy: SCREENING_POLICY });
+  const inputs = () => reviewInputs({ facts: facts2 });
   const first = replan(db, { inputs, now: at(1) });
   assert.equal(first.requeued, 1);
   assert.equal(reviewOf(db, 'p-neg').state, 'due');

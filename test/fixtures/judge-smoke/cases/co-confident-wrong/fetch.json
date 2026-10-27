@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "httpStatus": 200,
+  "finalUrl": "https://job-boards.greenhouse.io/examplegrid/jobs/900613",
+  "method": "ats_api",
+  "title": "Analytics Co-op, Fall 2027",
+  "requisitionId": "R900613",
+  "company": "Example Grid Analytics",
+  "locations": [],
+  "offices": [],
+  "remote": null,
+  "workplaceType": null,
+  "employmentType": null,
+  "text": "Analytics Co-op, Fall 2027\nLocation: Chicago, IL\n\nThis is a six-month co-op from July to December 2027 (Fall 2027 term), working on-site.\n\nAbout the role\nYou will join a small analytics group that builds dashboards, writes SQL and Python, and presents findings to product and operations leaders every other week. The team reviews each other's work, shares notebooks, and keeps a weekly written update for partner teams. You will own one project end to end and present it at the end of the program.\n\nResponsibilities\n• Build and maintain data pipelines for weekly reporting.\n• Analyse experiments and explain results to partner teams.\n• Document data definitions so others can reuse them.\n\nRequired Qualifications\n• Currently pursuing a Bachelor's degree in a technical field.\n• Must have completed at least two prior co-op rotations before the start date.\n",
+  "jsonLd": false,
+  "closedWording": false
+}

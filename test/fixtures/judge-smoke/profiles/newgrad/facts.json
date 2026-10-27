@@ -1,0 +1,31 @@
+[
+  {
+    "id": "degree",
+    "statement": "Completed a Master of Science in Statistics in December 2026",
+    "polarity": "constraint",
+    "value": {
+      "level": "masters",
+      "graduation": "2026-12"
+    }
+  },
+  {
+    "id": "sql",
+    "statement": "Writes SQL for analytics",
+    "polarity": "has"
+  },
+  {
+    "id": "tableau",
+    "statement": "Builds dashboards in Tableau",
+    "polarity": "has"
+  },
+  {
+    "id": "clearance",
+    "statement": "Holds no security clearance of any kind",
+    "polarity": "lacks"
+  },
+  {
+    "id": "auth",
+    "statement": "US permanent resident; needs no visa sponsorship",
+    "polarity": "has"
+  }
+]

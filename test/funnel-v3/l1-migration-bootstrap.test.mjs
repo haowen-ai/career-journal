@@ -53,8 +53,8 @@ test('[L1] a database newer than this build is refused instead of opened for wri
 test('[L1] bootstrap binds every application to a posting with exact aliases', async () => {
   const { bootstrapExisting } = await load('L1', './src/funnel/bootstrap.mjs', ['bootstrapExisting']);
   const db = freshDb();
-  const submitted = seedApplication(db, { company: 'Example Corp', role: 'ML Intern', status: 'applied', externalId: 'R171519', appliedAt: '2026-09-29T00:00:00Z' });
-  const linked = seedApplication(db, { company: 'Example Bank', role: 'AI Engineering Intern', status: 'applied', jobUrl: 'https://examplebank.wd12.myworkdayjobs.com/Ext/job/New-York-NY/AI-Engineering-Intern_R249109-1', appliedAt: '2026-09-29T00:00:00Z' });
+  const submitted = seedApplication(db, { company: 'Example Corp', role: 'ML Intern', status: 'applied', externalId: 'R900519', appliedAt: '2026-09-29T00:00:00Z' });
+  const linked = seedApplication(db, { company: 'Example Bank', role: 'AI Engineering Intern', status: 'applied', jobUrl: 'https://examplebank.wd12.myworkdayjobs.com/Ext/job/New-York-NY/AI-Engineering-Intern_R900109-1', appliedAt: '2026-09-29T00:00:00Z' });
   bootstrapExisting(db, { provenance: PROVENANCE, now: T0 });
   for (const app of [submitted, linked]) {
     const postingId = postingOf(db, app.id);
@@ -65,9 +65,9 @@ test('[L1] bootstrap binds every application to a posting with exact aliases', a
     assert.equal(review.code, 'already_submitted');
   }
   const aliases = db.prepare('SELECT alias FROM posting_aliases').all().map((row) => row.alias);
-  assert.ok(aliases.includes('company_req:examplecorp:R171519'), aliases.join(', '));
-  assert.ok(aliases.some((alias) => alias.startsWith('req:workday:examplebank:R249109-1')), aliases.join(', '));
-  assert.ok(aliases.includes('url:examplebank.wd12.myworkdayjobs.com/Ext/job/New-York-NY/AI-Engineering-Intern_R249109-1'), 'URL alias keeps path case');
+  assert.ok(aliases.includes('company_req:examplecorp:R900519'), aliases.join(', '));
+  assert.ok(aliases.some((alias) => alias.startsWith('req:workday:examplebank:R900109-1')), aliases.join(', '));
+  assert.ok(aliases.includes('url:examplebank.wd12.myworkdayjobs.com/Ext/job/New-York-NY/AI-Engineering-Intern_R900109-1'), 'URL alias keeps path case');
 });
 
 test('[L1] bootstrap re-queues automated withdrawals and held leads, preserves user declines, and holds unknown provenance', async () => {

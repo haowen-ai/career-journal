@@ -1,0 +1,34 @@
+[
+  {
+    "id": "experience",
+    "statement": "Has six years of professional data science experience, including two years leading a team of three",
+    "polarity": "constraint",
+    "value": {
+      "years": 6,
+      "leadershipYears": 2
+    }
+  },
+  {
+    "id": "degree",
+    "statement": "Holds a Master of Science in Applied Mathematics; no PhD",
+    "polarity": "constraint",
+    "value": {
+      "level": "masters"
+    }
+  },
+  {
+    "id": "python",
+    "statement": "Uses Python daily for modeling",
+    "polarity": "has"
+  },
+  {
+    "id": "sql",
+    "statement": "Writes SQL daily",
+    "polarity": "has"
+  },
+  {
+    "id": "auth",
+    "statement": "US citizen; needs no visa sponsorship",
+    "polarity": "has"
+  }
+]

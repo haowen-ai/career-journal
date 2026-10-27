@@ -102,22 +102,40 @@ export function eventsOf(db, applicationId) {
 }
 
 // Fake judge adapter: answers from a script keyed by posting id (or a function), counts calls,
-// and never touches the network. `status` defaults to 'ok'.
-export function fakeJudge({ tier = 'primary', model = `fake-${tier}`, answers = {}, onCall } = {}) {
+// and never touches the network. An answer is a judgment ({ output }) or a non-ok result such as
+// { status: 'quota' } / { status: 'error', error } and may carry transportRetries.
+export function fakeJudge({ tier = 'primary', model = `fake-${tier}`, effort = null, answers = {}, onCall } = {}) {
   const calls = [];
   return {
     id: `fake-${tier}`,
     runner: 'fake',
     model,
     tier,
+    effort,
+    cliVersion: 'fake-1',
     calls,
     async judge(request, context = {}) {
       calls.push({ request, context });
       if (onCall) await onCall(request, context);
-      const answer = typeof answers === 'function' ? answers(request) : answers[request.postingId];
+      const answer = typeof answers === 'function' ? await answers(request, context) : answers[request.postingId];
       if (!answer) return { status: 'error', output: null, rawText: '', usage: {}, transportRetries: 0, error: 'no scripted answer' };
-      return { status: 'ok', rawText: JSON.stringify(answer.output ?? answer), usage: { input_tokens: 10, output_tokens: 5 }, transportRetries: 0, ...answer, output: answer.output ?? answer };
+      if (answer.status && answer.status !== 'ok') {
+        return { output: null, rawText: '', usage: {}, transportRetries: 0, error: answer.error ?? answer.status, ...answer };
+      }
+      const output = answer.output ?? answer;
+      return { status: 'ok', rawText: JSON.stringify(output), usage: { input_tokens: 10, output_tokens: 5 }, transportRetries: 0, ...answer, output };
     },
+  };
+}
+
+// A controllable clock for deadline and time-share tests: clock() returns epoch ms, sleep(ms) advances it.
+export function fakeClock(start = Date.parse(T0)) {
+  let now = start;
+  return {
+    clock: () => now,
+    advance(ms) { now += ms; },
+    sleep: async (ms) => { now += Math.max(0, Number(ms) || 0); },
+    iso: () => new Date(now).toISOString(),
   };
 }
 
@@ -173,7 +191,7 @@ export async function tempDb() {
 }
 
 // Thrown by test hooks to simulate the process being killed at that point. Implementations must let it
-// propagate (no catch-and-continue, no cleanup) — see spec section 7.2 and LANE-L2 hooks.
+// propagate (no catch-and-continue, no cleanup) — see spec section 7.2 and the runReview hooks in the plan's frozen contract.
 export class Crash extends Error {
   constructor(point) { super(`simulated crash at ${point}`); this.name = 'Crash'; this.point = point; }
 }

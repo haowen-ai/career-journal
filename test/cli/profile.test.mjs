@@ -165,6 +165,31 @@ test('profile set creates the profile on first write and reports validation erro
   assert.match(text, /^pace\.batchSize: 3$/m);
 }));
 
+test('profile set round-trips search.countries and sources.expected; a profile without them loads with empty lists', async () => fixture(async (home) => {
+  assert.deepEqual((await json(['profile', 'set', '--home', home, '--key', 'search.countries', '--value', '["US"]'])).value, ['US']);
+  assert.deepEqual((await json(['profile', 'set', '--home', home, '--key', 'sources.expected', '--value', '["careerops","simplify"]'])).value, ['careerops', 'simplify']);
+  const shown = (await json(['profile', 'show', '--home', home, '--json'])).profile;
+  assert.deepEqual(shown.search.countries, ['US']);
+  assert.deepEqual(shown.sources.expected, ['careerops', 'simplify']);
+  for (const [key, value] of [['search.countries', '["United States"]'], ['sources.expected', '["linkedin"]']]) {
+    const invalid = await cli(['profile', 'set', '--home', home, '--key', key, '--value', value]);
+    assert.equal(invalid.code, 1, `${key} ${value}`);
+  }
+
+  const other = await mkdtemp(path.join(os.tmpdir(), 'career-journal-cli-profile-old-'));
+  try {
+    await setup(other, { timezone: 'UTC', email: { mode: 'skip' } });
+    await ok(['profile', 'set', '--home', other, '--key', 'search.jobType', '--value', 'internship']);
+    const raw = JSON.parse(await readFile(profilePath(other), 'utf8'));
+    delete raw.search.countries;
+    if (raw.sources) delete raw.sources.expected;
+    await writeFile(profilePath(other), JSON.stringify(raw, null, 2));
+    const old = (await json(['profile', 'show', '--home', other, '--json'])).profile;
+    assert.deepEqual(old.search.countries, []);
+    assert.deepEqual(old.sources.expected, []);
+  } finally { await rm(other, { recursive: true, force: true }); }
+}));
+
 test('profile answer appends form answers with the date and source', async () => fixture(async (home) => {
   const learned = await json(['profile', 'answer', '--home', home, '--question', 'Are you willing to relocate?', '--answer', 'Yes, within the US']);
   assert.equal(learned.section, 'Learned while applying');

@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "httpStatus": 200,
+  "finalUrl": "https://job-boards.greenhouse.io/exampleretaildata/jobs/900603",
+  "method": "ats_api",
+  "title": "Product Analytics Intern, Summer 2027",
+  "requisitionId": "R900603",
+  "company": "Example Retail Data",
+  "locations": [],
+  "offices": [],
+  "remote": null,
+  "workplaceType": null,
+  "employmentType": null,
+  "text": "Product Analytics Intern, Summer 2027\nLocation: Chicago, IL\n\nThis internship runs for twelve weeks in the summer of 2027, from June to August.\n\nAbout the role\nYou will join a small analytics group that builds dashboards, writes SQL and Python, and presents findings to product and operations leaders every other week. The team reviews each other's work, shares notebooks, and keeps a weekly written update for partner teams. You will own one project end to end and present it at the end of the program.\n\nResponsibilities\n• Build and maintain data pipelines for weekly reporting.\n• Analyse experiments and explain results to partner teams.\n• Document data definitions so others can reuse them.\n\nRequired Qualifications\n• Currently pursuing a degree in a quantitative field.\n• Strong SQL skills.\n\nPreferred Qualifications\n• Rising junior or senior undergraduate standing.\n• Familiarity with dashboard tools.\n",
+  "jsonLd": false,
+  "closedWording": false
+}

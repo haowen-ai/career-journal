@@ -1,5 +1,12 @@
 # Role-scan funnel v3 — Phase A build spec
 
+> **Superseded where the plan differs.** The screening release is built from
+> `docs/superpowers/plans/2026-10-26-screening-funnel.md`. Its "Changes against SPEC" and "Frozen interface contract"
+> sections win over this document (for example: no `full_time_only`/`non_us_only` drops, `outside_countries` and
+> `posting_excluded` instead, no R2 `out_of_area`, sightings keyed by partition, run kinds `scan|review|daily|prune`).
+> The former lane sheets `LANE-L1.md`/`LANE-L2.md` were deleted; their contracts live in the plan's frozen section.
+> This file remains the reference for mechanics the plan cites as `SPEC §n`.
+
 Status: build spec for implementation. Branch `feat/funnel-v3` (from `feat/scan-coverage`, 2.2.0).
 Scope: **Phase A only** — stop avoidable recall loss within the configured sources. Breadth work (new sources, employer
 inventory, partition trend statistics, full gazetteer, porting every fetch adapter to Node, elaborate ranking/report
@@ -8,8 +15,7 @@ commands, mail-sync completion barrier) is **deferred** to Phase B/C and must no
 This document is public. It contains no personal data. Real roles, candidate facts, quotas, application history and
 mailbox data stay in the user's data home (`<home>/.career-journal/…`) and in private acceptance lists outside the repo.
 
-Lanes: `LANE-L1.md` (storage, identity, collectors, bootstrap) and `LANE-L2.md` (review worker, judge adapter, budget,
-receipts, wrapper). Red acceptance tests: `test/funnel-v3/*.test.mjs` (each test title starts with its lane), shared harness
+Lanes: see the plan's "Lanes, order and gates" (the former `LANE-L1.md`/`LANE-L2.md` sheets were folded into the plan). Red acceptance tests: `test/funnel-v3/*.test.mjs` (each test title starts with its lane), shared harness
 `test-utils/funnel-v3.mjs`, synthetic fixtures `test-utils/funnel-v3-fixtures.mjs`. Run them with
 `node --test 'test/funnel-v3/*.test.mjs'` (a bare directory argument is not a test pattern). Until both lanes land, the
 default `npm test` also runs these red tests and fails on this branch by design; the pre-existing suite is checked with
@@ -132,7 +138,7 @@ The existing `requisitionKey` lowercases generic ids (`src/scan/dedupe.mjs:124-1
 - `req:<provider>:<tenant|->:<id>` (kind `req`) from `providerRequisition(url)`
 - `company_req:<companyKey>:<id>` (kind `company_req`) from the provider id **or** an explicit `requisitionId` /
   bootstrapped `external_id`. Explicit ids keep their case except that a **requisition-shaped** id (`^[A-Za-z]{0,4}[-_]?\d{3,}(?:-\d+)?$`)
-  is uppercased so that `R171519`, `r171519` and Workday's `_R171519` meet. Anything else is exact.
+  is uppercased so that `R900519`, `r900519` and Workday's `_R900519` meet. Anything else is exact.
 - `url:<canonicalUrl>` (kind `url`)
 
 ### 3.4 Resolution and reconciliation

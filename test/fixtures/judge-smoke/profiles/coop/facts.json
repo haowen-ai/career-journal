@@ -1,0 +1,31 @@
+[
+  {
+    "id": "degree",
+    "statement": "Pursuing a Bachelor of Science in Computer Science; expected graduation May 2028",
+    "polarity": "constraint",
+    "value": {
+      "level": "bachelors",
+      "graduation": "2028-05"
+    }
+  },
+  {
+    "id": "python",
+    "statement": "Uses Python in coursework and projects",
+    "polarity": "has"
+  },
+  {
+    "id": "java",
+    "statement": "Has written Java in two courses",
+    "polarity": "has"
+  },
+  {
+    "id": "prior_coop",
+    "statement": "Has not completed any co-op rotation or internship yet",
+    "polarity": "lacks"
+  },
+  {
+    "id": "auth",
+    "statement": "US citizen; needs no visa sponsorship",
+    "polarity": "has"
+  }
+]

@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "httpStatus": 200,
+  "finalUrl": "https://job-boards.greenhouse.io/examplesurveylabs/jobs/900607",
+  "method": "ats_api",
+  "title": "Research Data Intern, Summer 2027",
+  "requisitionId": "R900607",
+  "company": "Example Survey Labs",
+  "locations": [],
+  "offices": [],
+  "remote": null,
+  "workplaceType": null,
+  "employmentType": null,
+  "text": "Research Data Intern, Summer 2027\nLocation: Chicago, IL\nApply now.\n",
+  "jsonLd": false,
+  "closedWording": false
+}

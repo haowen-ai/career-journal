@@ -147,8 +147,10 @@ test('apply skill keeps fixed hard rules, own-tab batches, and evidence-gated st
     assert.match(text, /profile answer --question/);
     assert.match(text, /event add [^\n]*--status-after applied/);
     assert.match(text, /task add [^\n]*--due-at[^\n]*--due-note[^\n]*--link/);
-    for (const mark of ['🔑', '🤖', '❓', '👆', '✅']) assert.ok(text.includes(mark), `missing tab title ${mark}`);
+    for (const mark of ['🔑', '🆕', '🤖', '❓', '✍️', '📎', '🧪', '👆', '✅']) assert.ok(text.includes(mark), `missing tab title ${mark}`);
   }
+  assert.match(english, /similar title[^\n]*never[^\n]*skip/i, 'a similar title never causes a different requisition to be skipped');
+  assert.match(chinese, /相似[^\n]*不[^\n]*跳过/);
   assert.match(english, /own new tab and uses only that tab/);
   assert.match(chinese, /自己新开一个标签页，只用这一个标签页/);
   assert.match(english, /at most 4 at a time/);
@@ -185,12 +187,14 @@ test('orchestrator runs the profile interview after doctor and routes roles, app
     assert.match(text, /career-journal-apply/);
   }
   assert.match(english, /Find roles[^\n]*`scan run`[^\n]*`queue verify/);
+  assert.match(english, /Find roles[^\n]*`scan run`[^\n]*`review run`/);
   assert.match(english, /Apply, start applying[^\n]*career-journal-apply/);
   assert.match(english, /Profile, preferences, or form answers[^\n]*profile show\|questions\|set\|answer\|skip\|status/);
   assert.match(chinese, /`doctor`[^\n]*个人资料问答/);
   assert.match(chinese, /每轮最多问 4 个问题/);
   assert.match(chinese, /先推断，再确认/);
   assert.match(chinese, /找岗位[^\n]*`scan run`[^\n]*`queue verify/);
+  assert.match(chinese, /找岗位[^\n]*`scan run`[^\n]*`review run`/);
   assert.match(chinese, /投递、开始投[^\n]*career-journal-apply/);
   assert.match(chinese, /个人资料、偏好或表单答案[^\n]*profile show\|questions\|set\|answer\|skip\|status/);
 });

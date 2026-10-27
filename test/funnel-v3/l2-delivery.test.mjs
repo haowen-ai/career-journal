@@ -10,12 +10,12 @@ const modules = async () => ({
   ...(await load('L2', './src/review/lease.mjs', ['claimItem'])),
 });
 
-const ELIGIBLE = { decision: 'eligible', code: null, fit: { level: 'medium', note: 'SQL and Python match' }, deadline: { kind: 'none' }, location: 'Chicago, IL' };
+const ELIGIBLE = { decision: 'eligible', code: null, fit: { level: 'medium', note: 'SQL and Python match' }, deadline: { kind: 'none' }, location: { offices: [{ place: 'Chicago, IL', area: 'chicago', quote: 'Location: Chicago, IL' }], remote: { scope: 'none', quote: null }, display: 'Chicago, IL' } };
 const UNCLEAR = { decision: 'unclear', code: 'user_review', question: 'Is the junior-standing bullet mandatory?', nextAction: 'user_review' };
 const NOT_ELIGIBLE = { decision: 'not_eligible', code: 'requirement_conflict', evidence: [{ confirmed: true, section: 'required', clause: 'Be enrolled as a junior undergraduate student.', factIds: ['degree'] }] };
 
-function posting(db, { id = 'p-1', company = 'Example Corp', applicationId = null } = {}) {
-  insertPosting(db, { id, company, applicationId });
+function posting(db, { id = 'p-1', company = 'Example Corp', applicationId = null, aliases = [] } = {}) {
+  insertPosting(db, { id, company, applicationId, aliases });
   insertReview(db, { postingId: id, stage: 'deliver' });
   return id;
 }
@@ -150,10 +150,16 @@ test('[L2] quota rules: full → hold with recheck at window end; reconciliation
   const recon = posting(db, { id: 'p-recon', company: 'Recount Example' });
   const recount = posting(db, { id: 'p-recount', company: 'Count Again Example' });
   const program = posting(db, { id: 'p-program', company: 'Program Example' });
+  const programMatch = posting(db, { id: 'p-program-match', company: 'Program Match Example' });
+  const programOther = posting(db, { id: 'p-program-other', company: 'Program Match Example' });
   await deliverAs(db, full, ELIGIBLE);
   await deliverAs(db, recon, ELIGIBLE);
   const recountResult = await deliverAs(db, recount, ELIGIBLE);
   await deliverAs(db, program, ELIGIBLE);
+  await deliverAs(db, programMatch, { ...ELIGIBLE, program: { name: '2027 internship USA/Canada', countryScope: 'USA/Canada', quote: 'Our 2027 internship USA/Canada program' } });
+  const otherResult = await deliverAs(db, programOther, { ...ELIGIBLE, program: { name: '2027 Early Insight Week', countryScope: 'UK', quote: 'the 2027 Early Insight Week in the UK' } });
+  assert.deepEqual([reviewOf(db, programMatch).state, reviewOf(db, programMatch).code], ['held', 'quota_full'], 'a verdict naming the ruled program is held');
+  assert.equal(application(db, otherResult.applicationId).skip_reason, null, 'a different program at the same company is a visible lead');
   assert.deepEqual([reviewOf(db, full).state, reviewOf(db, full).code], ['held', 'quota_full']);
   assert.equal(reviewOf(db, full).next_due, '2026-12-01T00:00:00Z');
   assert.deepEqual([reviewOf(db, recon).state, reviewOf(db, recon).code], ['held', 'quota_reconciliation']);
@@ -171,13 +177,21 @@ test('[L2] quota rules: full → hold with recheck at window end; reconciliation
 
 test('[L2] mail: exact requisition confirmation hides reversibly; company-only mail is a note and the lead stays visible', async () => {
   const { annotateMail, unhide } = await modules();
+  const { matchMailHits } = await load('L2', './src/review/mail.mjs', ['matchMailHits']);
   const db = freshDb();
-  const exact = posting(db, { id: 'p-mail-exact' });
+  const exact = posting(db, { id: 'p-mail-exact', aliases: [['company_req:examplecorp:R5001', 'company_req']] });
   const company = posting(db, { id: 'p-mail-company' });
   const a = await deliverAs(db, exact, ELIGIBLE);
   const b = await deliverAs(db, company, ELIGIBLE);
-  annotateMail(db, { postingId: exact, match: 'exact', messageId: '<m1@example.com>', subject: 'Application received R5001', received: T0, matched: 'R5001', now: T0 });
-  annotateMail(db, { postingId: company, match: 'company', messageId: '<m2@example.com>', subject: 'Thanks for applying', received: T0, matched: 'Example Corp', now: T0 });
+  const hit = (overrides) => ({ messageId: '<m@example.com>', receivedAt: '2026-11-02T03:00:00.000+00:00', sender: 'careers@examplecorp.example', subject: '', mailbox: 'INBOX', excerpt: '', searchedTerm: 'Example Corp', ...overrides });
+  const [exactMatch, companyMatch] = matchMailHits(db, [
+    hit({ messageId: '<m1@example.com>', subject: 'Application received R5001', excerpt: 'Thank you for applying to Example Corp (requisition R5001).' }),
+    hit({ messageId: '<m2@example.com>', subject: 'Thanks for applying', excerpt: 'Thank you for your interest in Example Corp.' }),
+  ], { now: T0 });
+  assert.deepEqual([exactMatch.match, exactMatch.postingId, exactMatch.token], ['exact', exact, 'R5001']);
+  assert.equal(companyMatch.match, 'company');
+  annotateMail(db, { postingId: exactMatch.postingId, match: exactMatch.match, messageId: '<m1@example.com>', subject: 'Application received R5001', received: T0, matched: exactMatch.token, now: T0 });
+  annotateMail(db, { postingId: company, match: companyMatch.match, messageId: '<m2@example.com>', subject: 'Thanks for applying', received: T0, matched: 'Example Corp', now: T0 });
   assert.match(application(db, a.applicationId).skip_reason, /already_applied_mail|邮件/);
   assert.equal(application(db, b.applicationId).skip_reason, null);
   assert.ok(eventsOf(db, b.applicationId).some((event) => event.type === 'mail_note'));

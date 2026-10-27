@@ -1,0 +1,350 @@
+{
+  "setId": "judge-smoke-synthetic-1",
+  "profiles": {
+    "intern-summer": "profiles/intern-summer",
+    "coop": "profiles/coop",
+    "newgrad": "profiles/newgrad",
+    "experienced": "profiles/experienced"
+  },
+  "cases": [
+    {
+      "id": "is-eligible",
+      "profile": "intern-summer",
+      "posting": {
+        "url": "https://job-boards.greenhouse.io/exampleanalytics/jobs/900601",
+        "company": "Example Analytics Co",
+        "title": "Data Science Intern, Summer 2027",
+        "requisition": "R900601"
+      },
+      "fetch": "cases/is-eligible/fetch.json",
+      "expected": {
+        "decision": "eligible",
+        "acceptable": [
+          "eligible"
+        ]
+      },
+      "tags": []
+    },
+    {
+      "id": "is-or-clause",
+      "profile": "intern-summer",
+      "posting": {
+        "url": "https://job-boards.greenhouse.io/exampleanalytics/jobs/900602",
+        "company": "Example Analytics Co",
+        "title": "Data Engineering Intern, Summer 2027",
+        "requisition": "R900602"
+      },
+      "fetch": "cases/is-or-clause/fetch.json",
+      "expected": {
+        "decision": "eligible",
+        "acceptable": [
+          "eligible"
+        ]
+      },
+      "tags": [
+        "or_clause"
+      ]
+    },
+    {
+      "id": "is-preferred-only",
+      "profile": "intern-summer",
+      "posting": {
+        "url": "https://job-boards.greenhouse.io/exampleretaildata/jobs/900603",
+        "company": "Example Retail Data",
+        "title": "Product Analytics Intern, Summer 2027",
+        "requisition": "R900603"
+      },
+      "fetch": "cases/is-preferred-only/fetch.json",
+      "expected": {
+        "decision": "eligible",
+        "acceptable": [
+          "eligible"
+        ]
+      },
+      "tags": [
+        "preferred_only"
+      ]
+    },
+    {
+      "id": "is-confident-wrong",
+      "profile": "intern-summer",
+      "posting": {
+        "url": "https://job-boards.greenhouse.io/exampleretaildata/jobs/900604",
+        "company": "Example Retail Data",
+        "title": "Analytics Intern, Summer 2027",
+        "requisition": "R900604"
+      },
+      "fetch": "cases/is-confident-wrong/fetch.json",
+      "expected": {
+        "decision": "not_eligible",
+        "acceptable": [
+          "not_eligible"
+        ]
+      },
+      "tags": [
+        "confident_wrong_positive"
+      ]
+    },
+    {
+      "id": "is-unknown-fact",
+      "profile": "intern-summer",
+      "posting": {
+        "url": "https://job-boards.greenhouse.io/examplesurveylabs/jobs/900605",
+        "company": "Example Survey Labs",
+        "title": "Aerial Data Intern, Summer 2027",
+        "requisition": "R900605"
+      },
+      "fetch": "cases/is-unknown-fact/fetch.json",
+      "expected": {
+        "decision": "unclear",
+        "acceptable": [
+          "unclear"
+        ],
+        "code": "missing_fact"
+      },
+      "tags": [
+        "unknown_fact"
+      ]
+    },
+    {
+      "id": "is-wrong-page",
+      "profile": "intern-summer",
+      "posting": {
+        "url": "https://job-boards.greenhouse.io/exampleanalytics/jobs/900606",
+        "company": "Example Analytics Co",
+        "title": "Data Science Intern, Summer 2027",
+        "requisition": "R900606"
+      },
+      "fetch": "cases/is-wrong-page/fetch.json",
+      "expected": {
+        "decision": "unclear",
+        "acceptable": [
+          "unclear"
+        ]
+      },
+      "tags": [
+        "wrong_page"
+      ]
+    },
+    {
+      "id": "is-incomplete-page",
+      "profile": "intern-summer",
+      "posting": {
+        "url": "https://job-boards.greenhouse.io/examplesurveylabs/jobs/900607",
+        "company": "Example Survey Labs",
+        "title": "Research Data Intern, Summer 2027",
+        "requisition": "R900607"
+      },
+      "fetch": "cases/is-incomplete-page/fetch.json",
+      "expected": {
+        "decision": "unclear",
+        "acceptable": [
+          "unclear"
+        ]
+      },
+      "tags": [
+        "incomplete_page"
+      ]
+    },
+    {
+      "id": "co-eligible",
+      "profile": "coop",
+      "posting": {
+        "url": "https://job-boards.greenhouse.io/examplefreight/jobs/900611",
+        "company": "Example Freight Systems",
+        "title": "Data Engineering Co-op, Fall 2027",
+        "requisition": "R900611"
+      },
+      "fetch": "cases/co-eligible/fetch.json",
+      "expected": {
+        "decision": "eligible",
+        "acceptable": [
+          "eligible"
+        ]
+      },
+      "tags": [
+        "or_clause"
+      ]
+    },
+    {
+      "id": "co-wrong-area",
+      "profile": "coop",
+      "posting": {
+        "url": "https://job-boards.greenhouse.io/examplefreight/jobs/900612",
+        "company": "Example Freight Systems",
+        "title": "Software Data Co-op, Spring 2027",
+        "requisition": "R900612"
+      },
+      "fetch": "cases/co-wrong-area/fetch.json",
+      "expected": {
+        "decision": "unclear",
+        "acceptable": [
+          "unclear"
+        ]
+      },
+      "tags": []
+    },
+    {
+      "id": "co-confident-wrong",
+      "profile": "coop",
+      "posting": {
+        "url": "https://job-boards.greenhouse.io/examplegrid/jobs/900613",
+        "company": "Example Grid Analytics",
+        "title": "Analytics Co-op, Fall 2027",
+        "requisition": "R900613"
+      },
+      "fetch": "cases/co-confident-wrong/fetch.json",
+      "expected": {
+        "decision": "not_eligible",
+        "acceptable": [
+          "not_eligible"
+        ]
+      },
+      "tags": [
+        "confident_wrong_positive"
+      ]
+    },
+    {
+      "id": "ng-eligible",
+      "profile": "newgrad",
+      "posting": {
+        "url": "https://job-boards.greenhouse.io/examplehealthdata/jobs/900621",
+        "company": "Example Health Data",
+        "title": "Data Analyst, New Grad 2027",
+        "requisition": "R900621"
+      },
+      "fetch": "cases/ng-eligible/fetch.json",
+      "expected": {
+        "decision": "eligible",
+        "acceptable": [
+          "eligible"
+        ]
+      },
+      "tags": []
+    },
+    {
+      "id": "ng-or-clause",
+      "profile": "newgrad",
+      "posting": {
+        "url": "https://job-boards.greenhouse.io/examplehealthdata/jobs/900622",
+        "company": "Example Health Data",
+        "title": "Business Intelligence Analyst, New Grad 2027",
+        "requisition": "R900622"
+      },
+      "fetch": "cases/ng-or-clause/fetch.json",
+      "expected": {
+        "decision": "eligible",
+        "acceptable": [
+          "eligible"
+        ]
+      },
+      "tags": [
+        "or_clause"
+      ]
+    },
+    {
+      "id": "ng-confident-wrong",
+      "profile": "newgrad",
+      "posting": {
+        "url": "https://job-boards.greenhouse.io/examplesecure/jobs/900623",
+        "company": "Example Secure Systems",
+        "title": "Data Analyst I, New Grad 2027",
+        "requisition": "R900623"
+      },
+      "fetch": "cases/ng-confident-wrong/fetch.json",
+      "expected": {
+        "decision": "not_eligible",
+        "acceptable": [
+          "not_eligible"
+        ]
+      },
+      "tags": [
+        "confident_wrong_positive"
+      ]
+    },
+    {
+      "id": "ex-eligible",
+      "profile": "experienced",
+      "posting": {
+        "url": "https://job-boards.greenhouse.io/examplemedia/jobs/900631",
+        "company": "Example Media Group",
+        "title": "Senior Data Scientist",
+        "requisition": "R900631"
+      },
+      "fetch": "cases/ex-eligible/fetch.json",
+      "expected": {
+        "decision": "eligible",
+        "acceptable": [
+          "eligible"
+        ]
+      },
+      "tags": []
+    },
+    {
+      "id": "ex-preferred-only",
+      "profile": "experienced",
+      "posting": {
+        "url": "https://job-boards.greenhouse.io/examplemedia/jobs/900632",
+        "company": "Example Media Group",
+        "title": "Staff Data Scientist, Experimentation",
+        "requisition": "R900632"
+      },
+      "fetch": "cases/ex-preferred-only/fetch.json",
+      "expected": {
+        "decision": "eligible",
+        "acceptable": [
+          "eligible"
+        ]
+      },
+      "tags": [
+        "preferred_only"
+      ]
+    },
+    {
+      "id": "ex-confident-wrong",
+      "profile": "experienced",
+      "posting": {
+        "url": "https://job-boards.greenhouse.io/exampleinsurance/jobs/900633",
+        "company": "Example Insurance Analytics",
+        "title": "Director of Data Science",
+        "requisition": "R900633"
+      },
+      "fetch": "cases/ex-confident-wrong/fetch.json",
+      "expected": {
+        "decision": "not_eligible",
+        "acceptable": [
+          "not_eligible"
+        ]
+      },
+      "tags": [
+        "confident_wrong_positive"
+      ]
+    },
+    {
+      "id": "ex-unknown-fact",
+      "profile": "experienced",
+      "posting": {
+        "url": "https://job-boards.greenhouse.io/exampleinsurance/jobs/900634",
+        "company": "Example Insurance Analytics",
+        "title": "Senior Data Scientist, Tokyo Partnerships",
+        "requisition": "R900634"
+      },
+      "fetch": "cases/ex-unknown-fact/fetch.json",
+      "expected": {
+        "decision": "unclear",
+        "acceptable": [
+          "unclear"
+        ],
+        "code": "missing_fact"
+      },
+      "tags": [
+        "unknown_fact"
+      ]
+    }
+  ],
+  "gate": {
+    "maxFalseAccepts": 0,
+    "maxFalseRejects": 0,
+    "maxUnexpectedUnclear": 1
+  }
+}

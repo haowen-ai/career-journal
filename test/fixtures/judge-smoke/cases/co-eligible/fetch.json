@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "httpStatus": 200,
+  "finalUrl": "https://job-boards.greenhouse.io/examplefreight/jobs/900611",
+  "method": "ats_api",
+  "title": "Data Engineering Co-op, Fall 2027",
+  "requisitionId": "R900611",
+  "company": "Example Freight Systems",
+  "locations": [],
+  "offices": [],
+  "remote": null,
+  "workplaceType": null,
+  "employmentType": null,
+  "text": "Data Engineering Co-op, Fall 2027\nLocation: Chicago, IL\n\nThis is a six-month co-op from July to December 2027 (Fall 2027 term), working on-site.\n\nAbout the role\nYou will join a small analytics group that builds dashboards, writes SQL and Python, and presents findings to product and operations leaders every other week. The team reviews each other's work, shares notebooks, and keeps a weekly written update for partner teams. You will own one project end to end and present it at the end of the program.\n\nResponsibilities\n• Build and maintain data pipelines for weekly reporting.\n• Analyse experiments and explain results to partner teams.\n• Document data definitions so others can reuse them.\n\nRequired Qualifications\n• Currently pursuing a Bachelor's degree in Computer Science or a related field.\n• Experience with Python or Java from coursework or projects.\n",
+  "jsonLd": false,
+  "closedWording": false
+}

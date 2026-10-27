@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "httpStatus": 200,
+  "finalUrl": "https://job-boards.greenhouse.io/examplefreight/jobs/900612",
+  "method": "ats_api",
+  "title": "Software Data Co-op, Spring 2027",
+  "requisitionId": "R900612",
+  "company": "Example Freight Systems",
+  "locations": [],
+  "offices": [],
+  "remote": null,
+  "workplaceType": null,
+  "employmentType": null,
+  "text": "Software Data Co-op, Spring 2027\nLocation: Austin, TX\n\nThis is a Spring 2027 co-op from January to June 2027, on-site in Austin, TX five days a week; remote work is not available.\n\nAbout the role\nYou will join a small analytics group that builds dashboards, writes SQL and Python, and presents findings to product and operations leaders every other week. The team reviews each other's work, shares notebooks, and keeps a weekly written update for partner teams. You will own one project end to end and present it at the end of the program.\n\nResponsibilities\n• Build and maintain data pipelines for weekly reporting.\n• Analyse experiments and explain results to partner teams.\n• Document data definitions so others can reuse them.\n\nRequired Qualifications\n• Currently pursuing a Bachelor's degree in Computer Science.\n• Experience with Python.\n",
+  "jsonLd": false,
+  "closedWording": false
+}

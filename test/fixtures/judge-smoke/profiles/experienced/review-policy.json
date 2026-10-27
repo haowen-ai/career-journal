@@ -1,0 +1,75 @@
+{
+  "schema": 2,
+  "areas": {
+    "keys": [
+      "nyc",
+      "us_remote"
+    ],
+    "allowedStates": [
+      "NY"
+    ],
+    "homeStates": [
+      "NY"
+    ],
+    "text": "Synthetic policy: New York City metro or remote anywhere in the US."
+  },
+  "windows": [
+    {
+      "id": "full_time",
+      "termKinds": [
+        "full-time"
+      ],
+      "year": 2027,
+      "startAfter": "2027-01-01",
+      "startBefore": "2027-12-31",
+      "areas": [
+        "nyc",
+        "us_remote"
+      ]
+    }
+  ],
+  "functions": {
+    "userCall": [
+      "sales"
+    ],
+    "outOfScope": [
+      "hardware",
+      "other"
+    ]
+  },
+  "fit": {
+    "adjust": [
+      {
+        "function": "quant",
+        "set": "low"
+      }
+    ]
+  },
+  "serviceTargets": {
+    "maxWaitNights": 3,
+    "deadlineMaxWaitNights": 1,
+    "userHoldTargetDays": 2,
+    "agedAfterDays": 2,
+    "agedReserveShare": 0.25
+  },
+  "freshness": {
+    "activeDays": 7,
+    "deadlineDailyWithinDays": 3,
+    "negativeRecheckDays": 14,
+    "negativeHorizonDays": 60,
+    "unavailableRecheckDays": [
+      1,
+      3,
+      7
+    ],
+    "reappearAfterDays": 14
+  },
+  "budgets": {
+    "attempts": 10,
+    "fetches": 100,
+    "deadlineMin": 10,
+    "concurrency": 1,
+    "dailyMaxMinutes": 180,
+    "quotaCooldownHours": 6
+  }
+}

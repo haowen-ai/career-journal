@@ -11,34 +11,13 @@ import { createRuntime } from '../../src/runtime/create-runtime.mjs';
 import { loadConfig, saveConfig } from '../../src/config/store.mjs';
 import { defaultConfig } from '../../src/config/defaults.mjs';
 import { openDatabase } from '../../src/storage/database.mjs';
+import { openHomeDatabase } from '../../src/runtime/home.mjs';
+import { createApplication } from '../../src/commands/application.mjs';
 import { listTasks } from '../../src/automation/registry.mjs';
 import { memoryIO } from '../../test-utils/helpers.mjs';
 import { ATS_URLS, SIMPLIFY_URL, defaultRoutes, fixtureFetch, readFixture } from '../../test-utils/scan-fixtures.mjs';
 
 const JEV_URL = 'https://api.typesafe.ai/v1/systemone';
-
-test('official-review gate retains new scan records but exposes only verified roles to the queue', async () => fixture(async (home) => {
-  await writeProfile(home, (profile) => ({ ...profile, search: { ...profile.search,
-    exclusions: [...profile.search.exclusions, 'official-review-required'] } }));
-  const scan = await json(['scan', 'run', '--home', home]);
-  assert.equal(scan.counts.queued, 0);
-  assert.equal(scan.counts.held, 5);
-  assert.deepEqual(scan.queued, []);
-  assert.equal((await json(['queue', 'list', '--home', home])).length, 0);
-  const db = database(home);
-  let held;
-  try {
-    held = db.prepare('SELECT id,status,skip_reason FROM applications ORDER BY id').all();
-    assert.equal(held.length, 5);
-    assert.ok(held.every((row) => row.status === 'lead' && row.skip_reason));
-  } finally { db.close(); }
-  const again = await json(['scan', 'run', '--home', home]);
-  assert.equal(again.counts.duplicates, 5, 'held history prevents the same posting reappearing');
-  await json(['queue', 'verify', '--home', home, '--id', held[0].id, '--result', 'ok', '--reason', 'Official requirements and quota checked']);
-  const queue = await json(['queue', 'list', '--home', home]);
-  assert.equal(queue.length, 1);
-  assert.equal(queue[0].id, held[0].id);
-}));
 
 async function fixture(run) {
   const home = await mkdtemp(path.join(os.tmpdir(), 'career-journal-cli-scan-'));
@@ -72,92 +51,55 @@ function database(home) {
   return openDatabase(path.join(home, '.career-journal', 'career-journal.db'));
 }
 
+// Scans no longer create leads (leads come from `review run`), so queue tests seed the leads they need.
+const QUEUE_LEADS = [
+  { company: 'Example Corp', role: 'Machine Learning Intern, Summer 2027', source: 'greenhouse', sourceId: '4000001', location: 'New York, NY', postedAt: '2026-09-28T18:00:00.000Z', fit: 'high', jobUrl: 'https://job-boards.greenhouse.io/examplecorp/jobs/4000001' },
+  { company: 'Example Corp', role: 'Business Data Analyst Intern, Summer 2027', source: 'greenhouse', sourceId: '4000006', location: 'Seattle, WA', postedAt: '2026-09-30T08:00:00.000Z', fit: 'high', jobUrl: 'https://job-boards.greenhouse.io/examplecorp/jobs/4000006' },
+  { company: 'Example Labs', role: 'Quantitative Research Intern', source: 'lever', sourceId: '11111111-1111-4111-8111-111111111111', location: 'New York, NY', postedAt: '2026-09-22T16:00:00.000Z', fit: 'medium', jobUrl: 'https://jobs.lever.co/examplelabs/11111111-1111-4111-8111-111111111111' },
+  { company: 'Example Quant', role: 'Machine Learning Intern, Summer 2027', source: 'ashby', sourceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', location: 'Remote', postedAt: '2026-09-27T12:00:00.000Z', fit: 'high', jobUrl: 'https://jobs.ashbyhq.com/examplequant/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+  { company: 'Example Quant', role: 'Data Science Intern, Summer 2027', source: 'ashby', sourceId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', location: 'Manhattan, New York; Seattle, WA', postedAt: '2026-09-29T12:00:00.000Z', fit: 'high', jobUrl: 'https://jobs.ashbyhq.com/examplequant/dddddddd-dddd-4ddd-8ddd-dddddddddddd' },
+];
+
+async function seedQueue(home) {
+  const { db } = await openHomeDatabase(home);
+  try {
+    return QUEUE_LEADS.map((lead) => {
+      const application = createApplication(db, { company: lead.company, role: lead.role, jobUrl: lead.jobUrl }, '2026-10-01T00:00:00.000Z');
+      db.prepare('UPDATE applications SET source = ?, source_id = ?, location = ?, posted_at = ?, fit = ? WHERE id = ?')
+        .run(lead.source, lead.sourceId, lead.location, lead.postedAt, lead.fit, application.id);
+      return application.id;
+    });
+  } finally { db.close(); }
+}
+
 test('help lists the scan and queue commands', () => {
   assert.match(HELP, /^ {2}scan {10}Scan official job boards for roles that match the profile$/m);
   assert.match(HELP, /^ {2}queue {9}List or verify queued roles before applying$/m);
 });
 
-test('scan run --dry-run fetches, filters, and scores without writing anything', async () => fixture(async (home) => {
+test('scan run --dry-run collects and classifies without writing anything', async () => fixture(async (home) => {
   await writeProfile(home);
   const databaseFile = path.join(home, '.career-journal', 'career-journal.db');
   const summary = await json(['scan', 'run', '--home', home, '--dry-run']);
   assert.equal(summary.dryRun, true);
-  assert.deepEqual(summary.counts, { fetched: 14, dropped: 9, duplicates: 0, queued: 5, possibleDuplicates: 0 });
-  assert.ok(summary.queued.every((item) => item.id === null && item.fitEngine === 'rules'));
+  assert.equal(summary.counts.observed, 17, 'every board record, including malformed rows and unlisted postings, is observed');
+  assert.equal(summary.counts.quarantined, 2);
+  assert.equal('queued' in summary.counts, false);
   assert.equal(existsSync(databaseFile), false, 'a dry run on a fresh workspace creates no database');
 
   assert.equal((await cli(['scan', 'run', '--home', home])).code, 0);
+  const db = database(home);
+  try {
+    assert.equal(db.prepare('SELECT COUNT(*) count FROM applications').get().count, 0, 'a scan never creates leads');
+    assert.ok(db.prepare('SELECT COUNT(*) count FROM observations').get().count > 0);
+  } finally { db.close(); }
   const before = await readFile(databaseFile);
   const again = await json(['scan', 'run', '--home', home, '--dry-run']);
-  assert.equal(again.counts.duplicates, 5);
-  assert.equal(again.counts.queued, 0);
+  assert.equal(again.counts.observed, 17);
   assert.deepEqual(await readFile(databaseFile), before, 'a dry run leaves an existing database unchanged');
 }));
 
-test('scan run queues kept roles as leads with source, location, and fit, and explains every drop', async () => fixture(async (home) => {
-  await writeProfile(home);
-  const summary = await json(['scan', 'run', '--home', home]);
-  assert.equal(summary.dryRun, false);
-  assert.deepEqual(summary.sources.map((item) => [item.source, item.status, item.count]), [
-    ['greenhouse', 'ok', 6], ['lever', 'ok', 5], ['ashby', 'ok', 3], ['careerops', 'skipped', 0], ['simplify', 'skipped', 0],
-  ]);
-  assert.deepEqual(summary.counts, { fetched: 14, dropped: 9, duplicates: 0, queued: 5, possibleDuplicates: 0 });
-  assert.deepEqual(summary.dropReasons, {
-    season: 1, direction: 1, 'degree-phd-only': 1, 'degree-undergrad-only': 2, citizenship: 1, clearance: 1,
-    'no-return-offer': 1, location: 1, 'job-type': 1,
-  });
-  for (const item of summary.dropped) {
-    assert.ok(item.reasons.length > 0, item.title);
-    assert.ok(item.reasons.every((reason) => /^[a-z-]+: .{20,}/.test(reason)), item.reasons.join(' | '));
-  }
-  assert.deepEqual(summary.queued.map((item) => [item.title, item.fit, item.locRank]), [
-    ['Data Science Intern, Summer 2027', 'high', 1],
-    ['Machine Learning Intern, Summer 2027', 'high', 1],
-    ['Business Data Analyst Intern, Summer 2027', 'high', 2],
-    ['Machine Learning Intern, Summer 2027', 'high', 3],
-    ['Quantitative Research Intern', 'medium', 1],
-  ]);
-
-  const db = database(home);
-  try {
-    const leads = db.prepare(`SELECT id, company, role, status, external_id, job_url, source, source_id, location, posted_at,
-      fit, fit_confidence, fit_note, verified_at, skip_reason FROM applications ORDER BY id`).all();
-    assert.equal(leads.length, 5);
-    assert.ok(leads.every((lead) => lead.status === 'lead' && lead.verified_at === null && lead.skip_reason === null));
-    const ml = leads.find((lead) => lead.source === 'greenhouse' && lead.source_id === '4000001');
-    assert.deepEqual({ ...ml, id: undefined }, {
-      id: undefined,
-      company: 'Example Corp',
-      role: 'Machine Learning Intern, Summer 2027',
-      status: 'lead',
-      external_id: 'greenhouse:4000001',
-      job_url: 'https://job-boards.greenhouse.io/examplecorp/jobs/4000001',
-      source: 'greenhouse',
-      source_id: '4000001',
-      location: 'New York, NY',
-      posted_at: '2026-09-28T18:00:00.000Z',
-      fit: 'high',
-      fit_confidence: null,
-      fit_note: 'Rule-based fit (no semantic provider decided): primary direction ai-ml ("machine learning") in the title',
-      verified_at: null,
-      skip_reason: null,
-    });
-    const event = db.prepare("SELECT event_type, title, source_json, status_after FROM application_events WHERE application_id = ?").get(ml.id);
-    assert.equal(event.event_type, 'role_found');
-    assert.equal(event.status_after, null);
-    assert.equal(JSON.parse(event.source_json).kind, 'role-scan');
-    const trace = db.prepare("SELECT engine, mode, applied, decision_json FROM decision_traces WHERE application_id = ?").get(ml.id);
-    assert.deepEqual({ engine: trace.engine, mode: trace.mode, applied: trace.applied }, { engine: 'rules', mode: 'role-fit', applied: 1 });
-    assert.equal(JSON.parse(trace.decision_json).ruleBased, true);
-  } finally { db.close(); }
-
-  const rerun = await json(['scan', 'run', '--home', home]);
-  assert.equal(rerun.counts.queued, 0, 'a second scan never queues the same roles again');
-  assert.equal(rerun.counts.duplicates, 5);
-  assert.match(rerun.duplicates[0].reason, /^duplicate: same source id as .+ \(lead\)$/);
-}));
-
-test('the opt-in Simplify source adds new roles and is deduplicated against official boards', async () => fixture(async (home) => {
+test('the opt-in Simplify source and the official board are one posting with two observations and no application', async () => fixture(async (home) => {
   const profilePath = await writeProfile(home, (profile) => {
     profile.sources.simplify = { enabled: true, url: SIMPLIFY_URL };
     return profile;
@@ -167,50 +109,20 @@ test('the opt-in Simplify source adds new roles and is deduplicated against offi
     routes: await defaultRoutes({ [SIMPLIFY_URL]: await readFixture('simplify-listings.json') }), calls,
   });
   assert.ok(calls.includes(SIMPLIFY_URL));
-  assert.deepEqual(summary.counts, { fetched: 20, dropped: 11, duplicates: 2, queued: 7, possibleDuplicates: 1 });
-  assert.deepEqual(summary.duplicates.map((item) => [item.source, item.title]), [
-    ['simplify', 'Machine Learning Intern, Summer 2027'],
-    ['simplify', 'Machine Learning Intern - Summer 2027'],
-  ]);
-  assert.match(summary.duplicates[0].reason, /same requisition id in the link/);
-  const possible = summary.queued.find((item) => item.possibleDuplicateOf);
-  assert.equal(possible.title, 'Machine Learning Intern, Summer 2027 - NLP');
+  assert.equal(summary.counts.observed, 24);
   const db = database(home);
   try {
-    const note = db.prepare("SELECT fit_note FROM applications WHERE source = 'simplify' AND role LIKE '%NLP%'").get().fit_note;
-    assert.match(note, /Possible duplicate of "Machine Learning Intern, Summer 2027" \(title similarity 0\.83\); check before applying/);
-    assert.equal(db.prepare("SELECT COUNT(*) count FROM applications WHERE source = 'simplify'").get().count, 2);
+    const postingId = db.prepare("SELECT posting_id FROM posting_aliases WHERE alias = 'source:greenhouse:4000001'").get()?.posting_id;
+    assert.ok(postingId, 'the board posting exists');
+    const sources = db.prepare('SELECT source FROM observations WHERE posting_id = ? ORDER BY source').all(postingId).map((row) => row.source);
+    assert.deepEqual(sources, ['greenhouse', 'simplify'], 'the Simplify listing of the same posting is a second observation, not a second posting');
+    assert.equal(db.prepare('SELECT COUNT(*) count FROM applications').get().count, 0);
   } finally { db.close(); }
 }));
 
-test('fit goes through configured Jev during a real scan but never during a dry run', async () => fixture(async (home) => {
+test('queue list orders by fit, cutoff, location rank, company load, then newest posting', async () => fixture(async (home) => {
   await writeProfile(home);
-  const config = await loadConfig(home);
-  config.jev = { ...config.jev, accessState: 'enabled', mode: 'active', threshold: 0.8, secretRef: 'env:CAREER_JOURNAL_SCAN_TEST_JEV', retryDelaysMs: [] };
-  await saveConfig(home, config);
-  process.env.CAREER_JOURNAL_SCAN_TEST_JEV = 'fixture-secret';
-  try {
-    const routes = await defaultRoutes();
-    const dryCalls = [];
-    await json(['scan', 'run', '--home', home, '--dry-run'], { routes, calls: dryCalls });
-    assert.equal(dryCalls.includes(JEV_URL), false);
-
-    const jevRoutes = { ...routes, [JEV_URL]: { answers: { fit: { type: 'choice', choice: 'medium', confidence: 0.93 } } } };
-    const calls = [];
-    const summary = await json(['scan', 'run', '--home', home], { routes: jevRoutes, calls });
-    assert.equal(calls.filter((url) => url === JEV_URL).length, 5);
-    assert.ok(summary.queued.every((item) => item.fit === 'medium' && item.fitEngine === 'jev' && item.fitConfidence === 0.93));
-    const db = database(home);
-    try {
-      const row = db.prepare("SELECT fit, fit_confidence, fit_note FROM applications WHERE source = 'lever'").get();
-      assert.deepEqual({ ...row }, { fit: 'medium', fit_confidence: 0.93, fit_note: 'Fit by Jev (confidence 0.93)' });
-    } finally { db.close(); }
-  } finally { delete process.env.CAREER_JOURNAL_SCAN_TEST_JEV; }
-}));
-
-test('queue list orders by fit, deadline, location rank, then newest posting', async () => fixture(async (home) => {
-  await writeProfile(home);
-  await json(['scan', 'run', '--home', home]);
+  const ids = await seedQueue(home);
   const queue = await json(['queue', 'list', '--home', home]);
   assert.deepEqual(queue.map((item) => [item.company, item.role, item.fit, item.locRank]), [
     ['Example Quant', 'Data Science Intern, Summer 2027', 'high', 1],
@@ -219,6 +131,11 @@ test('queue list orders by fit, deadline, location rank, then newest posting', a
     ['Example Quant', 'Machine Learning Intern, Summer 2027', 'high', 3],
     ['Example Labs', 'Quantitative Research Intern', 'medium', 1],
   ]);
+  for (const item of queue) {
+    for (const key of ['companyLoad', 'tabHint', 'deadlinePrecision', 'postingEndAt']) assert.ok(key in item, `${key} in queue rows`);
+    assert.equal(item.companyLoad, 0);
+    assert.equal(item.tabHint, `✅ Ready to submit ${item.company}`);
+  }
   const analyst = queue[2];
   const verified = await cli(['queue', 'verify', '--home', home, '--id', analyst.id, '--result', 'ok', '--reason', 'Official posting open; degree and authorization fit', '--deadline', '2026-10-15T23:59:00-07:00']);
   assert.equal(verified.code, 0, verified.io.stderr);
@@ -229,9 +146,20 @@ test('queue list orders by fit, deadline, location rank, then newest posting', a
   const reordered = await json(['queue', 'list', '--home', home]);
   assert.equal(reordered[0].id, analyst.id, 'a known deadline moves a role ahead within its fit');
 
+  // A date-only cutoff is the end of that day in the configured time zone (UTC here), never midnight at its start.
+  const [corpMl, , , quantMl] = ids;
+  const db = database(home);
+  try {
+    db.prepare("UPDATE applications SET deadline_at = '2026-10-15T12:00:00Z', deadline_precision = 'datetime', deadline_source = 'review' WHERE id = ?").run(corpMl);
+    db.prepare("UPDATE applications SET deadline_at = '2026-10-15', deadline_precision = 'date', deadline_source = 'review' WHERE id = ?").run(quantMl);
+  } finally { db.close(); }
+  const cutoffs = await json(['queue', 'list', '--home', home]);
+  assert.deepEqual(cutoffs.slice(0, 3).map((item) => item.id), [corpMl, quantMl, analyst.id]);
+  assert.equal(cutoffs[1].deadlinePrecision, 'date');
+
   const text = await cli(['queue', 'list', '--home', home]);
   assert.equal(text.io.stdout.trim().split('\n').length, 5);
-  assert.match(text.io.stdout.split('\n')[0], /^high\t2026-10-15T23:59:00-07:00\tSeattle, WA\tExample Corp\tBusiness Data Analyst Intern, Summer 2027\t/);
+  assert.match(text.io.stdout.split('\n')[0], /^high\t2026-10-15T12:00:00Z\tNew York, NY\tExample Corp\tMachine Learning Intern, Summer 2027\t/);
 
   const noProfile = path.join(home, 'missing.json');
   assert.match((await cli(['queue', 'list', '--home', home, '--profile', noProfile])).io.stderr, /No search profile found/);
@@ -242,7 +170,7 @@ test('queue list orders by fit, deadline, location rank, then newest posting', a
 
 test('queue verify --result skip withdraws the lead with an event carrying the reason', async () => fixture(async (home) => {
   await writeProfile(home);
-  await json(['scan', 'run', '--home', home]);
+  await seedQueue(home);
   const [first] = await json(['queue', 'list', '--home', home]);
   const reason = 'Posting requires graduation before May 2027';
   const skipped = await cli(['queue', 'verify', '--home', home, '--id', first.id, '--result', 'skip', '--reason', reason]);
@@ -258,9 +186,12 @@ test('queue verify --result skip withdraws the lead with an event carrying the r
   } finally { db.close(); }
   const queue = await json(['queue', 'list', '--home', home]);
   assert.equal(queue.some((item) => item.id === first.id), false);
-  const rescan = await json(['scan', 'run', '--home', home]);
-  assert.equal(rescan.counts.queued, 0, 'a skipped role does not come back on the next scan');
-  assert.ok(rescan.duplicates.some((item) => item.duplicateOf === first.id && /\(withdrawn\)/.test(item.reason)));
+  await json(['scan', 'run', '--home', home]);
+  const after = database(home);
+  try {
+    assert.equal(after.prepare('SELECT status FROM applications WHERE id = ?').get(first.id).status, 'withdrawn', 'a skipped role does not come back on the next scan');
+    assert.equal(after.prepare('SELECT COUNT(*) count FROM applications').get().count, QUEUE_LEADS.length, 'the scan creates no application');
+  } finally { after.close(); }
 
   const again = await cli(['queue', 'verify', '--home', home, '--id', first.id, '--result', 'ok', '--reason', 'retry']);
   assert.equal(again.code, 1);
@@ -269,7 +200,7 @@ test('queue verify --result skip withdraws the lead with an event carrying the r
 
 test('queue verify validates its inputs before writing', async () => fixture(async (home) => {
   await writeProfile(home);
-  await json(['scan', 'run', '--home', home]);
+  await seedQueue(home);
   const [first] = await json(['queue', 'list', '--home', home]);
   const cases = [
     [['--id', first.id, '--result', 'maybe', '--reason', 'x'], /result must be ok or skip/],
@@ -300,11 +231,11 @@ test('scan, queue, and the role-scan task read the profile of a legacy .jobops w
 
     const preview = await json(['scan', 'run', '--home', home, '--dry-run']);
     assert.equal(preview.dryRun, true);
-    assert.ok(preview.counts.queued > 0);
+    assert.ok(preview.counts.observed > 0);
     const summary = await json(['scan', 'run', '--home', home]);
-    assert.equal(summary.counts.queued, preview.counts.queued);
+    assert.equal(summary.counts.observed, preview.counts.observed);
     assert.equal(existsSync(path.join(home, '.career-journal')), false, 'no second workspace is created');
-    assert.equal((await json(['queue', 'list', '--home', home])).length, summary.counts.queued);
+    assert.equal((await json(['queue', 'list', '--home', home])).length, 0, 'the scan reads the legacy profile and creates no leads');
     const configured = await cli(['automation', 'configure', '--home', home, '--task', 'role-scan', '--enabled']);
     assert.equal(configured.code, 0, configured.io.stderr);
     assert.equal(JSON.parse(configured.io.stdout).schedule, '08:30');
@@ -325,14 +256,14 @@ test('scan run reports a missing profile, missing sources, and total source fail
   });
   assert.equal(failed.code, 1);
   assert.match(failed.io.stderr, /Every scan source failed/);
-  assert.match(failed.io.stdout, /Sources: greenhouse\/examplecorp error \(HTTP 500\)/);
+  assert.match(failed.io.stdout, /greenhouse[^\n]*examplecorp[^\n]*error[^\n]*HTTP 500/);
 
+  await writeProfile(home, (profile) => ({ ...profile, sources: { ...profile.sources, expected: ['atsBoards'] } }));
   const partial = await cli(['scan', 'run', '--home', home], {
     routes: { ...(await defaultRoutes()), [ATS_URLS.lever]: 503 },
   });
-  assert.equal(partial.code, 0, partial.io.stderr);
-  assert.match(partial.io.stdout, /^Role scan\nSources: greenhouse\/examplecorp ok 6; lever\/examplelabs error \(HTTP 503\); ashby\/examplequant ok 3; careerops skipped \(not enabled in the profile\); simplify skipped \(opt-in source is not enabled\)\nFetched 9; queued 4; dropped 5; duplicates 0\n/);
-  assert.match(partial.io.stdout, /Dropped by reason: /);
+  assert.equal(partial.code, 2, 'an erroring expected partition makes the scan partial');
+  assert.match(partial.io.stdout, /lever[^\n]*examplelabs[^\n]*error[^\n]*HTTP 503/);
 }));
 
 test('the optional role-scan task uses pace.scanTime, runs the scan, and is never required', async () => fixture(async (home) => {
@@ -345,15 +276,14 @@ test('the optional role-scan task uses pace.scanTime, runs the scan, and is neve
   const run = await cli(['automation', 'run', '--home', home, '--task', 'role-scan']);
   assert.equal(run.code, 0, run.io.stderr);
   const result = JSON.parse(run.io.stdout);
-  assert.equal(result.changed, 5);
-  assert.equal(result.message, '5 new role(s) queued');
-  const quiet = await cli(['automation', 'run', '--home', home, '--task', 'role-scan']);
-  assert.equal(quiet.code, 0);
-  assert.equal(quiet.io.stdout, '', 'an unchanged scan prints nothing');
+  assert.equal(result.changed, 0, 'the scan stage creates no leads');
+  assert.match(result.message, /review not configured/, 'without review inputs the task scans and reports that review is not configured');
 
   const db = database(home);
   try {
     assert.deepEqual(listTasks(db).map((item) => item.type), ['role-scan']);
+    assert.equal(db.prepare('SELECT COUNT(*) count FROM applications').get().count, 0);
+    assert.ok(db.prepare('SELECT COUNT(*) count FROM observations').get().count > 0, 'the scan stage ran');
   } finally { db.close(); }
   const probed = [];
   const report = await doctor(home, {

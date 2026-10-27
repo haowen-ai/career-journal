@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { freshDb, load, insertPosting, insertReview, reviewOf, fakeJudge, fakeFetcher, T0, at } from '../../test-utils/funnel-v3.mjs';
-import { FACTS, REVIEW_POLICY, SCREENING_POLICY, SNAPSHOTS, JUDGMENTS, page } from '../../test-utils/funnel-v3-fixtures.mjs';
+import { FACTS, REVIEW_POLICY, SCREENING_POLICY, SNAPSHOTS, JUDGMENTS, page, reviewInputs } from '../../test-utils/funnel-v3-fixtures.mjs';
 
 const worker = () => load('L2', './src/review/worker.mjs', ['runReview']);
 const budgetModule = () => load('L2', './src/review/budget.mjs', ['createBudget']);
@@ -29,7 +29,7 @@ function nightOptions(db, { now, budget, runId, judges, fetcher }) {
     db, runId, owner: 'worker-a', now, budget, deadlineMs: 600_000, attemptDir: null, sleep: async () => {},
     fetcher: fetcher ?? fakeFetcher(pages),
     judges: judges ?? { primary: fakeJudge({ tier: 'primary', answers: () => ({ output: JUDGMENTS.eligible }) }), escalation: fakeJudge({ tier: 'escalation', answers: () => ({ output: JUDGMENTS.eligible }) }) },
-    inputs: () => ({ facts: FACTS, policy: REVIEW_POLICY, screeningPolicy: SCREENING_POLICY }),
+    inputs: () => reviewInputs(),
     hooks: {},
   };
 }

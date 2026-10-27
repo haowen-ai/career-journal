@@ -4,10 +4,10 @@ import assert from 'node:assert/strict';
 import { parseGreenhouse, parseAshby } from '../../src/scan/sources/ats-boards.mjs';
 import { parseSimplify } from '../../src/scan/sources/simplify.mjs';
 import { freshDb, load, reviewOf, T0 } from '../../test-utils/funnel-v3.mjs';
-import { record, SCREENING_POLICY } from '../../test-utils/funnel-v3-fixtures.mjs';
+import { record, SCREENING_POLICY, PROFILE } from '../../test-utils/funnel-v3-fixtures.mjs';
 
 const classify = () => load('L1', './src/funnel/classify.mjs', ['classifyRole']);
-const ingest = () => load('L1', './src/funnel/ingest.mjs', ['ingestBatch', 'recordSourceStatus']);
+const ingest = () => load('L1', './src/funnel/ingest.mjs', ['ingestBatch']);
 const postingFor = (db, alias) => db.prepare('SELECT posting_id FROM posting_aliases WHERE alias = ?').get(alias)?.posting_id;
 const LONG = (text) => `${text} `.repeat(30);
 
@@ -39,14 +39,15 @@ test('[L1] Ashby keeps isListed=false postings as unlisted records', () => {
 
 // ---------------------------------------------------------- classifyRole
 
-test('[L1] the four certain drop/reuse codes fire only on certain facts', async () => {
+test('[L1] the certain drop/reuse codes fire only on certain facts', async () => {
   const { classifyRole } = await classify();
   const policy = SCREENING_POLICY;
   assert.equal(classifyRole(record({ company: 'Excluded Example Co' }), { policy }).code, 'company_excluded');
-  assert.equal(classifyRole(record({ locations: ['London, United Kingdom', 'Berlin, Germany'], workplaceType: 'onsite', remote: false,
-    completeness: { locations: 'complete', arrangement: 'known', description: 'full', employment_type: 'absent' } }), { policy }).code, 'non_us_only');
-  assert.equal(classifyRole(record({ title: 'Senior Data Engineer', employmentType: 'Full-time', description: LONG('Build pipelines for our analytics platform with Spark.'),
-    completeness: { locations: 'complete', arrangement: 'known', description: 'full', employment_type: 'explicit' } }), { policy }).code, 'full_time_only');
+  const foreign = record({ locations: ['London, United Kingdom', 'Berlin, Germany'], workplaceType: 'onsite', remote: false,
+    completeness: { locations: 'complete', arrangement: 'known', description: 'full', employment_type: 'absent' } });
+  assert.equal(classifyRole(foreign, { policy, profile: PROFILE }).code, 'outside_countries');
+  assert.equal(classifyRole(foreign, { policy }).kind, 'review', 'without profile countries geography never drops');
+  assert.equal(classifyRole(record({ sourceId: '9000777', url: 'https://job-boards.greenhouse.io/examplecorp/jobs/9000777' }), { policy, profile: PROFILE }).code, 'posting_excluded');
   const reuse = classifyRole(record(), { policy, identity: { submitted: true } });
   assert.deepEqual([reuse.kind, reuse.code], ['reuse', 'already_submitted']);
   const declined = classifyRole(record(), { policy, identity: { userDeclined: true } });
@@ -68,19 +69,26 @@ for (const [name, overrides] of [
   ['fellowship / residency / placement titles', { title: 'AI Residency Program' }],
   ['first-seen inactive record', { listed: false }],
   ['state-only remote location', { locations: ['USA - IL - Remote'] }],
+  ['explicit Full-time with a complete description and no student signal', { title: 'Senior Data Engineer', employmentType: 'Full-time', description: LONG('Build pipelines for our analytics platform with Spark.'), completeness: { locations: 'complete', arrangement: 'known', description: 'full', employment_type: 'explicit' } }],
 ]) {
   test(`[L1] stays review, never dropped: ${name}`, async () => {
     const { classifyRole } = await classify();
-    const result = classifyRole(record(overrides), { policy: SCREENING_POLICY });
+    const result = classifyRole(record(overrides), { policy: SCREENING_POLICY, profile: PROFILE });
     assert.equal(result.kind, 'review', JSON.stringify(result));
   });
 }
 
 test('[L1] a complete JD with no student signal and no employment category goes to the no_student_signal lane (U1 default never drops)', async () => {
   const { classifyRole } = await classify();
-  const result = classifyRole(record({ title: 'Data Analyst', description: LONG('Analyse revenue data for our finance team.') }), { policy: SCREENING_POLICY });
+  const plain = record({ title: 'Data Analyst', description: LONG('Analyse revenue data for our finance team.') });
+  const result = classifyRole(plain, { policy: SCREENING_POLICY, profile: PROFILE });
   assert.equal(result.kind, 'review');
   assert.ok(result.flags.includes('no_student_signal'));
+  assert.equal(result.lane, 'no_student_signal');
+  const fullTime = classifyRole(plain, { policy: SCREENING_POLICY, profile: { search: { jobType: 'full-time', countries: ['US'] } } });
+  assert.equal(fullTime.kind, 'review');
+  assert.ok(!fullTime.flags.includes('no_student_signal'), 'the lane exists only for internship and co-op searches');
+  assert.equal(fullTime.lane, 'new');
 });
 
 // --------------------------------------------------------- ingestBatch
@@ -117,6 +125,13 @@ test('[L1] unchanged sightings over successive censuses are recorded per run', a
   for (const runId of ['run-1', 'run-2', 'run-3']) ingestBatch(db, { runId, source: 'greenhouse', partition: 'greenhouse:examplecorp', records, now: T0, policy: SCREENING_POLICY });
   assert.equal(db.prepare('SELECT COUNT(*) n FROM observations').get().n, 1);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM observation_sightings').get().n, 3);
+
+  const lists = freshDb();
+  const listed = record({ source: 'simplify', sourceId: 'shared-1', url: 'https://careers.example.com/jobs/shared-1', completeness: { locations: 'partial', arrangement: 'unknown', description: 'tags', employment_type: 'absent' } });
+  for (const partition of ['simplify:1', 'simplify:2']) ingestBatch(lists, { runId: 'run-1', source: 'simplify', partition, records: [{ ...listed, partition }], now: T0, policy: SCREENING_POLICY });
+  assert.equal(lists.prepare('SELECT COUNT(*) n FROM observation_sightings').get().n, 2, 'one sighting per partition that listed the posting');
+  assert.equal(lists.prepare('SELECT COUNT(*) n FROM postings').get().n, 1);
+  assert.equal(lists.prepare('SELECT COUNT(*) n FROM reviews').get().n, 1);
 });
 
 test('[L1] a failure inside a source batch leaves no partial rows', async () => {
@@ -202,7 +217,7 @@ async function scanWith(sources) {
 }
 
 test('[L1] scan run no longer creates leads and no longer prints held/queued', async () => {
-  const { db, summary } = await scanWith({ sources: [{ source: 'careerops', partition: 'workday:Acme', status: 'ok', count: 1 }, { source: 'simplify', partition: 'simplify:list', status: 'ok', count: 0 }], batches: [{ source: 'careerops', partition: 'workday:Acme', records: [record({ source: 'careerops', partition: 'workday:Acme' })] }] });
+  const { db, summary } = await scanWith({ sources: [{ source: 'careerops', partition: 'workday:Acme', status: 'ok', count: 1, rawCount: 1, truncated: false }, { source: 'simplify', partition: 'simplify:list', status: 'ok', count: 0, rawCount: 0, truncated: false }], batches: [{ source: 'careerops', partition: 'workday:Acme', rawCount: 1, records: [record({ source: 'careerops', partition: 'workday:Acme' })] }] });
   assert.equal(db.prepare('SELECT COUNT(*) n FROM applications').get().n, 0);
   assert.equal('held' in summary, false);
   assert.equal('queued' in summary, false);
@@ -210,16 +225,16 @@ test('[L1] scan run no longer creates leads and no longer prints held/queued', a
 });
 
 test('[L1] an expected source that is disabled makes the scan partial (exit 2)', async () => {
-  const { summary, exit } = await scanWith({ sources: [{ source: 'careerops', partition: 'all', status: 'ok', count: 0 }, { source: 'simplify', partition: 'all', status: 'skipped', count: 0, detail: 'opt-in source is not enabled' }], batches: [] });
+  const { summary, exit } = await scanWith({ sources: [{ source: 'careerops', partition: 'all', status: 'ok', count: 0, rawCount: 0, truncated: false }, { source: 'simplify', partition: 'all', status: 'skipped', count: 0, rawCount: 0, truncated: false, detail: 'opt-in source is not enabled' }], batches: [] });
   assert.equal(summary.status, 'partial');
   assert.equal(exit, 2);
 });
 
 test('[L1] all sources erroring is failed (exit 1); a genuine empty census is ok (exit 0)', async () => {
-  const failed = await scanWith({ sources: [{ source: 'careerops', partition: 'all', status: 'error', count: 0 }, { source: 'simplify', partition: 'all', status: 'error', count: 0 }], batches: [] });
+  const failed = await scanWith({ sources: [{ source: 'careerops', partition: 'all', status: 'error', count: 0, rawCount: 0, truncated: false }, { source: 'simplify', partition: 'all', status: 'error', count: 0, rawCount: 0, truncated: false }], batches: [] });
   assert.equal(failed.summary.status, 'failed');
   assert.equal(failed.exit, 1);
-  const empty = await scanWith({ sources: [{ source: 'careerops', partition: 'all', status: 'ok', count: 0 }, { source: 'simplify', partition: 'all', status: 'ok', count: 0 }], batches: [] });
+  const empty = await scanWith({ sources: [{ source: 'careerops', partition: 'all', status: 'ok', count: 0, rawCount: 0, truncated: false }, { source: 'simplify', partition: 'all', status: 'ok', count: 0, rawCount: 0, truncated: false }], batches: [] });
   assert.equal(empty.summary.status, 'ok');
   assert.equal(empty.exit, 0);
 });

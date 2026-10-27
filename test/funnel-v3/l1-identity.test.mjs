@@ -25,7 +25,7 @@ test('[L1] canonicalUrl lowercases only the host, keeps path case and identity p
 
 test('[L1] providerRequisition normalizes only where the provider guarantees equivalence', async () => {
   const { providerRequisition } = await identity();
-  assert.deepEqual(providerRequisition('https://acme.wd5.myworkdayjobs.com/ext/job/Chicago-IL/Data-Intern_r36285'), { provider: 'workday', tenant: 'acme', id: 'R36285' });
+  assert.deepEqual(providerRequisition('https://acme.wd5.myworkdayjobs.com/ext/job/Chicago-IL/Data-Intern_r900285'), { provider: 'workday', tenant: 'acme', id: 'R900285' });
   const lever = providerRequisition('https://jobs.lever.co/examplelabs/2F1C7C1E-0000-4000-8000-00000000000A');
   assert.deepEqual([lever.provider, lever.id], ['lever', '2f1c7c1e-0000-4000-8000-00000000000a']);
   assert.deepEqual(providerRequisition('https://careers.example.com/apply?jobId=CaseA'), { provider: 'generic', tenant: 'careers.example.com', id: 'CaseA' });
@@ -43,7 +43,7 @@ test('[L1] case-distinct generic query ids stay two postings (both reviewed)', a
 
 test('[L1] the same posting seen via an aggregator and via its Workday link is one posting with both observations', async () => {
   const db = freshDb();
-  const url = 'https://acme.wd5.myworkdayjobs.com/ext/job/Chicago-IL/Data-Science-Intern_R36285';
+  const url = 'https://acme.wd5.myworkdayjobs.com/ext/job/Chicago-IL/Data-Science-Intern_R900285';
   await batch(db, [record({ source: 'simplify', sourceId: 's-1', partition: 'simplify:list', url, completeness: { locations: 'partial', arrangement: 'unknown', description: 'tags', employment_type: 'absent' } })]);
   await batch(db, [record({ source: 'careerops', sourceId: url, partition: 'workday:acme', url: url.replace('Data-Science-Intern', 'data-science-intern') })], { runId: 'run-2' });
   assert.equal(db.prepare('SELECT COUNT(*) n FROM postings').get().n, 1);
@@ -65,14 +65,14 @@ test('[L1] post-fetch alias collision with an already-submitted posting binds to
   const { reconcileAliases } = await identity();
   const { bootstrapExisting } = await bootstrap();
   const db = freshDb();
-  const submitted = seedApplication(db, { company: 'Example Corp', role: 'ML Intern', status: 'applied', externalId: 'R171519', appliedAt: '2026-09-29T00:00:00Z' });
+  const submitted = seedApplication(db, { company: 'Example Corp', role: 'ML Intern', status: 'applied', externalId: 'R900519', appliedAt: '2026-09-29T00:00:00Z' });
   bootstrapExisting(db, { provenance: { automatedSkipPrefixes: [], userDeclineMarkers: [] }, now: T0 });
   await batch(db, [record({ source: 'simplify', sourceId: 's-77', partition: 'simplify:list', url: 'https://careers.example.com/jobs/view/ml-intern', title: 'Machine Learning Engineer Intern' })]);
   const fallback = postingFor(db, 'source:simplify:s-77');
   const target = db.prepare('SELECT id FROM postings WHERE application_id = ?').get(submitted.id).id;
   assert.notEqual(fallback, target, 'before fetch the aggregator record is its own posting');
   const before = applicationsCount(db);
-  const result = reconcileAliases(db, fallback, [{ alias: 'company_req:examplecorp:R171519', kind: 'company_req' }], { now: T0 });
+  const result = reconcileAliases(db, fallback, [{ alias: 'company_req:examplecorp:R900519', kind: 'company_req' }], { now: T0 });
   assert.equal(result.action, 'bound');
   assert.equal(effective(db, fallback), target);
   const review = reviewOf(db, target);
@@ -129,9 +129,9 @@ for (const status of ['lead', 'applied', 'rejected', 'withdrawn']) {
 test('[L1] an exact alias hit on a submitted application is reused at scan with zero work', async () => {
   const { bootstrapExisting } = await bootstrap();
   const db = freshDb();
-  seedApplication(db, { company: 'Example Bank', role: 'AI Engineering Intern', status: 'applied', jobUrl: 'https://examplebank.wd12.myworkdayjobs.com/Ext/job/New-York-NY/AI-Engineering-Intern_R249109-1', appliedAt: '2026-09-29T00:00:00Z' });
+  seedApplication(db, { company: 'Example Bank', role: 'AI Engineering Intern', status: 'applied', jobUrl: 'https://examplebank.wd12.myworkdayjobs.com/Ext/job/New-York-NY/AI-Engineering-Intern_R900109-1', appliedAt: '2026-09-29T00:00:00Z' });
   bootstrapExisting(db, { provenance: { automatedSkipPrefixes: [], userDeclineMarkers: [] }, now: T0 });
-  const counts = await batch(db, [record({ source: 'simplify', sourceId: 's-cap', partition: 'simplify:list', company: 'Example Bank', title: 'AI Engineer Intern', url: 'https://examplebank.wd12.myworkdayjobs.com/Ext/job/New-York-NY/Current-Masters-AI-Engineering-Intern_R249109-1' })]);
+  const counts = await batch(db, [record({ source: 'simplify', sourceId: 's-cap', partition: 'simplify:list', company: 'Example Bank', title: 'AI Engineer Intern', url: 'https://examplebank.wd12.myworkdayjobs.com/Ext/job/New-York-NY/Current-Masters-AI-Engineering-Intern_R900109-1' })]);
   assert.equal(counts.reused, 1);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM reviews WHERE state IN ('due','leased')").get().n, 0);
 });
