@@ -70,6 +70,18 @@ export function verifyQueuedRole(db, input, now = new Date().toISOString()) {
   try {
     db.prepare(`UPDATE applications SET verified_at = ?, deadline_at = COALESCE(?, deadline_at), skip_reason = ?, updated_at = ?
       WHERE id = ?`).run(now, deadline, skip ? reason : null, now, id);
+    const funnel = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reviews'").get();
+    const actor = input.actor === 'review-worker' ? 'review-worker' : 'user';
+    if (funnel) {
+      db.prepare('UPDATE applications SET skip_owner=?,deadline_source=CASE WHEN ? IS NOT NULL THEN ? ELSE deadline_source END,deadline_precision=CASE WHEN ? IS NOT NULL THEN ? ELSE deadline_precision END WHERE id=?')
+        .run(skip ? (actor === 'user' ? 'user' : 'review') : null, deadline, actor === 'user' ? 'user' : 'review', deadline, 'datetime', id);
+      for (const posting of db.prepare('SELECT id FROM postings WHERE application_id=?').all(id)) {
+        db.prepare("UPDATE reviews SET state='done',decision=?,code=?,hold_owner=NULL,hold_since=NULL,next_due=NULL,lease_owner=NULL,lease_until=NULL,updated_at=? WHERE posting_id=?")
+          .run(skip ? 'not_eligible' : 'eligible', skip ? 'user_declined' : null, now, posting.id);
+        db.prepare("INSERT INTO review_log(posting_id,at,stage,kind,payload_json) VALUES (?,?,'deliver',?,?)")
+          .run(posting.id, now, actor === 'user' ? 'user' : 'delivery', JSON.stringify({ actor, result, reason }));
+      }
+    }
     recordEvent(db, {
       id: randomUUID(),
       applicationId: id,
@@ -79,7 +91,7 @@ export function verifyQueuedRole(db, input, now = new Date().toISOString()) {
       recordedAt: now,
       title: skip ? 'Skipped after posting check' : 'Posting checked',
       note: reason,
-      source: { kind: 'queue-verify', result, reason, ...(deadline ? { deadline } : {}) },
+      source: { kind: 'queue-verify', actor, result, reason, ...(deadline ? { deadline } : {}) },
       statusAfter: skip ? 'withdrawn' : null,
     }, { withinTransaction: true });
     db.exec('COMMIT');

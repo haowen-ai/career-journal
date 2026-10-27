@@ -16,5 +16,10 @@ export function assertStatusTransition(from, to) {
   return true;
 }
 
+export function assertReviewRestore(from, to, { actor, lastActor, automated = false }) {
+  if (from !== 'withdrawn' || to !== 'lead' || actor !== 'review-worker' || !(lastActor === 'review-worker' || automated)) throw new Error('Invalid review restore');
+  return true;
+}
+
 export const applicationStatuses = Object.freeze([...transitions.keys()]);
 
