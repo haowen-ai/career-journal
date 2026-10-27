@@ -87,7 +87,7 @@ export async function runEval({ setDir, judges, secondOpinion, jev, judgePolicy,
         else {
           let jevProbabilities;
           if (usesJevSplit(profile.inputs.policy)) {
-            const result = await reviewJevSplit({ inputs: profile.inputs, snapshotText: snapshot.text, firstSeen: item.posting.firstSeen,
+            const result = await reviewJevSplit({ inputs: profile.inputs, snapshotText: snapshot.text, firstSeen: item.posting.firstSeen, posting: item.posting,
               jev: profile.jev, counts: metrics.jev });
             verdict = result.verdict; jevProbabilities = result.probabilities;
           }

@@ -422,7 +422,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     let jevProbabilities;
     if (usesJevSplit(stageInputs.policy) && !expired()) {
       receipt.jev ??= jevCounts();
-      const result = await reviewJevSplit({ inputs: stageInputs, snapshotText: snapshot.text, firstSeen: posting.first_seen,
+      const result = await reviewJevSplit({ inputs: stageInputs, snapshotText: snapshot.text, firstSeen: posting.first_seen, posting,
         jev, counts: receipt.jev });
       final = result.verdict; jevProbabilities = result.probabilities;
     }
