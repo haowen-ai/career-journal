@@ -77,7 +77,7 @@ test('validates only the fields the scan needs, with the field path in each erro
   const minimal = normalizeScanProfile({});
   assert.deepEqual(minimal.search.directions, { primary: [], secondary: [] });
   assert.equal(minimal.search.remoteOk, false);
-  assert.deepEqual(minimal.sources, { atsBoards: [], careerOps: false, simplify: { enabled: false, url: null } });
+  assert.deepEqual(minimal.sources, { atsBoards: [], careerOps: false, simplify: { enabled: false, url: null }, expected: [] });
   const overlapping = normalizeScanProfile({ search: { directions: { primary: ['quant'], secondary: ['quant', 'product'] }, locations: [{ label: 'Boston, MA' }] } });
   assert.deepEqual(overlapping.search.directions.secondary, ['product']);
   assert.deepEqual(overlapping.search.locations[0].match, ['boston, ma']);
