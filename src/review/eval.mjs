@@ -85,7 +85,7 @@ export async function runEval({ setDir, judges, concurrency = 3 }) {
             let result;
             try { result = await adapter.judge(request, { attemptId, outputPath }); }
             catch (error) { result = { status: 'error', error: error.message }; }
-            attempts.push({ tier, status: result.status, error: result.error ?? null });
+            attempts.push({ tier, status: result.status, error: result.error ?? null, judgment: result.output ?? null });
             if (tier === 'escalation') { escalated = true; metrics.escalations += 1; }
             if (result.status !== 'ok') { verdict = { decision: 'unclear', code: `judge_${result.status}` }; adapterError = true; break; }
             verdict = decide({ snapshotText: snapshot.text, judgment: result.output, facts: profile.inputs.facts, policy: profile.inputs.policy, tier,

@@ -224,6 +224,14 @@ export function decide({ snapshotText, judgment, facts, policy, tier, firstSeen,
   const termOrArea = () => unclear('term_or_area', 'Which stated work window and office or remote scope match your policy?');
   const confirmed = criteria.find(({ criterion, validation }) => criterion.status === 'conflicts' && validation.confirmedConflict);
   if (confirmed) return rejected(confirmed.criterion.key, confirmed.validation.clause.text);
+  if (alternatives.length && alternatives.every((alternative) => alternative.validated && !alternative.acceptable)) {
+    const code = alternatives.every((alternative) => alternative.outside === 'outside_window') ? 'outside_window' : 'outside_area';
+    // Retain the validated model alternatives, including all supporting quotes,
+    // even though none can be delivered as an allowed location alternative.
+    base.evidence.push(...alternatives.map(({ term, offices, remote }) => ({ confirmed: true, code, term, offices, remote,
+      factIds: [], quote: term.quote, quotes: [term.quote, ...offices.map((office) => office.quote), remote.quote].filter(Boolean) })));
+    return rejected(code, 'The quoted alternatives all fall outside your policy.');
+  }
   const advisoryCriterion = ({ criterion, validation }) => {
     if (criterion.status !== 'unclear' || !validation.valid || !criterion.fact_ids?.length) return false;
     const cited = criterion.fact_ids.map((id) => facts.find((fact) => fact.id === id));
@@ -237,15 +245,7 @@ export function decide({ snapshotText, judgment, facts, policy, tier, firstSeen,
   }
   if (policy.functions?.outOfScope?.includes(functionValue)) return rejected('function_out_of_scope', `Is ${functionValue} work in scope?`);
   if (policy.functions?.userCall?.includes(functionValue)) return unclear('user_review', `Would you like to consider this ${functionValue} role?`);
-  if (!alternatives.some((alternative) => alternative.acceptable)) {
-    if (!alternatives.length || !alternatives.every((alternative) => alternative.validated)) return termOrArea();
-    const code = alternatives.every((alternative) => alternative.outside === 'outside_window') ? 'outside_window' : 'outside_area';
-    // Retain the validated model alternatives, including all supporting quotes,
-    // even though none can be delivered as an allowed location alternative.
-    base.evidence.push(...alternatives.map(({ term, offices, remote }) => ({ confirmed: true, code, term, offices, remote,
-      factIds: [], quote: term.quote, quotes: [term.quote, ...offices.map((office) => office.quote), remote.quote].filter(Boolean) })));
-    return rejected(code, 'The quoted alternatives all fall outside your policy.');
-  }
+  if (!alternatives.some((alternative) => alternative.acceptable)) return termOrArea();
   if (tier === 'primary' && alternatives.some((alternative) => alternative.acceptable && alternative.advisory)) return termOrArea();
   return { ...base, decision: 'eligible' };
 }
