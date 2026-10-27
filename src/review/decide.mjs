@@ -35,10 +35,30 @@ function dateEvidence(quote, value) {
   return { start: `${year}-${String(month).padStart(2, '0')}-01`, end: new Date(Date.UTC(Number(year), month, 0)).toISOString().slice(0, 10) };
 }
 
+function quoteAgreesWithTerm(term, quote) {
+  return seasons(quote).every((season) => seasons(term.label).includes(season))
+    && (clean(quote).match(/\b\d{4}\b/g) ?? []).every((year) => Number(year) === term.year);
+}
+
+function termPlacesAgree(quote, offices) {
+  // Compare literal named places in this quote with this alternative's offices.
+  // No page-wide place lookup or proximity-based track assignment is involved.
+  const city = String.raw`\p{Lu}[\p{L}\p{M}.'-]*(?:\s+\p{Lu}[\p{L}\p{M}.'-]*)*`;
+  const value = normalizeQuote(quote ?? '');
+  const places = [
+    ...[...value.matchAll(new RegExp(`${city},\\s*[A-Z]{2}\\b`, 'gu'))].map((match) => match[0]),
+    ...[...value.matchAll(new RegExp(`\\b(?:[Bb]ased|[Ll]ocated) in (${city}(?:,\\s*[A-Z]{2}\\b)?)`, 'gu'))].map((match) => match[1]),
+  ];
+  return places.every((place) => offices.some((office) => {
+    const expected = place.includes(',') ? clean(office.place) : clean(office.place).split(',')[0].trim();
+    return expected && (clean(place) === expected || clean(place).endsWith(` ${expected}`));
+  }));
+}
+
 function termEvidence(text, term, inferred = false) {
   if (!term || !findQuote(text, term.quote)) return false;
   const quote = clean(term.quote);
-  if (!term.label || seasons(quote).some((season) => !seasons(term.label).includes(season))) return false;
+  if (!term.label || !quoteAgreesWithTerm(term, quote)) return false;
   if (term.year !== undefined && term.year !== null && (!Number.isInteger(term.year) || !inferred && !new RegExp(`\\b${term.year}\\b`).test(quote))) return false;
   if (term.start && !dateValid(term.start)) return false;
   if (term.start && !dateEvidence(quote, term.start)) return false;
@@ -91,9 +111,12 @@ function readAlternative(text, alternative, policy, firstSeen) {
   let contradictory = false;
   let advisory = false;
   const { term, inferred } = inferTerm(alternative.term, firstSeen);
+  const quotedOffices = alternative.offices ?? [];
+  if (term && ([term.quote, ...quotedOffices.map((office) => office.quote), alternative.remote?.quote]
+    .some((quote) => !quoteAgreesWithTerm(term, quote)) || !termPlacesAgree(term.quote, quotedOffices))) contradictory = true;
   const offices = [];
   const keys = new Set([...(policy.areas?.keys ?? []), 'outside', 'unknown']);
-  for (const office of alternative.offices ?? []) {
+  for (const office of quotedOffices) {
     if (!findQuote(text, office.quote) || !office.place || !clean(office.quote).includes(clean(office.place)) || !keys.has(office.area)) { contradictory = true; continue; }
     let area = office.area;
     const state = /,\s*([A-Z]{2})\b/.exec(office.place)?.[1];
@@ -172,6 +195,8 @@ export function decide({ snapshotText, judgment, facts, policy, tier, firstSeen 
   const base = { code: null, escalate: false, factsUsed, evidence, flags: alternatives.some((item) => item.inferred) ? ['term_inferred'] : [], fit: fitFor(judged, policy, functionValue), ...details };
   const unclear = (code, question) => ({ ...base, decision: 'unclear', code, escalate: tier === 'primary', nextAction: 'user_review', question });
   const rejected = (code, question) => tier === 'primary' ? unclear(code, question) : { ...base, decision: 'not_eligible', code };
+  const termOrArea = () => unclear('term_or_area', 'Which stated work window and office or remote scope match your policy?');
+  if (alternatives.some((alternative) => alternative.contradictory)) return termOrArea();
   const conflicts = criteria.filter(({ criterion }) => criterion.status === 'conflicts');
   const unresolved = criteria.find(({ criterion, validation }) => (criterion.status === 'conflicts' || criterion.status === 'unclear') && validation.reason !== 'non_mandatory' && !validation.confirmedConflict);
   if (unresolved) {
@@ -182,7 +207,7 @@ export function decide({ snapshotText, judgment, facts, policy, tier, firstSeen 
   if (confirmed) return rejected(confirmed.criterion.key, confirmed.validation.clause.text);
   if (policy.functions?.outOfScope?.includes(functionValue)) return rejected('function_out_of_scope', `Is ${functionValue} work in scope?`);
   if (policy.functions?.userCall?.includes(functionValue)) return unclear('user_review', `Would you like to consider this ${functionValue} role?`);
-  if (!alternatives.some((alternative) => alternative.acceptable) || alternatives.some((alternative) => alternative.contradictory)
-    || tier === 'primary' && alternatives.some((alternative) => alternative.advisory)) return unclear('term_or_area', 'Which stated work window and office or remote scope match your policy?');
+  if (!alternatives.some((alternative) => alternative.acceptable)
+    || tier === 'primary' && alternatives.some((alternative) => alternative.advisory)) return termOrArea();
   return { ...base, decision: 'eligible' };
 }
