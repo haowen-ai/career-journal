@@ -5,13 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { openDatabase, migrate, schemaMigrations } from '../../src/storage/database.mjs';
 
-test('dry run plans schema versions 1 through 7 without writing', async () => {
+test('dry run plans schema versions 1 through 8 without writing', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'jobops-db-'));
   try {
     const db = openDatabase(path.join(home, 'jobops.db'));
-    assert.deepEqual(migrate(db, { dryRun: true }).pending, [1, 2, 3, 4, 5, 6, 7]);
+    assert.deepEqual(migrate(db, { dryRun: true }).pending, [1, 2, 3, 4, 5, 6, 7, 8]);
     assert.throws(() => db.prepare('SELECT * FROM applications').all(), /no such table/);
-    assert.deepEqual(migrate(db).applied, [1, 2, 3, 4, 5, 6, 7]);
+    assert.deepEqual(migrate(db).applied, [1, 2, 3, 4, 5, 6, 7, 8]);
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row) => row.name);
     for (const name of ['applications', 'application_events', 'artifacts', 'email_accounts', 'automations', 'decision_traces', 'application_tasks', 'schema_migrations']) assert.ok(tables.includes(name), name);
     const accountColumns = new Set(db.prepare('PRAGMA table_info(email_accounts)').all().map((column) => column.name));
@@ -59,11 +59,11 @@ test('migration 3 creates application_tasks with constraints, defaults, index, a
   assert.equal(db.prepare('SELECT COUNT(*) count FROM application_tasks').get().count, 0);
 }));
 
-test('an already-migrated version 2 database upgrades through version 7 in place', async () => withDatabase(async (db) => {
+test('an already-migrated version 2 database upgrades through version 8 in place', async () => withDatabase(async (db) => {
   assert.deepEqual(migrate(db, { migrations: schemaMigrations.slice(0, 2) }).applied, [1, 2]);
   insertApplication(db, 'kept');
-  assert.deepEqual(migrate(db, { dryRun: true }).pending, [3, 4, 5, 6, 7]);
-  assert.deepEqual(migrate(db).applied, [3, 4, 5, 6, 7]);
+  assert.deepEqual(migrate(db, { dryRun: true }).pending, [3, 4, 5, 6, 7, 8]);
+  assert.deepEqual(migrate(db).applied, [3, 4, 5, 6, 7, 8]);
   assert.equal(db.prepare("SELECT company FROM applications WHERE id = 'kept'").get().company, 'Acme');
   assert.equal(db.prepare('SELECT COUNT(*) count FROM application_tasks').get().count, 0);
   assert.deepEqual(db.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all().map((row) => ({ ...row })), [
@@ -74,6 +74,7 @@ test('an already-migrated version 2 database upgrades through version 7 in place
     { version: 5, name: 'role-queue' },
     { version: 6, name: 'funnel' },
     { version: 7, name: 'posting-merge-index' },
+    { version: 8, name: 'out-of-direction' },
   ]);
   assert.deepEqual(migrate(db).applied, []);
 }));
