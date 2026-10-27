@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { freshDb, tempDb, load, insertPosting, insertReview, reviewOf, applicationsCount, fakeJudge, fakeFetcher, Crash, T0, at, seedApplication } from '../../test-utils/funnel-v3.mjs';
-import { FACTS, REVIEW_POLICY, SCREENING_POLICY, SNAPSHOTS, JUDGMENTS, page, record, reviewInputs } from '../../test-utils/funnel-v3-fixtures.mjs';
+import { FACTS, REVIEW_POLICY, SCREENING_POLICY, SNAPSHOTS, JUDGMENTS, page, record, snapshotTitle, reviewInputs } from '../../test-utils/funnel-v3-fixtures.mjs';
 
 const worker = () => load('L2', './src/review/worker.mjs', ['runReview', 'replan']);
 const lease = () => load('L2', './src/review/lease.mjs', ['acquireRunLease', 'claimItem', 'StaleLeaseError']);
@@ -12,7 +12,7 @@ const exits = () => load('L2', './src/review/receipt.mjs', ['reviewExitCode']);
 
 function item(db, id, { snapshot = 'eligible', company = 'Example Corp', applicationId = null } = {}) {
   const url = `https://job-boards.greenhouse.io/examplecorp/jobs/${id}`;
-  insertPosting(db, { id, company, url, applicationId });
+  insertPosting(db, { id, company, title: snapshotTitle(SNAPSHOTS[snapshot]), url, applicationId });
   insertReview(db, { postingId: id, stage: 'fetch' });
   return { id, url, page: page(url, SNAPSHOTS[snapshot]) };
 }

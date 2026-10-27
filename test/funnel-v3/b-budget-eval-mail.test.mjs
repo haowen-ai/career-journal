@@ -4,11 +4,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
+import { execFile } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { freshDb, tempDb, load, insertPosting, insertReview, reviewOf, application, applicationsCount, fakeJudge, fakeFetcher, fakeClock, T0, at } from '../../test-utils/funnel-v3.mjs';
-import { FACTS, REVIEW_POLICY, SCREENING_POLICY, SNAPSHOTS, JUDGMENTS, MORE_SNAPSHOTS, MORE_JUDGMENTS, RULES, RESUME_TEXT, page, judgment, reviewInputs, writeReviewFiles, writeReviewHome, REVIEW_FILES } from '../../test-utils/funnel-v3-fixtures.mjs';
+import { FACTS, REVIEW_POLICY, SCREENING_POLICY, SNAPSHOTS, JUDGMENTS, MORE_SNAPSHOTS, MORE_JUDGMENTS, RULES, RESUME_TEXT, page, snapshotTitle, judgment, reviewInputs, writeReviewFiles, writeReviewHome, REVIEW_FILES } from '../../test-utils/funnel-v3-fixtures.mjs';
 import { createApplication } from '../../src/commands/application.mjs';
 import { listQueue } from '../../src/commands/queue.mjs';
 
@@ -358,12 +359,23 @@ test('[B] a hung fetch command times out and an oversized reply is cut', { timeo
     const result = await hung.fetch({ postingId: 'p-1', url: 'https://job-boards.greenhouse.io/examplecorp/jobs/9000001', known: { company: 'Example Corp', title: 'Data Intern', requisition: null } });
     assert.deepEqual([result.ok, result.error], [false, 'timeout']);
     assert.ok(Date.now() - started < 8000);
-    const pid = Number(await readFile(pidFile, 'utf8'));
+    // The 50 ms timeout may stop the child before its script writes the PID file, so the child is found by its
+    // unique argv (the PID file path) in the process table, which holds from spawn on; the PID file is checked too
+    // when it was written.
+    const survivors = () => new Promise((resolve, reject) => {
+      execFile('ps', ['-A', '-ww', '-o', 'pid=,args='], { maxBuffer: 16_000_000 }, (error, stdout) => (error ? reject(error) : resolve(stdout.split('\n').filter((line) => line.includes(pidFile)))));
+    });
+    const pidAlive = async () => {
+      let pid;
+      try { pid = Number(await readFile(pidFile, 'utf8')); } catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+      try { process.kill(pid, 0); return true; } catch { return false; }
+    };
     let alive = true;
     for (let wait = 0; wait < 65 && alive; wait += 1) {
-      try { process.kill(pid, 0); await new Promise((resolve) => setTimeout(resolve, 100)); } catch { alive = false; }
+      alive = (await survivors()).length > 0 || await pidAlive();
+      if (alive) await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    assert.equal(alive, false, 'the hung child was killed');
+    assert.equal(alive, false, `the hung child was killed: ${(await survivors()).join(' | ')}`);
 
     const big = commandFetcher({ argv: [process.execPath, '-e', "process.stdout.write('x'.repeat(3_000_000))"], timeoutMs: 10_000 });
     const oversized = await big.fetch({ postingId: 'p-2', url: 'https://job-boards.greenhouse.io/examplecorp/jobs/9000002', known: {} });
@@ -448,8 +460,8 @@ const mailHit = (overrides) => ({ messageId: `<m-${Math.random().toString(36).sl
 test('[B] mail matching needs the exact owned id at a boundary', async () => {
   const { matchMailHits } = await mailModule();
   const db = freshDb();
-  insertPosting(db, { id: 'p-a', aliases: [['company_req:examplecorp:R5001', 'company_req']] });
-  insertPosting(db, { id: 'p-b', aliases: [['company_req:examplecorp:R7001', 'company_req']] });
+  insertPosting(db, { id: 'p-a', aliases: [['company_req:example:R5001', 'company_req']] });
+  insertPosting(db, { id: 'p-b', aliases: [['company_req:example:R7001', 'company_req']] });
   insertPosting(db, { id: 'p-c', url: 'https://examplecorp.wd1.myworkdayjobs.com/ext/job/X/Data-Intern_R7001', aliases: [['req:workday:examplecorp:R7001', 'req']] });
   const hits = [
     mailHit({ subject: 'Application received R50011', excerpt: 'Thank you for applying to Example Corp.' }),
@@ -525,13 +537,15 @@ function queue() {
   let serial = 0;
   return {
     pages,
-    add(db, { id, now = T0, snapshot = 'eligible', text, lane = 'new', flags = [], requisitionId = null, aliases = [], company = 'Example Corp' } = {}) {
+    add(db, { id, now = T0, snapshot = 'eligible', text, title, lane = 'new', flags = [], requisitionId = null, aliases = [], company = 'Example Corp' } = {}) {
       serial += 1;
       const postingId = id ?? `p-${String(serial).padStart(4, '0')}`;
       const url = `https://job-boards.greenhouse.io/examplecorp/jobs/${postingId}`;
-      insertPosting(db, { id: postingId, url, company, firstSeen: now, aliases });
+      const body = text ?? SNAPSHOTS[snapshot];
+      // The scanned posting carries the title its official page shows, so R1 identity (spec 6.1) passes.
+      insertPosting(db, { id: postingId, url, company, title: title ?? snapshotTitle(body), firstSeen: now, aliases });
       insertReview(db, { postingId, stage: 'fetch', firstSeen: now, nextDue: now, lane, flags });
-      pages[url] = page(url, text ?? SNAPSHOTS[snapshot], { requisitionId });
+      pages[url] = page(url, body, { requisitionId });
       return postingId;
     },
   };
@@ -818,7 +832,7 @@ test('[B] a closed posting that reappears with the same requisition is reopened 
   const { deliver } = await deliverModule();
   const db = freshDb();
   const q = queue();
-  const id = q.add(db, { requisitionId: 'R900611', aliases: [['company_req:examplecorp:R900611', 'company_req']] });
+  const id = q.add(db, { requisitionId: 'R900611', aliases: [['company_req:example:R900611', 'company_req']] });
   await runReview(runOptions(db, { pages: q.pages }));
   const lead = applicationOf(db, id);
   assert.ok(lead);
@@ -928,17 +942,18 @@ test('[B] the report lists awaiting-user items, reused roles and a spot-check of
     const context = await openHomeDatabase(home);
     const db = context.db;
     const q = queue();
+    const now = new Date().toISOString(); // one clock for seeding and the run, so every seeded item is due
     const answers = {};
     MARKERS.forEach((marker, index) => {
-      const id = q.add(db, { id: `p-eligible-${index}`, text: markerSnapshot(marker) });
+      const id = q.add(db, { id: `p-eligible-${index}`, now, text: markerSnapshot(marker) });
       answers[id] = { output: markerJudgment(marker) };
     });
-    const held = q.add(db, { id: 'p-sales', snapshot: 'sales' });
+    const held = q.add(db, { id: 'p-sales', now, snapshot: 'sales' });
     answers[held] = { output: JUDGMENTS.sales };
     insertPosting(db, { id: 'p-reused', title: 'Reused Analytics Intern' });
     insertReview(db, { postingId: 'p-reused', stage: 'scan', state: 'done', decision: 'reused', code: 'already_submitted' });
     const judges = { primary: fakeJudge({ tier: 'primary', answers }), escalation: fakeJudge({ tier: 'escalation', answers }) };
-    const receipt = await runReview(runOptions(db, { runId: 'review-r1', now: new Date().toISOString(), pages: q.pages, judges }));
+    const receipt = await runReview(runOptions(db, { runId: 'review-r1', now, pages: q.pages, judges }));
     await writeReceipt(home, receipt);
     db.close();
     const result = await cli(['review', 'report', '--home', home, '--run-id', 'review-r1']);

@@ -179,7 +179,7 @@ test('[L2] mail: exact requisition confirmation hides reversibly; company-only m
   const { annotateMail, unhide } = await modules();
   const { matchMailHits } = await load('L2', './src/review/mail.mjs', ['matchMailHits']);
   const db = freshDb();
-  const exact = posting(db, { id: 'p-mail-exact', aliases: [['company_req:examplecorp:R5001', 'company_req']] });
+  const exact = posting(db, { id: 'p-mail-exact', aliases: [['company_req:example:R5001', 'company_req']] });
   const company = posting(db, { id: 'p-mail-company' });
   const a = await deliverAs(db, exact, ELIGIBLE);
   const b = await deliverAs(db, company, ELIGIBLE);

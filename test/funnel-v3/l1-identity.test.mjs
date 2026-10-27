@@ -55,9 +55,9 @@ test('[L1] a fallback posting upgraded with a requisition after fetch keeps its 
   const db = freshDb();
   await batch(db, [record({ source: 'simplify', sourceId: 's-9', partition: 'simplify:list', url: 'https://careers.example.com/jobs/view/abc', title: 'Analytics Intern' })]);
   const postingId = postingFor(db, 'source:simplify:s-9');
-  const result = reconcileAliases(db, postingId, [{ alias: 'company_req:examplecorp:R50001', kind: 'company_req' }], { now: T0 });
+  const result = reconcileAliases(db, postingId, [{ alias: 'company_req:example:R50001', kind: 'company_req' }], { now: T0 });
   assert.equal(result.action, 'added');
-  assert.equal(postingFor(db, 'company_req:examplecorp:R50001'), postingId);
+  assert.equal(postingFor(db, 'company_req:example:R50001'), postingId);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM observations WHERE posting_id = ?').get(postingId).n, 1);
 });
 
@@ -72,7 +72,7 @@ test('[L1] post-fetch alias collision with an already-submitted posting binds to
   const target = db.prepare('SELECT id FROM postings WHERE application_id = ?').get(submitted.id).id;
   assert.notEqual(fallback, target, 'before fetch the aggregator record is its own posting');
   const before = applicationsCount(db);
-  const result = reconcileAliases(db, fallback, [{ alias: 'company_req:examplecorp:R900519', kind: 'company_req' }], { now: T0 });
+  const result = reconcileAliases(db, fallback, [{ alias: 'company_req:example:R900519', kind: 'company_req' }], { now: T0 });
   assert.equal(result.action, 'bound');
   assert.equal(effective(db, fallback), target);
   const review = reviewOf(db, target);
@@ -92,7 +92,7 @@ test('[L1] contradictory authoritative aliases are quarantined, not merged', asy
   ]);
   const first = postingFor(db, 'source:greenhouse:9100001');
   const second = postingFor(db, 'source:greenhouse:9100002');
-  const result = reconcileAliases(db, first, [{ alias: 'company_req:examplecorp:R1002', kind: 'company_req' }], { now: T0 });
+  const result = reconcileAliases(db, first, [{ alias: 'company_req:example:R1002', kind: 'company_req' }], { now: T0 });
   assert.equal(result.action, 'quarantined');
   assert.equal(effective(db, first), first);
   assert.equal(effective(db, second), second);

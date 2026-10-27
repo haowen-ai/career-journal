@@ -65,7 +65,7 @@ test('[L1] bootstrap binds every application to a posting with exact aliases', a
     assert.equal(review.code, 'already_submitted');
   }
   const aliases = db.prepare('SELECT alias FROM posting_aliases').all().map((row) => row.alias);
-  assert.ok(aliases.includes('company_req:examplecorp:R900519'), aliases.join(', '));
+  assert.ok(aliases.includes('company_req:example:R900519'), aliases.join(', '));
   assert.ok(aliases.some((alias) => alias.startsWith('req:workday:examplebank:R900109-1')), aliases.join(', '));
   assert.ok(aliases.includes('url:examplebank.wd12.myworkdayjobs.com/Ext/job/New-York-NY/AI-Engineering-Intern_R900109-1'), 'URL alias keeps path case');
 });
