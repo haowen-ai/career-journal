@@ -409,3 +409,30 @@ test('[B] an unclear criterion that cites no fact and quotes non-requirement pro
   const held = await decideWith({ text, facts: AVAILABILITY_FACTS, judged: decided(alternatives, [{ ...vague, quote: required }]) });
   assert.equal(held.decision, 'unclear', `a required-section clause still holds: ${why(held)}`);
 });
+
+// ===================================================================== R16
+
+test('[B] real-shaped out-of-area postings (month-range terms, bare City, ST office quotes, unknown remote) reject as outside_area (eval R16)', async () => {
+  // Captured shapes (run 7): a month-range term quote with a "Summer 2027" label and several bare "City, ST" office quotes;
+  // and a month-range label with kind summer, one office, remote scope unknown with a null quote.
+  const multiText = posting({ location: 'Locations:\nRiverton, NJ\nMill Creek, TX', term: 'Program Duration: June 2027 – August 2027 (10 weeks)' });
+  const months = { label: 'Summer 2027', year: 2027, kind: 'summer', start: '2027-06', end: '2027-08', quote: 'Program Duration: June 2027 – August 2027 (10 weeks)' };
+  const multi = await decideWith({ text: multiText, judged: decided([
+    { term: months, offices: [{ place: 'Riverton, NJ', area: 'outside', quote: 'Riverton, NJ' }], remote: { scope: 'none', quote: null } },
+    { term: months, offices: [{ place: 'Mill Creek, TX', area: 'outside', quote: 'Mill Creek, TX' }], remote: { scope: 'none', quote: null } },
+  ]) });
+  assert.deepEqual([multi.decision, multi.code], ['not_eligible', 'outside_area'], why(multi));
+
+  const singleText = posting({ location: 'Location: Pine Ridge, CO', term: 'Timing: May – August 2027' });
+  const single = await decideWith({ text: singleText, judged: decided([
+    { term: { label: 'May – August 2027', year: 2027, kind: 'summer', start: '2027-05', end: '2027-08', quote: 'Timing: May – August 2027' }, offices: [{ place: 'Pine Ridge, Colorado', area: 'outside', quote: 'Location: Pine Ridge, CO' }], remote: { scope: 'unknown', quote: null } },
+  ]) });
+  assert.deepEqual([single.decision, single.code], ['not_eligible', 'outside_area'], why(single));
+});
+
+test('[B] an unclear criterion citing only availability and has facts together is advisory (eval R6b)', async () => {
+  const text = posting({ bullets: ['Ability to work fully in person in Chicago. Summer interns should be available full time.'] });
+  const criterion = { key: 'requirement', status: 'unclear', quote: 'Ability to work fully in person in Chicago. Summer interns should be available full time.', clause_alternatives: [], fact_ids: ['availability', 'python'] };
+  const verdict = await decideWith({ text, facts: AVAILABILITY_FACTS, judged: decided([{ term: summer2027, offices: [chicago], remote: none }], [criterion]) });
+  assert.equal(verdict.decision, 'eligible', why(verdict));
+});
