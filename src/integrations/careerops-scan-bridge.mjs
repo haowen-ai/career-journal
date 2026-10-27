@@ -14,7 +14,7 @@
 //   stdin:  { "action": "scan", "readOnly": true }
 //   stdout: { "ok": true, "roles": [...] }
 
-import { executeCareerOpsProcess, installCareerOpsShutdown } from './careerops-process.mjs';
+import { executeCareerOpsProcess, installCareerOpsShutdown, MAX_RAW_SCAN_BYTES } from './careerops-process.mjs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -30,6 +30,9 @@ export const WIDE_TITLE_FILTER = Object.freeze([
 
 const REPLACED_SECTIONS = new Set(['title_filter', 'location_filter']);
 const DEFAULT_TIMEOUT_MS = 18 * 60 * 1000;
+const MAX_FIELD_CHARS = 4000;
+const IDENTITY_FIELDS = new Set(['id', 'sourceId', 'source', 'company', 'company_name', 'title', 'url',
+  'applyUrl', 'hostedUrl', 'jobUrl', 'location', 'locations', 'requisitionId', 'jobReqId', 'partition']);
 
 // Rewrites portals.yml text: drops the top-level title_filter and location_filter blocks and
 // appends an internship-only title filter. Every other block, including tracked_companies,
@@ -135,8 +138,17 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
       const maxPages = Number(entry.max_pages ?? entry.maxPages ?? entry.workday?.max_pages ?? portals.workday?.max_pages ?? 100);
       if (provider.id === 'workday' && Number.isFinite(maxPages) && maxPages > 0 && jobs.length >= maxPages * 20) capDetected = true;
       const truncated = capDetected || Object.entries(jobs).some(([key, value]) => /(?:truncated|partial|capDetected)$/i.test(key) && value === true);
-      for (const job of jobs) roles.push({ ...job, company: job?.company ?? entry.name, partition,
-        locations: job?.locations ?? (job?.location ? [job.location] : []), requisitionId: job?.requisitionId ?? job?.jobReqId ?? null });
+      for (const job of jobs) {
+        const role = { ...job, company: job?.company ?? entry.name, partition,
+          locations: job?.locations ?? (job?.location ? [job.location] : []), requisitionId: job?.requisitionId ?? job?.jobReqId ?? null };
+        for (const [key, value] of Object.entries(role)) {
+          if (typeof value === 'string' && value.length > MAX_FIELD_CHARS && !IDENTITY_FIELDS.has(key)) {
+            // Copy only the bounded prefix; a sliced string can retain the full provider text.
+            role[key] = Buffer.from(value.slice(0, MAX_FIELD_CHARS), 'utf16le').toString('utf16le');
+          }
+        }
+        roles.push(role);
+      }
       partitions.push({ partition, status: truncated ? 'partial' : 'ok', count: jobs.length, rawCount: jobs.length, truncated, capDetected });
     } catch (error) {
       partitions.push({ partition, status: 'error', count: 0, rawCount: 0, error: error.message, truncated: capDetected, capDetected });
@@ -151,7 +163,7 @@ export async function scanCareerOpsRaw(root, { execute = run, env = process.env,
     const portals = path.join(temporary, 'portals.yml');
     await writeFile(portals, await readFile(env.CAREER_OPS_PORTALS || path.join(root, 'portals.yml')));
     const execution = await execute(process.execPath, [fileURLToPath(import.meta.url), 'scan-raw', '--worker'], {
-      cwd: root, timeoutMs,
+      cwd: root, timeoutMs, maxBytes: MAX_RAW_SCAN_BYTES,
       env: { ...env, CAREER_OPS_ROOT: temporary, CAREER_OPS_PORTALS: portals },
     });
     if (execution.exitCode !== 0) throw new Error(`CareerOps raw scan exited with ${execution.exitCode}: ${String(execution.stderr ?? '').slice(-1000)}`);

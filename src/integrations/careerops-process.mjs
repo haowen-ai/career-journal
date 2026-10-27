@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
 
+export const MAX_RAW_SCAN_BYTES = 200_000_000;
+
 const active = new Set();
 
 // Each wrapper owns its child's group. Bridge signal handlers also stop nested groups.

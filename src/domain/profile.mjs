@@ -227,6 +227,8 @@ const fieldRules = Object.freeze({
   'sources.simplify.url': nullable(webUrl({ httpsOnly: true })),
   // More list links read after sources.simplify.url, such as a second Simplify list.
   'sources.simplify.urls': list(webUrl({ httpsOnly: true })),
+  'sources.simplify.maxBytes': integer(1, Number.MAX_SAFE_INTEGER),
+  'sources.simplify.timeoutMs': integer(1, 2_147_483_647),
   'interview.roundsCompleted': list(integer(1, 4)),
   'interview.skipped': list(questionKey),
   'interview.asked': list(questionKey),
@@ -240,7 +242,7 @@ const textFields = new Set([
 ]);
 const materialFileFields = Object.freeze(['materials.resumePath', 'materials.transcriptPath']);
 const managedFields = new Set(['schemaVersion', 'updatedAt']);
-const optionalFields = new Set(['interview.asked', 'sources.simplify.urls', 'search.countries', 'sources.expected']);
+const optionalFields = new Set(['interview.asked', 'sources.simplify.urls', 'sources.simplify.maxBytes', 'sources.simplify.timeoutMs', 'search.countries', 'sources.expected']);
 
 export const profileFields = Object.freeze(Object.keys(fieldRules).filter((field) => !managedFields.has(field)));
 

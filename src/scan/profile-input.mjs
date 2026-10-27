@@ -108,7 +108,13 @@ function simplify(value) {
   if (input.enabled != null && typeof input.enabled !== 'boolean') fail('sources.simplify.enabled', 'must be true or false');
   const url = httpsUrl(input.url, 'sources.simplify.url');
   const urls = stringList(input.urls, 'sources.simplify.urls').map((item, index) => httpsUrl(item, `sources.simplify.urls[${index}]`));
-  return { enabled: input.enabled === true, url, ...(urls.length ? { urls } : {}) };
+  const limits = {};
+  for (const key of ['maxBytes', 'timeoutMs']) {
+    if (input[key] === undefined) continue;
+    if (!Number.isSafeInteger(input[key]) || input[key] <= 0 || (key === 'timeoutMs' && input[key] > 2_147_483_647)) fail(`sources.simplify.${key}`, 'must be a positive integer within the supported range');
+    limits[key] = input[key];
+  }
+  return { enabled: input.enabled === true, url, ...(urls.length ? { urls } : {}), ...limits };
 }
 
 export function normalizeScanProfile(raw) {

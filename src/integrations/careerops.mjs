@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { access, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { executeCareerOpsProcess } from './careerops-process.mjs';
+import { executeCareerOpsProcess, MAX_RAW_SCAN_BYTES } from './careerops-process.mjs';
 import { fileURLToPath } from 'node:url';
 
 const MAX_REQUEST_BYTES = 1_000_000;
@@ -120,6 +120,7 @@ export async function runCareerOpsScan(config = {}, dependencies = {}) {
     stdin: JSON.stringify({ action: health.builtInBridge ? 'scan-raw' : 'scan', readOnly: true }),
     // A full CareerOps portal scan takes several minutes; the built-in bridge stops its own scan at 18.
     timeoutMs: config.scanTimeoutMs ?? 1_200_000,
+    maxBytes: MAX_RAW_SCAN_BYTES,
   });
   if (execution.exitCode !== 0) {
     const detail = String(execution.stderr ?? '').trim().slice(0, 2_000);

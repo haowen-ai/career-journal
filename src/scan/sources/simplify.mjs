@@ -1,6 +1,9 @@
 import { fetchSourceJson } from './ats-boards.mjs';
 import { httpUrl, isoDate, sourceError, text, uniqueStrings } from './common.mjs';
 
+export const DEFAULT_SIMPLIFY_TIMEOUT_MS = 120_000;
+const DEFAULT_MAX_BYTES = 64_000_000;
+
 // SimplifyJobs publishes its internship and new-grad lists without an
 // open-source licence. This source is therefore opt-in and never a default:
 // it runs only when the user sets sources.simplify.enabled and supplies the
@@ -55,10 +58,14 @@ export async function fetchSimplify(settings, fetchImpl, options = {}) {
   const sources = [];
   const roles = [];
   const batches = [];
+  const limits = {
+    maxBytes: options.maxBytes ?? settings.maxBytes ?? DEFAULT_MAX_BYTES,
+    timeoutMs: Math.min(options.timeoutMs ?? Infinity, settings.timeoutMs ?? DEFAULT_SIMPLIFY_TIMEOUT_MS),
+  };
   for (const [index, url] of urls.entries()) {
     const partition = `simplify:${index + 1}`;
     try {
-      const payload = await fetchSourceJson(fetchImpl, url, options);
+      const payload = await fetchSourceJson(fetchImpl, url, limits);
       if (!Array.isArray(payload) && !Array.isArray(payload?.listings)) throw new Error('Malformed Simplify response: missing listing array');
       const listRoles = parseSimplify(payload, { partition });
       batches.push({ source: 'simplify', partition, rawCount: listRoles.length, records: listRoles });

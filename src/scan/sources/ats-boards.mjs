@@ -148,17 +148,20 @@ export async function fetchSourceJson(fetchImpl, url, { timeoutMs = 30_000, maxB
       if (Number(response.headers?.get?.('content-length')) > maxBytes) { controller.abort(); throw new Error('response exceeds byte limit'); }
       if (response.body?.getReader) {
         const reader = response.body.getReader();
-        const chunks = []; let length = 0;
+        // Keep decoded text only, rather than chunks plus a second concatenated buffer.
+        const decoder = new TextDecoder();
+        let body = ''; let length = 0;
         try {
           for (;;) {
             const { value, done } = await reader.read();
             if (done) break;
             length += value.byteLength;
             if (length > maxBytes) { controller.abort(); await reader.cancel(); throw new Error('response exceeds byte limit'); }
-            chunks.push(Buffer.from(value));
+            body += decoder.decode(value, { stream: true });
           }
         } finally { reader.releaseLock(); }
-        try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new Error('response is not valid JSON'); }
+        body += decoder.decode();
+        try { return JSON.parse(body); } catch { throw new Error('response is not valid JSON'); }
       }
       let payload;
       try { payload = await response.json(); } catch { throw new Error('response is not valid JSON'); }

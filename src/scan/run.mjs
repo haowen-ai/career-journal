@@ -8,7 +8,7 @@ import { ingestBatch } from '../funnel/ingest.mjs';
 import { buildExpectedManifest, assessSourceHealth } from '../funnel/health.mjs';
 import { fetchAtsBoards } from './sources/ats-boards.mjs';
 import { fetchCareerOpsRoles } from './sources/careerops.mjs';
-import { fetchSimplify, simplifyUrls } from './sources/simplify.mjs';
+import { DEFAULT_SIMPLIFY_TIMEOUT_MS, fetchSimplify, simplifyUrls } from './sources/simplify.mjs';
 import { redact } from '../runtime/redact.mjs';
 import { assertScanOwner } from '../funnel/scan-lease.mjs';
 
@@ -16,7 +16,7 @@ import { assertScanOwner } from '../funnel/scan-lease.mjs';
 export async function collectRoles(profile, { fetchImpl, careerOpsConfig, careerOpsDependencies, timeoutMs, deadlineAt, clock = Date.now } = {}) {
   const parts = [];
   const beforeDeadline = () => !deadlineAt || clock() < Date.parse(deadlineAt);
-  const options = () => ({ timeoutMs: deadlineAt ? Math.max(1, Math.min(timeoutMs ?? 30_000, Date.parse(deadlineAt) - clock())) : timeoutMs });
+  const options = (defaultTimeoutMs = 30_000) => ({ timeoutMs: deadlineAt ? Math.max(1, Math.min(timeoutMs ?? defaultTimeoutMs, Date.parse(deadlineAt) - clock())) : timeoutMs });
   for (const entry of profile.sources.atsBoards ?? []) {
     if (!beforeDeadline()) break;
     parts.push(await fetchAtsBoards([entry], fetchImpl, options()));
@@ -32,7 +32,7 @@ export async function collectRoles(profile, { fetchImpl, careerOpsConfig, career
     if (beforeDeadline()) parts.push(await fetchSimplify(settings, fetchImpl, options()));
   } else for (const [index, url] of urls.entries()) {
     if (!beforeDeadline()) break;
-    const part = await fetchSimplify({ enabled: true, url }, fetchImpl, options());
+    const part = await fetchSimplify({ ...settings, url, urls: [] }, fetchImpl, options(settings.timeoutMs ?? DEFAULT_SIMPLIFY_TIMEOUT_MS));
     const partition = `simplify:${index + 1}`;
     for (const source of part.sources) source.partition = partition;
     for (const batch of part.batches) { batch.partition = partition; for (const record of batch.records) record.partition = partition; }
