@@ -16,12 +16,15 @@ function dateValid(value) {
 }
 
 function dateEvidence(quote, value) {
-  if (!dateValid(value)) return null;
+  const monthOnly = typeof value === 'string' && /^\d{4}-\d{2}$/.test(value);
+  const date = monthOnly ? `${value}-01` : value;
+  if (!dateValid(date)) return null;
   const exact = [...quote.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)].map((match) => match[0]);
-  if (exact.length) return exact[0] === value ? { start: value, end: value } : null;
+  if (exact.length) return (monthOnly ? dateValid(exact[0]) && exact[0].slice(0, 7) === value : exact[0] === value)
+    ? { start: exact[0], end: exact[0] } : null;
   const year = value.slice(0, 4);
   const month = Number(value.slice(5, 7));
-  const reference = new Date(`${value}T12:00:00Z`);
+  const reference = new Date(`${date}T12:00:00Z`);
   const names = ['long', 'short'].map((style) => new Intl.DateTimeFormat('en', { month: style, timeZone: 'UTC' }).format(reference).replace(/\.$/, '').toLowerCase());
   for (const name of names) {
     const forward = new RegExp(`\\b${name}\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s*,?\\s*${year}\\b`, 'i').exec(quote);
@@ -29,10 +32,13 @@ function dateEvidence(quote, value) {
     const day = forward?.[1] ?? reverse?.[1];
     if (day) {
       const actual = `${year}-${String(month).padStart(2, '0')}-${day.padStart(2, '0')}`;
-      return actual === value ? { start: actual, end: actual } : null;
+      return (monthOnly ? dateValid(actual) : actual === value) ? { start: actual, end: actual } : null;
     }
   }
-  if (!names.some((name) => new RegExp(`\\b${name}\\.?\\s+(?:of\\s+)?${year}\\b`, 'i').test(quote))) return null;
+  // A month-range term can state its year only after the ending month.
+  const monthName = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+  const rangeEnd = monthOnly ? `(?:(?:[-–—]|to|through)\\s*${monthName}\\.?\\s+)?` : '';
+  if (!names.some((name) => new RegExp(`\\b${name}\\.?\\s+${rangeEnd}(?:of\\s+)?${year}\\b`, 'i').test(quote))) return null;
   // Month-only wording proves an interval, never the model's invented start day.
   return { start: `${year}-${String(month).padStart(2, '0')}-01`, end: new Date(Date.UTC(Number(year), month, 0)).toISOString().slice(0, 10) };
 }
@@ -73,7 +79,6 @@ function termEvidence(text, term, inferred = false) {
   if (!term || !findQuote(text, term.quote)) return false;
   const quote = clean(term.quote);
   if (!term.label || !quoteAgreesWithTerm(term, quote, true)) return false;
-  if (term.start && !dateValid(term.start)) return false;
   if (term.start && !dateEvidence(quote, term.start)) return false;
   const years = titleYears(text);
   // Missing year evidence is incomplete, not contradictory.
@@ -256,7 +261,7 @@ export function decide({ snapshotText, judgment, facts, policy, tier, firstSeen,
     // Without cited facts, only a required-section clause can raise a question.
     if (!criterion.fact_ids?.length) return validation.section !== 'required';
     const cited = criterion.fact_ids.map((id) => facts.find((fact) => fact.id === id));
-    return cited.every((fact) => fact && /^(?:availability|.+-availability)$/.test(fact.id)) || cited.every((fact) => fact?.polarity === 'has');
+    return cited.every((fact) => fact && (/^(?:availability|.+-availability)$/.test(fact.id) || fact.polarity === 'has'));
   };
   const unresolved = criteria.find((item) => (item.criterion.status === 'conflicts' || item.criterion.status === 'unclear')
     && item.validation.reason !== 'non_mandatory' && !advisoryCriterion(item));
