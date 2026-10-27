@@ -113,7 +113,7 @@ helpers; its `dedupeRoles` is no longer called by the scan, and its ≥0.9 title
 ### 3.1 `canonicalUrl(url)`
 - `http(s)` only; credentials rejected. Drop scheme. Lowercase the **host only**; strip a leading `www.`.
 - Path keeps its case; trailing slashes trimmed.
-- Query: remove only the allowlist `utm_*`, `gh_src`, `ref`, `source`, `src`, `lever-source`, `lever-origin`, `iis`, `iisn`,
+- Query: remove only the allowlist `utm_*`, `gh_src`, `ref`, `source`, `src`, `lever-source`, `lever-origin`, `iis`, `iisn`, `icims`,
   `trk`. Every other parameter (including `token`, `gh_jid`, `jobId`, `jid`, `reqId`) is identity and is kept with its
   value's case. Remaining parameters are sorted by key (stable for equal keys).
 - Fragment: kept only when it starts with `#/` (single-page job routes); otherwise dropped.
