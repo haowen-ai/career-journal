@@ -305,3 +305,90 @@ test('[B] at the escalation tier, out-of-policy alternatives and confirmed confl
   const primary = await decideWith({ text: outsideText, judged: decided([riverton], [unclearCommute]), tier: 'primary' });
   assert.deepEqual([primary.decision, primary.escalate], ['unclear', true], why(primary));
 });
+
+// ===================================================================== R12
+
+test('[B] optional wording inside a parenthetical or attached to another attribute does not soften the main requirement (eval R12)', async () => {
+  // Captured shape: "Be enrolled as a junior undergraduate (Preferred Graduation Date: …)". The parenthetical
+  // qualifies the graduation date, not the enrolment requirement; the model's confirmed conflict must stand.
+  const { validateCriterion } = await clausesModule();
+  const valid = { term: summer2027, offices: [chicago], remote: none };
+  const conflict = (quote, factIds = ['degree']) => ({ key: 'degree', status: 'conflicts', quote, clause_alternatives: [], fact_ids: factIds });
+  for (const quote of [
+    'Be enrolled as a junior undergraduate student (Preferred Graduation Date: Spring 2029)',
+    'Be enrolled as a junior undergraduate student in a quantitative major (preferred: Statistics or Economics).',
+  ]) {
+    const text = posting({ heading: 'Minimum Qualifications', bullets: [quote, 'Proficiency in Python or R for data analysis.'] });
+    const validation = validateCriterion(text, conflict(quote), FACTS);
+    assert.notEqual(validation.reason, 'non_mandatory', `${quote}: the optional wording belongs to another attribute`);
+    assert.equal(validation.confirmedConflict, true, `${quote}: the whole-clause conflict with a constraint fact is confirmed`);
+    const verdict = await decideWith({ text, judged: decided([valid], [conflict(quote)]) });
+    assert.deepEqual([verdict.decision, verdict.code], ['not_eligible', 'degree'], `${quote}: ${why(verdict)}`);
+  }
+
+  // Guards: "X preferred." as the clause's own predicate is still non-mandatory and never blocks (merged #4).
+  for (const [quote, factIds] of [['Scala experience preferred.', ['scala']], ["A Master's degree in Statistics is preferred.", ['degree']]]) {
+    const text = posting({ heading: 'Minimum Qualifications', bullets: ['Proficiency in Python or R for data analysis.', quote] });
+    const validation = validateCriterion(text, conflict(quote, factIds), FACTS);
+    assert.equal(validation.reason, 'non_mandatory', quote);
+    assert.equal(validation.confirmedConflict, false, quote);
+    const verdict = await decideWith({ text, judged: decided([valid], [conflict(quote, factIds)]) });
+    assert.notEqual(verdict.decision, 'not_eligible', `${quote}: preferred wording never blocks: ${why(verdict)}`);
+  }
+});
+
+// ===================================================================== R13
+
+test('[B] a term year missing from its quote is taken from the page title, else inferred from first seen; never a contradiction (eval R13)', async () => {
+  // Captured shape: the title names "2027", the body only "the summer"; the model's label is free text.
+  const quote = 'As our data intern, you will own one problem for the summer.';
+  const body = (title) => posting({ title, location: 'Location: Chicago, IL', term: quote });
+  const freeText = (label, year = 2027) => decided([{ term: { label, year, kind: 'summer', start: null, end: null, quote }, offices: [chicago], remote: none }]);
+  const seen = { firstSeen: '2026-10-15T12:00:00Z', jobType: 'internship' };
+
+  for (const [name, text] of [
+    ['a TITLE: line', `URL: https://jobs.example.test/data-intern\nTITLE: 2027 Internship Data Intern\n${body('About Example Robotics')}`],
+    ['the first heading', body('# 2027 Internship Data Intern')],
+  ]) {
+    const verdict = await decideWith({ text, judged: freeText('Summer 2027; year from title, season from body'), ...seen });
+    assert.equal(verdict.decision, 'eligible', `${name} carries 2027 and the quote names summer: ${why(verdict)}`);
+    assert.equal(verdict.location.alternatives[0]?.term?.year, 2027);
+  }
+
+  // Neither quote nor title names a year: the model's year is unknown, so the season-only first-seen rule applies.
+  const untitled = body('Data Science Intern');
+  const inferred = await decideWith({ text: untitled, judged: freeText('Summer 2027; year assumed'), ...seen });
+  assert.equal(inferred.decision, 'eligible', `first seen Oct 2026, "the summer" means Summer 2027: ${why(inferred)}`);
+  assert.ok(inferred.flags.includes('term_inferred'), `the inference is flagged: ${JSON.stringify(inferred.flags)}`);
+  assert.equal(inferred.location.alternatives[0]?.term?.year, 2027);
+
+  // Guards: an unsupported model year does not survive a later first-seen date, and a title naming another year
+  // does not vouch for the model's 2027.
+  const later = await decideWith({ text: untitled, judged: freeText('Summer 2027; year assumed'), firstSeen: '2027-10-15T12:00:00Z', jobType: 'internship' });
+  assert.notEqual(later.decision, 'eligible', `first seen Oct 2027, "the summer" is Summer 2028: ${why(later)}`);
+  const otherYear = await decideWith({ text: body('# 2028 Internship Data Intern'), judged: freeText('Summer 2027; year from title'), ...seen });
+  assert.notEqual(otherYear.decision, 'eligible', `the title says 2028, not 2027: ${why(otherYear)}`);
+});
+
+// ===================================================================== R14
+
+test('[B] a season-only summer term with a free-text label and unknown remote scope infers the upcoming year (eval R14)', async () => {
+  // Captured shape: year null, kind "summer", label "Summer internship; year unspecified", remote scope unknown
+  // with a null quote. The season-only rule must read the label's season word (or the kind), not demand a bare label.
+  const quote = 'Example Parts has an exciting Customer Analytics summer internship opening at our headquarters in Elm Harbor, WA.';
+  const text = posting({ title: 'Summer Internship - Customer Analytics', location: 'Elm Harbor, WA, US, 98000', term: quote });
+  const office = { place: 'Elm Harbor, Washington', area: 'seattle', quote: 'Elm Harbor, WA, US, 98000' };
+  const seasonOnly = (label) => decided([{ term: { label, year: null, kind: 'summer', start: null, end: null, quote }, offices: [office], remote: { scope: 'unknown', quote: null } }]);
+
+  for (const label of ['Summer internship; year unspecified', 'summer (year not stated)']) {
+    const verdict = await decideWith({ text, judged: seasonOnly(label), firstSeen: '2026-10-15T12:00:00Z', jobType: 'internship' });
+    assert.equal(verdict.decision, 'eligible', `${label}: first seen Oct 2026, a summer internship is Summer 2027: ${why(verdict)}`);
+    assert.ok(verdict.flags.includes('term_inferred'), `${label}: the inference is flagged: ${JSON.stringify(verdict.flags)}`);
+    assert.equal(verdict.location.alternatives[0]?.term?.year, 2027, label);
+  }
+
+  // Guard: outside Aug–Dec there is no inference, so the posting stays unresolved.
+  const spring = await decideWith({ text, judged: seasonOnly('Summer internship; year unspecified'), firstSeen: '2026-05-15T12:00:00Z', jobType: 'internship' });
+  assert.notEqual(spring.decision, 'eligible', why(spring));
+  assert.ok(!spring.flags.includes('term_inferred'), 'no inference in May');
+});
