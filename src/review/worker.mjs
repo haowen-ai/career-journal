@@ -146,7 +146,12 @@ export function replan(db, { inputs, now, runtimeDeps, comparison }) {
         migrated = true;
       }
       const relevantFacts = factsChanged && (usedChanged || row.decision === 'not_eligible' || row.code === 'missing_fact');
-      const relevantOther = old.jev !== state.jev || otherChanged && (row.decision !== 'eligible' || windowsChanged);
+      // Runner strategy (including Jev questions/thresholds) selects how new
+      // work is judged; it does not invalidate a settled screening decision.
+      // Keep it in inputState so unfinished work and in-flight changes still
+      // use the current strategy without weakening screening dependencies.
+      const strategyChanged = !['done', 'held'].includes(row.state) && old.jev !== state.jev;
+      const relevantOther = strategyChanged || otherChanged && (row.decision !== 'eligible' || windowsChanged);
       if (relevantFacts || relevantOther) {
         db.prepare("UPDATE reviews SET state='due',stage='judge',next_due=?,hold_owner=NULL,hold_since=NULL,lease_owner=NULL,lease_until=NULL,dep_hashes_json=?,updated_at=? WHERE posting_id=?")
           .run(now, JSON.stringify({ ...stored, inputs: state, invalidated: true }), now, row.posting_id);
