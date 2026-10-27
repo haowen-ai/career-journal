@@ -87,7 +87,7 @@ export async function reviewPrimaryVerdict({ verdict, inputs, snapshotText, firs
 }
 
 export function inputState(inputs) {
-  return { facts: factsMap(inputs.facts), rules: dependencyHash(inputs.rules), policy: dependencyHash({ policy: screeningPolicyParts(inputs.policy), jobType: inputs.profile?.search?.jobType ?? null }),
+  return { formatVersion: 2, facts: factsMap(inputs.facts), rules: dependencyHash(inputs.rules), policy: dependencyHash({ policy: screeningPolicyParts(inputs.policy), jobType: inputs.profile?.search?.jobType ?? null }),
     screening: dependencyHash(inputs.screeningPolicy), provenance: dependencyHash(inputs.provenance), resume: dependencyHash(inputs.resume?.text ?? null),
     windowsAreas: dependencyHash({ windows: inputs.policy.windows, areas: inputs.policy.areas, jobType: inputs.profile?.search?.jobType ?? null }),
     code: dependencyHash({ ...normalPromptDependencies(),
@@ -102,10 +102,10 @@ export function replan(db, { inputs, now, runtimeDeps, comparison }) {
     for (const row of db.prepare(`SELECT r.*,p.application_id FROM reviews r JOIN postings p ON p.id=r.posting_id
       ${reviewOwnershipJoins} WHERE NOT ${userDecisionSql}`).all()) {
       const stored = parseJson(row.dep_hashes_json);
+      let migrated = false;
       // Persist exact legacy-policy witnesses separately from the immutable
       // judgment parts, so later budget/runner changes cannot lose that proof.
       if (comparison) {
-        let migrated = false;
         for (const parts of [...Object.values(stored.runtime ?? {}), ...Object.values(stored.decisionRuntime ?? {})]) {
           const alias = comparison.policyAlias(parts.policy);
           if (alias && alias !== parts.policy && stored.policyAliases?.[parts.policy] !== alias) {
@@ -115,21 +115,35 @@ export function replan(db, { inputs, now, runtimeDeps, comparison }) {
         if (stored.inputs && stored.inputs.policy !== state.policy && comparison.inputPolicyMatches(stored.inputs.policy, state.policy)) {
           stored.inputs = { ...stored.inputs, policy: state.policy }; migrated = true;
         }
-        if (migrated) db.prepare('UPDATE reviews SET dep_hashes_json=? WHERE posting_id=?').run(JSON.stringify(stored), row.posting_id);
       }
       const old = stored.inputs;
-      if (!old) continue;
+      if (!old) {
+        if (migrated) db.prepare('UPDATE reviews SET dep_hashes_json=? WHERE posting_id=?').run(JSON.stringify(stored), row.posting_id);
+        continue;
+      }
+      // Unversioned records used full-policy and mixed-code hashes. Neither is
+      // comparable to this format; retain the comparable inputs and the exact
+      // runtime witnesses instead of treating a format migration as new work.
+      const legacyInputs = old.formatVersion === undefined;
       const factsChanged = dependencyHash(old.facts) !== dependencyHash(state.facts);
       const evidence = parseJson(row.evidence_json);
       const used = new Set([...(evidence.factsUsed ?? []), ...current.facts.filter((f) => f.polarity === 'constraint').map((f) => f.id)]);
       const usedChanged = [...used].some((id) => old.facts?.[id] !== state.facts[id]);
       const lastDecision = stored.decisionRuntime ?? stored.runtime;
-      const codeChanged = old.code !== state.code && (!runtimeDeps || !comparison?.legacyCode(old.code) || !lastDecision
+      const codeChanged = !legacyInputs && old.code !== state.code && (!runtimeDeps || !comparison?.legacyCode(old.code) || !lastDecision
         || Object.entries(lastDecision).some(([tier, parts]) => dependencyHash(comparison.parts(parts, runtimeDeps[tier], { omit: ['model'], policyAliases: stored.policyAliases }))
           !== dependencyHash(comparison.parts(runtimeDeps[tier], runtimeDeps[tier], { omit: ['model'] }))));
-      const policyChanged = comparison ? !comparison.inputPolicyMatches(old.policy, state.policy) : old.policy !== state.policy;
-      const otherChanged = codeChanged || policyChanged || ['rules','screening','provenance','resume'].some((part) => old[part] !== state[part]);
+      const policyChanged = !legacyInputs && (comparison ? !comparison.inputPolicyMatches(old.policy, state.policy) : old.policy !== state.policy);
       const windowsChanged = old.windowsAreas !== state.windowsAreas;
+      const otherChanged = codeChanged || policyChanged || (legacyInputs && windowsChanged)
+        || ['rules','screening','provenance','resume'].some((part) => old[part] !== state[part]);
+      if (legacyInputs) {
+        // No old screening-only policy can be recovered from an opaque hash.
+        // windowsAreas still checks the policy subset recorded independently.
+        stored.inputs = { ...old, formatVersion: state.formatVersion, policy: state.policy, code: state.code };
+        stored.inputFormatBaseline = { code: state.code };
+        migrated = true;
+      }
       const relevantFacts = factsChanged && (usedChanged || row.decision === 'not_eligible' || row.code === 'missing_fact');
       const relevantOther = otherChanged && (row.decision !== 'eligible' || windowsChanged);
       if (relevantFacts || relevantOther) {
@@ -138,7 +152,7 @@ export function replan(db, { inputs, now, runtimeDeps, comparison }) {
         if (row.decision === 'eligible' && row.application_id) db.prepare("UPDATE applications SET fit_note=COALESCE(fit_note,'') || ' rechecking' WHERE id=?").run(row.application_id);
         logReview(db, row.posting_id, { now, stage: 'judge', kind: 'replan', payload: { factsChanged, otherChanged } });
         requeued += 1;
-      }
+      } else if (migrated) db.prepare('UPDATE reviews SET dep_hashes_json=? WHERE posting_id=?').run(JSON.stringify(stored), row.posting_id);
     }
   });
   return { requeued };
@@ -195,6 +209,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   }
   releaseHolds(db, { now, provenance: current.provenance, inputs: current, codes: ['provenance_unknown'] });
   scheduleRefresh(db, { now, policy: current.policy }); recheckHolds(db, { now, screeningPolicy: current.screeningPolicy }); replan(db, { inputs: current, now, runtimeDeps, comparison });
+  const currentState = inputState(current);
   // Actual adapter/CLI dependencies are available only after adapter.ready.
   atomic(db, () => {
     for (const row of db.prepare(`SELECT r.* FROM reviews r JOIN postings p ON p.id=r.posting_id
@@ -202,8 +217,13 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       if (row.decision === 'eligible' || row.decision === 'reused' || row.decision === 'dropped') continue;
       const old = parseJson(row.dep_hashes_json);
       const lastDecision = old.decisionRuntime ?? old.runtime;
+      // A migrated mixed-code fingerprint establishes today's baseline without
+      // relabelling any cached judgment. Future code changes (or an already
+      // invalidated review) still take the normal T7 replay path.
+      const migratedCode = !old.invalidated && old.inputs?.code === currentState.code
+        && old.inputFormatBaseline?.code === currentState.code;
       if (!lastDecision || Object.entries(lastDecision).every(([tier, parts]) => {
-        const options = { omit: settled.has(row.posting_id) ? ['model'] : [], policyAliases: old.policyAliases };
+        const options = { omit: [...(settled.has(row.posting_id) ? ['model'] : []), ...(migratedCode ? ['decide'] : [])], policyAliases: old.policyAliases };
         return dependencyHash(comparison.parts(parts, runtimeDeps[tier], options)) === dependencyHash(comparison.parts(runtimeDeps[tier], runtimeDeps[tier], options));
       })) continue;
       db.prepare("UPDATE reviews SET state='due',stage='judge',next_due=?,hold_owner=NULL,hold_since=NULL,lease_owner=NULL,lease_until=NULL,dep_hashes_json=?,updated_at=? WHERE posting_id=?")
