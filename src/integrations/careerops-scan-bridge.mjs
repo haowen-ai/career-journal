@@ -14,7 +14,9 @@
 //   stdin:  { "action": "scan", "readOnly": true }
 //   stdout: { "ok": true, "roles": [...] }
 
-import { spawn } from 'node:child_process';
+import { executeCareerOpsProcess, installCareerOpsShutdown } from './careerops-process.mjs';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -22,7 +24,8 @@ import { fileURLToPath } from 'node:url';
 
 export const WIDE_TITLE_FILTER = Object.freeze([
   'word:intern', 'word:interns', 'stem:internship', 'co-op', 'word:coop', 'stem:apprentice',
-  'summer analyst', 'summer associate', 'working student',
+  'summer analyst', 'summer associate', 'working student', 'placement', 'word:student', 'stem:fellow',
+  'stem:residen', 'graduate program', 'early career', 'university program', 'campus program', 'currently enrolled', 'class of',
 ]);
 
 const REPLACED_SECTIONS = new Set(['title_filter', 'location_filter']);
@@ -74,23 +77,8 @@ export function parseScanOutput(stdout, stderr) {
   return { roles, errors: Array.isArray(receipt.errors) ? receipt.errors.length : 0 };
 }
 
-function run(command, args, { cwd, env, timeoutMs }) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-    let stdout = '';
-    let stderr = '';
-    const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.once('error', (error) => { clearTimeout(timer); reject(error); });
-    child.once('close', (exitCode, signal) => {
-      clearTimeout(timer);
-      if (signal) reject(new Error(`CareerOps scan stopped (${signal}) after at most ${timeoutMs}ms`));
-      else resolve({ exitCode, stdout, stderr });
-    });
-  });
+function run(command, args, options) {
+  return executeCareerOpsProcess({ command, args, ...options });
 }
 
 export async function scanCareerOps(root, { execute = run, env = process.env, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
@@ -104,6 +92,7 @@ export async function scanCareerOps(root, { execute = run, env = process.env, ti
       timeoutMs,
       env: {
         ...env,
+        CAREER_OPS_ROOT: temporary,
         CAREER_OPS_PORTALS: widened,
         CAREER_OPS_SCAN_HISTORY: path.join(temporary, 'scan-history.tsv'),
         CAREER_OPS_PIPELINE: path.join(temporary, 'pipeline.md'),
@@ -119,6 +108,80 @@ export async function scanCareerOps(root, { execute = run, env = process.env, ti
   }
 }
 
+// Each fetch is sequential: stderr cap messages belong only to the current entry.
+export async function collectCareerOpsRaw({ portals, providers, resolveProvider, makeHttpCtx }) {
+  const roles = [];
+  const partitions = [];
+  const configuredPartitions = [];
+  const entries = [...(portals.tracked_companies ?? []), ...(portals.job_boards ?? [])];
+  for (const entry of entries) {
+    let provider;
+    let partition = `unknown:${entry.name ?? entry.board ?? entry.url ?? ''}`;
+    const originalError = console.error;
+    let capDetected = false;
+    try {
+      const resolved = await resolveProvider(entry, providers);
+      provider = resolved?.provider ?? resolved;
+      if (typeof provider === 'string') provider = providers.get?.(provider) ?? providers[provider];
+      if (!provider?.fetch) throw new Error('No provider for configured entry');
+      partition = `${provider.id ?? resolved.id ?? resolved.providerId ?? 'unknown'}:${entry.name ?? entry.board ?? entry.url ?? ''}`;
+      console.error = (...args) => {
+        const line = args.map(String).join(' ');
+        if (/\btruncat(?:ed|ion)\b|\bpartial (?:result|census)|\b(?:page|result) (?:limit|cap)\b/i.test(line)) capDetected = true;
+        originalError(...args);
+      };
+      const jobs = await provider.fetch(entry, await makeHttpCtx(entry, portals));
+      if (!Array.isArray(jobs)) throw new Error('Provider returned no job array');
+      const maxPages = Number(entry.max_pages ?? entry.maxPages ?? entry.workday?.max_pages ?? portals.workday?.max_pages ?? 100);
+      if (provider.id === 'workday' && Number.isFinite(maxPages) && maxPages > 0 && jobs.length >= maxPages * 20) capDetected = true;
+      const truncated = capDetected || Object.entries(jobs).some(([key, value]) => /(?:truncated|partial|capDetected)$/i.test(key) && value === true);
+      for (const job of jobs) roles.push({ ...job, company: job?.company ?? entry.name, partition,
+        locations: job?.locations ?? (job?.location ? [job.location] : []), requisitionId: job?.requisitionId ?? job?.jobReqId ?? null });
+      partitions.push({ partition, status: truncated ? 'partial' : 'ok', count: jobs.length, rawCount: jobs.length, truncated, capDetected });
+    } catch (error) {
+      partitions.push({ partition, status: 'error', count: 0, rawCount: 0, error: error.message, truncated: capDetected, capDetected });
+    } finally { configuredPartitions.push(partition); console.error = originalError; }
+  }
+  return { roles, partitions, configuredPartitions };
+}
+
+export async function scanCareerOpsRaw(root, { execute = run, env = process.env, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'career-journal-careerops-raw-'));
+  try {
+    const portals = path.join(temporary, 'portals.yml');
+    await writeFile(portals, await readFile(env.CAREER_OPS_PORTALS || path.join(root, 'portals.yml')));
+    const execution = await execute(process.execPath, [fileURLToPath(import.meta.url), 'scan-raw', '--worker'], {
+      cwd: root, timeoutMs,
+      env: { ...env, CAREER_OPS_ROOT: temporary, CAREER_OPS_PORTALS: portals },
+    });
+    if (execution.exitCode !== 0) throw new Error(`CareerOps raw scan exited with ${execution.exitCode}: ${String(execution.stderr ?? '').slice(-1000)}`);
+    let result;
+    try { result = JSON.parse(String(execution.stdout)); } catch { throw new Error('CareerOps raw scan printed invalid JSON'); }
+    if (!Array.isArray(result.roles)) throw new Error('CareerOps raw scan printed no role array');
+    return result;
+  } finally { await rm(temporary, { recursive: true, force: true }); }
+}
+
+async function rawWorker(root) {
+  // Only absent raw entrypoints permit fallback; fetch/import failures in a present provider stay errors.
+  const { existsSync } = await import('node:fs');
+  const base = [root, path.join(root, 'scripts')].find((candidate) => existsSync(path.join(candidate, 'providers', '_registry.mjs')));
+  if (!base || !existsSync(path.join(base, 'providers', '_http.mjs')) || !existsSync(path.join(base, 'plugins', '_engine.mjs'))) {
+    const legacy = await scanCareerOps(root);
+    return { ...legacy, partitions: [{ partition: 'all', status: 'partial', count: legacy.roles.length, rawCount: legacy.roles.length,
+      truncated: false, detail: 'legacy display-line bridge' }] };
+  }
+  const require = createRequire(path.join(root, 'package.json'));
+  const yaml = require('js-yaml');
+  const portals = yaml.load(await readFile(process.env.CAREER_OPS_PORTALS, 'utf8'));
+  const registry = await import(pathToFileURL(path.join(base, 'providers', '_registry.mjs')).href);
+  const http = await import(pathToFileURL(path.join(base, 'providers', '_http.mjs')).href);
+  const plugins = await import(pathToFileURL(path.join(base, 'plugins', '_engine.mjs')).href);
+  let providers = await registry.loadProviders(path.join(base, 'providers'));
+  providers = await plugins.mergeProviderPlugins(providers, { root: base }) ?? providers;
+  return collectCareerOpsRaw({ portals, providers, resolveProvider: registry.resolveProvider, makeHttpCtx: http.makeHttpCtx });
+}
+
 async function readStdin() {
   let text = '';
   process.stdin.setEncoding('utf8');
@@ -128,18 +191,22 @@ async function readStdin() {
 
 async function main() {
   const command = process.argv[2];
-  if (command !== 'scan') {
+  if (!['scan', 'scan-raw'].includes(command)) {
     process.stderr.write(`The built-in CareerOps bridge only supports "scan"; "${command ?? ''}" needs the CareerOps career-journal-adapter.mjs bridge.\n`);
     process.exitCode = 1;
     return;
   }
-  const request = JSON.parse((await readStdin()) || '{}');
-  if (request.action !== 'scan' || request.readOnly !== true) throw new Error('The bridge accepts only a read-only scan request');
-  const { roles } = await scanCareerOps(process.cwd());
-  process.stdout.write(`${JSON.stringify({ ok: true, roles })}\n`);
+  const worker = process.argv.includes('--worker');
+  if (!worker) {
+    const request = JSON.parse((await readStdin()) || '{}');
+    if (!['scan', 'scan-raw'].includes(request.action) || request.readOnly !== true) throw new Error('The bridge accepts only a read-only scan request');
+  }
+  const result = command === 'scan' ? await scanCareerOps(process.cwd()) : worker ? await rawWorker(process.cwd()) : await scanCareerOpsRaw(process.cwd());
+  process.stdout.write(`${JSON.stringify({ ok: true, ...result })}\n`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  installCareerOpsShutdown();
   main().catch((error) => {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;

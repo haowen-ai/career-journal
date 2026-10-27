@@ -79,7 +79,7 @@ export function verifyQueuedRole(db, input, now = new Date().toISOString()) {
       recordedAt: now,
       title: skip ? 'Skipped after posting check' : 'Posting checked',
       note: reason,
-      source: { kind: 'queue-verify', result, reason, ...(deadline ? { deadline } : {}) },
+      source: { kind: 'queue-verify', result, reason, actor: 'user', ...(deadline ? { deadline } : {}) },
       statusAfter: skip ? 'withdrawn' : null,
     }, { withinTransaction: true });
     db.exec('COMMIT');

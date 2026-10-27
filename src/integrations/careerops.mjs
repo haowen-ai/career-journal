@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { access, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { executeCareerOpsProcess } from './careerops-process.mjs';
 import { fileURLToPath } from 'node:url';
 
 const MAX_REQUEST_BYTES = 1_000_000;
@@ -39,29 +39,7 @@ export async function detectCareerOps(config = {}) {
   return { ok: true, code: 'ready', installedVersion: metadata.version, entrypoint, root, detail: `CareerOps ${metadata.version} is ready` };
 }
 
-function executeProcess({ command, args, cwd, stdin, timeoutMs }) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGKILL');
-    }, timeoutMs);
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.once('error', (error) => { clearTimeout(timer); reject(error); });
-    child.once('close', (exitCode) => {
-      clearTimeout(timer);
-      if (timedOut) reject(new Error(`CareerOps request timed out after ${timeoutMs}ms`));
-      else resolve({ exitCode, stdout, stderr });
-    });
-    child.stdin.end(stdin);
-  });
-}
+const executeProcess = executeCareerOpsProcess;
 
 function validateRequest(request) {
   if (!ACTIONS.has(request?.action)) throw new Error(`Unsupported CareerOps action: ${request?.action ?? 'missing'}`);
@@ -137,9 +115,9 @@ export async function runCareerOpsScan(config = {}, dependencies = {}) {
   const execute = dependencies.execute ?? executeProcess;
   const execution = await execute({
     command: config.nodeExecutable ?? process.execPath,
-    args: [health.entrypoint, 'scan'],
+    args: [health.entrypoint, health.builtInBridge ? 'scan-raw' : 'scan'],
     cwd: health.root,
-    stdin: JSON.stringify({ action: 'scan', readOnly: true }),
+    stdin: JSON.stringify({ action: health.builtInBridge ? 'scan-raw' : 'scan', readOnly: true }),
     // A full CareerOps portal scan takes several minutes; the built-in bridge stops its own scan at 18.
     timeoutMs: config.scanTimeoutMs ?? 1_200_000,
   });

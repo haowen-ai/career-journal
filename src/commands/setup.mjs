@@ -3,10 +3,11 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { defaultConfig, validateTimezone } from '../config/defaults.mjs';
 import { loadConfig, saveConfig } from '../config/store.mjs';
-import { openDatabase, openReadOnlyDatabase, migrate, pendingMigrationError } from '../storage/database.mjs';
+import { openDatabase, openReadOnlyDatabase, migrate, pendingMigrationError, assertSchemaNotNewer } from '../storage/database.mjs';
 import { assertPublicEmailAddress, configureEmailAccount, listEmailAccounts, emailSetupState } from '../email/accounts.mjs';
 import { upsertTask, listTasks, automationSetupState, taskEmailAccountIds } from '../automation/registry.mjs';
 import { validSecretReference } from '../secrets/reference.mjs';
+import { assertHomeOutsideCheckout } from '../runtime/home.mjs';
 
 const DAILY_AUTOMATIONS = Object.freeze({
   'mail-sync': { time: '20:00', notificationPolicy: 'actionable' },
@@ -83,6 +84,7 @@ function hasDailyMailbox(home, config) {
 }
 
 export async function setup(home, answers = {}) {
+  assertHomeOutsideCheckout(home);
   let config;
   let created = false;
   try { config = await loadConfig(home); }
@@ -92,6 +94,11 @@ export async function setup(home, answers = {}) {
     created = true;
   }
   if (answers.timezone !== undefined) config.timezone = validateTimezone(answers.timezone);
+  const existingDatabase = path.resolve(home, config.data.database);
+  if (existsSync(existingDatabase)) {
+    const inspect = openReadOnlyDatabase(existingDatabase);
+    try { assertSchemaNotNewer(inspect); } finally { inspect.close(); }
+  }
   if (answers.email?.mode === 'skip') {
     config.email.setupState = 'skipped';
   } else if (answers.email?.mode === 'configure') {
@@ -204,6 +211,7 @@ export async function setup(home, answers = {}) {
 
 export async function setupCommand(parsed, io, runtime) {
   const home = parsed.options.home ?? process.cwd();
+  assertHomeOutsideCheckout(home);
   let timezone = parsed.options.timezone;
   let existing = true;
   let existingConfig = null;

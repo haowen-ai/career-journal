@@ -133,6 +133,10 @@ export function normalizeScanProfile(raw) {
       season: optionalString(search.season, 'search.season'),
       directions: directions(search.directions),
       locations: locations(search.locations),
+      countries: stringList(search.countries, 'search.countries').map((code) => {
+        if (!/^[A-Z]{2}$/.test(code)) fail('search.countries', 'must contain ISO 3166 alpha-2 codes');
+        return code;
+      }),
       remoteOk: search.remoteOk === true,
       exclusions: stringList(search.exclusions, 'search.exclusions'),
     },
@@ -148,6 +152,10 @@ export function normalizeScanProfile(raw) {
     },
     pace: { scanTime },
     sources: {
+      expected: stringList(sources.expected, 'sources.expected').map((source) => {
+        if (!['atsBoards', 'careerops', 'simplify'].includes(source)) fail('sources.expected', 'contains an unsupported source');
+        return source;
+      }),
       atsBoards: atsBoards(sources.atsBoards),
       careerOps: sources.careerOps === true,
       simplify: simplify(sources.simplify),

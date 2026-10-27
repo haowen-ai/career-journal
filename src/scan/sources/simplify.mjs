@@ -1,4 +1,5 @@
-import { fetchJson, httpUrl, isoDate, sourceError, text, uniqueStrings } from './common.mjs';
+import { fetchSourceJson } from './ats-boards.mjs';
+import { httpUrl, isoDate, sourceError, text, uniqueStrings } from './common.mjs';
 
 // SimplifyJobs publishes its internship and new-grad lists without an
 // open-source licence. This source is therefore opt-in and never a default:
@@ -10,20 +11,22 @@ import { fetchJson, httpUrl, isoDate, sourceError, text, uniqueStrings } from '.
 
 // A listing looks like { id, company_name, title, url, locations[], active, is_visible,
 // date_posted (epoch seconds), terms[], sponsorship, degrees[], category }.
-export function parseSimplify(payload) {
+export function parseSimplify(payload, { partition = 'simplify:1' } = {}) {
   const listings = Array.isArray(payload) ? payload : Array.isArray(payload?.listings) ? payload.listings : [];
   const roles = [];
-  for (const listing of listings) {
-    if (listing?.active === false || listing?.is_visible === false) continue;
+  for (let listing of listings) {
+    listing ??= {};
     const url = httpUrl(listing?.url);
     const id = text(listing?.id);
-    if (!id || !text(listing?.title) || !text(listing?.company_name) || !url) continue;
+    const invalid = !id ? 'missing id' : !text(listing.title) ? 'missing title' : !text(listing.company_name) ? 'missing company' : !url ? 'missing http(s) URL' : null;
     const details = [
       text(listing.sponsorship) ? `Sponsorship: ${text(listing.sponsorship)}` : '',
       Array.isArray(listing.degrees) && listing.degrees.length ? `Degrees: ${uniqueStrings(listing.degrees).join(', ')}` : '',
     ].filter(Boolean);
     roles.push({
-      source: 'simplify',
+      source: 'simplify', partition, invalid, listed: listing.active !== false && listing.is_visible !== false,
+      offices: [], remote: null, workplaceType: null, employmentType: null, requisitionId: text(listing.requisitionId) || null,
+      completeness: { locations: 'partial', arrangement: 'unknown', description: 'tags', employment_type: 'absent' },
       sourceId: id,
       company: text(listing.company_name),
       title: text(listing.title),
@@ -46,22 +49,24 @@ export function simplifyUrls(settings) {
 }
 
 export async function fetchSimplify(settings, fetchImpl, options = {}) {
-  if (!settings?.enabled) return { sources: [{ source: 'simplify', status: 'skipped', count: 0, detail: 'opt-in source is not enabled' }], roles: [] };
+  if (!settings?.enabled) return { sources: [{ source: 'simplify', partition: 'all', rawCount: 0, truncated: false, status: 'skipped', count: 0, detail: 'opt-in source is not enabled' }], batches: [], roles: [] };
   const urls = simplifyUrls(settings);
-  if (!urls.length) return { sources: [{ source: 'simplify', status: 'skipped', count: 0, detail: 'enabled but no URL is configured' }], roles: [] };
+  if (!urls.length) return { sources: [{ source: 'simplify', partition: 'all', rawCount: 0, truncated: false, status: 'skipped', count: 0, detail: 'enabled but no URL is configured' }], batches: [], roles: [] };
   const sources = [];
   const roles = [];
-  const seen = new Set();
-  for (const url of urls) {
+  const batches = [];
+  for (const [index, url] of urls.entries()) {
+    const partition = `simplify:${index + 1}`;
     try {
-      // A listing that appears on more than one list is kept once, from the first list.
-      const listRoles = parseSimplify(await fetchJson(fetchImpl, url, options)).filter((role) => !seen.has(role.sourceId));
-      for (const role of listRoles) seen.add(role.sourceId);
+      const payload = await fetchSourceJson(fetchImpl, url, options);
+      if (!Array.isArray(payload) && !Array.isArray(payload?.listings)) throw new Error('Malformed Simplify response: missing listing array');
+      const listRoles = parseSimplify(payload, { partition });
+      batches.push({ source: 'simplify', partition, rawCount: listRoles.length, records: listRoles });
       roles.push(...listRoles);
-      sources.push({ source: 'simplify', url, status: 'ok', count: listRoles.length });
+      sources.push({ source: 'simplify', partition, url, status: 'ok', count: listRoles.length, rawCount: listRoles.length, truncated: false });
     } catch (error) {
-      sources.push({ source: 'simplify', url, status: 'error', count: 0, detail: sourceError(error) });
+      sources.push({ source: 'simplify', partition, url, rawCount: 0, truncated: false, status: 'error', count: 0, detail: sourceError(error) });
     }
   }
-  return { sources, roles };
+  return { sources, batches, roles };
 }

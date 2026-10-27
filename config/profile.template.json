@@ -9,6 +9,7 @@
       "secondary": []
     },
     "locations": [],
+    "countries": [],
     "remoteOk": null,
     "exclusions": []
   },
@@ -40,6 +41,7 @@
     "notify": "desktop"
   },
   "sources": {
+    "expected": [],
     "atsBoards": [],
     "careerOps": false,
     "simplify": {
