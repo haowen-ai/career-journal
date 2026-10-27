@@ -241,3 +241,35 @@ test('[B] a fetch batch runs in parallel across hosts and stays one-at-a-time pe
   assert.ok(maxInFlight <= 4, `no more than concurrency in flight (max ${maxInFlight})`);
   assert.equal(hostOverlap, false, 'one request at a time per host');
 });
+
+// ------------------------------------------------------------------ T5: a continuous judge pool
+// Live drain (2026-10-27): about 110 postings per hour with concurrency 8. Judge batches ran under Promise.all, so
+// every batch waited for its slowest item (a primary call plus an escalation), leaving most slots idle.
+// Ruling: judging runs as a pool that keeps up to `concurrency` items in flight and refills a slot as soon as an
+// item finishes; fetching ahead keeps the pool supplied.
+
+test('[B] the judge pool refills free slots instead of waiting for the slowest item of a batch (trial T5)', async () => {
+  const { runReview } = await workerModule();
+  const db = freshDb();
+  const q = queue();
+  const ids = [];
+  for (let i = 0; i < 12; i += 1) { const id = `p-pool-${i}`; ids.push(id); q.add(db, { id, text: SNAPSHOTS.eligible }); }
+  let inFlight = 0; let maxInFlight = 0;
+  const delayFor = (postingId) => (postingId === 'p-pool-0' || postingId === 'p-pool-4' || postingId === 'p-pool-8' ? 400 : 40);
+  const slowJudge = (tier) => {
+    const base = fakeJudge({ tier, answers: () => JUDGMENTS.eligible });
+    return { ...base, async judge(request, context) {
+      inFlight += 1; maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, delayFor(request.postingId ?? context?.postingId)));
+      inFlight -= 1;
+      return base.judge(request, context);
+    } };
+  };
+  const started = Date.now();
+  await runReview(runOptions(db, { budget: 60, concurrency: 4, pages: q.pages, judges: { primary: slowJudge('primary'), escalation: slowJudge('escalation') } }));
+  const elapsed = Date.now() - started;
+  for (const id of ids) assert.equal(reviewOf(db, id).state, 'done', `${id} judged`);
+  // Batches of 4 would wait 400 ms three times (≥ 1200 ms); a refilling pool finishes in roughly one slow call plus a few fast ones.
+  assert.ok(elapsed < 900, `pool finished in ${elapsed} ms`);
+  assert.ok(maxInFlight <= 4, `never more than concurrency in flight (${maxInFlight})`);
+});
