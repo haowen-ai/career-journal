@@ -22,6 +22,7 @@ import { postingPartitions } from '../funnel/membership.mjs';
 export { scheduleRefresh } from './freshness.mjs';
 
 const DAY = 86400000;
+const explorationLane = (row) => ['no_student_signal', 'out_of_direction'].includes(row.lane);
 const factsMap = (facts) => Object.fromEntries(facts.map((fact) => [fact.id, dependencyHash(fact)]));
 function inputState(inputs) {
   return { facts: factsMap(inputs.facts), rules: dependencyHash(inputs.rules), policy: dependencyHash({ policy: inputs.policy, jobType: inputs.profile?.search?.jobType ?? null }),
@@ -65,19 +66,19 @@ function ordered(rows, { now, policy, budget, explorationLeft }) {
   const age = (row) => (Date.parse(now) - Date.parse(row.first_seen)) / DAY;
   const deadline = (row) => { const d = parseJson(row.deadline_json); return d.kind === 'cutoff' ? Date.parse(d.date) : Infinity; };
   const soon = (row) => deadline(row) <= Date.parse(now) + 7 * DAY;
-  const aged = (row) => row.lane === 'aged' || row.lane !== 'no_student_signal' && age(row) >= (policy.serviceTargets?.agedAfterDays ?? 2);
+  const aged = (row) => !explorationLane(row) && (row.lane === 'aged' || age(row) >= (policy.serviceTargets?.agedAfterDays ?? 2));
   const byAge = (a, b) => a.first_seen.localeCompare(b.first_seen) || a.posting_id.localeCompare(b.posting_id);
   const sorted = [...rows].sort(byAge); const chosen = [];
-  const noSignal = sorted.filter((row) => row.lane === 'no_student_signal').slice(0, explorationLeft);
+  const exploration = sorted.filter(explorationLane).slice(0, explorationLeft);
   // A due-list rebuild must not grant another exploration share or let the
-  // remainder of this lane enter via the deadline/ordinary fallbacks.
-  const eligible = sorted.filter((row) => row.lane !== 'no_student_signal' || noSignal.includes(row));
+  // remainder of either lane enter via the deadline/ordinary fallbacks.
+  const eligible = sorted.filter((row) => !explorationLane(row) || exploration.includes(row));
   const take = (candidates, count = Infinity) => { for (const row of candidates) if (!chosen.includes(row) && count-- > 0) chosen.push(row); };
   const deadlines = eligible.filter(soon).sort((a, b) => deadline(a) - deadline(b) || byAge(a,b));
   // One imminent deadline, then reserved shares, then the rest of the paid order.
   take(deadlines, 1);
   take(sorted.filter(aged), Math.max(1, Math.ceil(budget * (policy.serviceTargets?.agedReserveShare ?? .25))));
-  take(noSignal);
+  take(exploration);
   take(deadlines); take(sorted.filter(aged));
   for (const lane of ['bootstrap','new','refresh']) take(sorted.filter((r) => r.lane === lane));
   take(eligible); return chosen;
@@ -144,8 +145,13 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   attemptDir ??= await mkdtemp(path.join(os.tmpdir(), 'cj-review-attempts-'));
   await mkdir(attemptDir, { recursive: true, mode: 0o700 });
   const seen = new Set();
-  const exploration = new Set(db.prepare("SELECT * FROM reviews WHERE state='due' AND lane='no_student_signal' AND (next_due IS NULL OR next_due<=?)").all(now)
-    .filter((row) => !userDecided(db, row)).map((row) => row.posting_id));
+  // Also exclude legacy pending work created from unlisted-only observations.
+  // Previously listed postings and reviews with no census observations retain
+  // their existing scheduling and absence-based closure behavior.
+  const unlistedOnly = new Set(db.prepare('SELECT posting_id FROM observations GROUP BY posting_id HAVING MAX(listed)=0').all().map((row) => row.posting_id));
+  const reviewable = (row) => !unlistedOnly.has(row.posting_id);
+  const exploration = new Set(db.prepare("SELECT * FROM reviews WHERE state='due' AND lane IN ('no_student_signal','out_of_direction') AND (next_due IS NULL OR next_due<=?)").all(now)
+    .filter((row) => reviewable(row) && !userDecided(db, row)).map((row) => row.posting_id));
   const explorationTarget = Math.min(exploration.size, budget ? Math.max(1, Math.ceil(budget * EXPLORATION_SHARE)) : 0);
   const explorationReserved = () => {
     const spent = db.prepare('SELECT posting_id,1+transport_retries n FROM attempts WHERE run_id=?').all(runId)
@@ -167,7 +173,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   const due = () => {
     const explored = [...seen].filter((id) => exploration.has(id)).length;
     return ordered(db.prepare("SELECT * FROM reviews WHERE state='due' AND (next_due IS NULL OR next_due<=?)").all(now)
-      .filter((row) => !seen.has(row.posting_id) && !userDecided(db, row)),
+      .filter((row) => reviewable(row) && !seen.has(row.posting_id) && !userDecided(db, row)),
     { now, policy: current.policy, budget, explorationLeft: Math.max(0, explorationTarget - explored) });
   };
   const refreshInputs = async () => { current = await inputs(); return current; };
@@ -349,7 +355,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     }
     receipt.counts.attempts = db.prepare('SELECT COUNT(*) n FROM attempts WHERE run_id=?').get(runId).n;
     receipt.counts.escalations = db.prepare("SELECT COUNT(*) n FROM attempts WHERE run_id=? AND tier='escalation'").get(runId).n;
-    const pending = db.prepare("SELECT * FROM reviews WHERE state IN ('due','held','failed')").all();
+    const pending = db.prepare("SELECT * FROM reviews WHERE state IN ('due','held','failed')").all().filter(reviewable);
     const targets = current.policy.serviceTargets;
     for (const row of pending) {
       const age = (Date.parse(now) - Date.parse(row.first_seen)) / DAY;
@@ -357,8 +363,10 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       else if (row.code === 'system_failure' || age >= targets.maxWaitNights) receipt.breaches.push({ postingId: row.posting_id, age_days: age, code: row.code });
     }
     const noSignal = pending.filter((r) => r.lane === 'no_student_signal' && r.state === 'due');
+    const outOfDirection = pending.filter((r) => r.lane === 'out_of_direction' && r.state === 'due');
     receipt.backlog = { due: pending.filter((r) => r.state === 'due').length,
       no_student_signal: { due: noSignal.length, oldest_days: Math.max(0, ...noSignal.map((r) => (Date.parse(now) - Date.parse(r.first_seen)) / DAY)) },
+      out_of_direction: { due: outOfDirection.length, oldest_days: Math.max(0, ...outOfDirection.map((r) => (Date.parse(now) - Date.parse(r.first_seen)) / DAY)) },
       recommendation: receipt.breaches.length ? `raise budget to ${Math.max(budget + 1, Math.ceil(pending.length / Math.max(1, targets.maxWaitNights)))}` : null };
     if (receipt.status !== 'failed' && (receipt.stop_reason || receipt.breaches.length || pending.some((r) => r.state === 'failed'))) receipt.status = 'partial';
     await hooks.beforeFinish?.();

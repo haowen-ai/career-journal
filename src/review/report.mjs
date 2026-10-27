@@ -19,6 +19,7 @@ export function reviewReport(db, { receipt = null, sourceReceipts = [], lang = '
   lines.push('', zh ? '## 来源告警' : '## Source alerts');
   for (const source of sourceReceipts.flatMap((s) => s.sources ?? [])) if (source.alert || !['ok','empty'].includes(source.status)) lines.push(`- ${source.source} ${source.partition}: ${source.alert ?? source.status}`);
   lines.push('', '## No-student-signal backlog', JSON.stringify(receipt?.backlog?.no_student_signal ?? {}));
+  lines.push('', '## Out-of-direction backlog', JSON.stringify(receipt?.backlog?.out_of_direction ?? {}));
   lines.push('', zh ? '## 抽查证据' : '## Spot-check (up to 3)');
   const runPostingIds = receipt?.run_id ? new Set(db.prepare('SELECT DISTINCT posting_id FROM attempts WHERE run_id=?').all(receipt.run_id).map((r) => r.posting_id)) : null;
   for (const row of rows.filter((r) => r.decision === 'eligible' && (!runPostingIds || runPostingIds.has(r.id))).slice(0,3)) {

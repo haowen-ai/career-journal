@@ -6,6 +6,7 @@ const STUDENT = /\b(?:intern(?:s|ship|ships)?|co[- ]?ops?|apprentice(?:s|ship|sh
 // Descriptions often mention students in company-wide boilerplate. Only explicit
 // program phrases count there; titles and departments retain the broader signal.
 const PROGRAM = /\b(?:interns?|internships?|co[- ]?ops?|apprentice(?:s|ship|ships)?|summer\s+20\d\d\s+(?:interns?|analysts?|associates?|program(?:me)?)|(?:graduate|early career|university|campus)\s+program(?:me)?)\b/i;
+const DIRECTION = /\b(?:data|analytics|analyst|AI|ML|machine\s+learning|product|program|project|business|insights|intelligence|solutions|strategy|BI|quant)\b/i;
 const names = new Map();
 const normalized = (value) => String(value).normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const displayNames = new Intl.DisplayNames(['en'], { type: 'region' });
@@ -62,12 +63,17 @@ export function classifyRole(record, { policy = {}, profile, identity: { submitt
   const signal = [record.title, ...(record.categories ?? []), record.department].some((text) => STUDENT.test(text ?? ''))
     || PROGRAM.test(record.description ?? '');
   if (!signal) flags.push('generic_title');
-  if (['internship', 'co-op'].includes(profile?.search?.jobType) && !signal) {
+  const studentSearch = ['internship', 'co-op'].includes(profile?.search?.jobType);
+  if (studentSearch && !signal) {
     flags.push('no_student_signal'); lane = 'no_student_signal';
+  } else if (studentSearch && record.source === 'simplify' && record.categories?.length
+      && record.categories.every((category) => /^hardware(?: engineering)?$/i.test(String(category).trim()))
+      && !DIRECTION.test(record.title ?? '')) {
+    lane = 'out_of_direction';
   }
   if (record.terms?.length) flags.push('term_tag_conflict');
   if (record.degrees?.length) flags.push('degree_tag');
   if (locations.some((location) => stateNames.has(normalized(location)) || Object.hasOwn(countries.usStates, String(location)))) flags.push('state_only_location');
-  if (record.deadlineAt && record.deadlineKind === 'cutoff' && lane !== 'no_student_signal') lane = 'deadline';
+  if (record.deadlineAt && record.deadlineKind === 'cutoff' && !['no_student_signal', 'out_of_direction'].includes(lane)) lane = 'deadline';
   return outcome('review', null);
 }

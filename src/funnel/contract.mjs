@@ -1,8 +1,8 @@
-// Shared screening interfaces. Keep these values aligned with schema 006.
+// Shared screening interfaces. Keep these values aligned with the latest schema.
 export const REVIEW_STAGES = Object.freeze(['scan', 'fetch', 'check', 'judge', 'deliver']);
 export const REVIEW_STATES = Object.freeze(['due', 'leased', 'held', 'done', 'failed']);
 export const DECISIONS = Object.freeze(['dropped', 'reused', 'not_eligible', 'eligible', 'unclear']);
-export const LANES = Object.freeze(['deadline', 'aged', 'bootstrap', 'new', 'refresh', 'no_student_signal']);
+export const LANES = Object.freeze(['deadline', 'aged', 'bootstrap', 'new', 'refresh', 'no_student_signal', 'out_of_direction']);
 export const DROP_CODES = Object.freeze(['company_excluded', 'posting_excluded', 'outside_countries']);
 export const REUSE_CODES = Object.freeze(['already_submitted', 'user_declined']);
 export const HOLD_CODES = Object.freeze(['user_review', 'browser_review', 'identity_conflict', 'provenance_unknown', 'system_failure', 'quota_full', 'quota_reconciliation', 'quota_unclear', 'unavailable', 'already_applied_mail', 'missing_fact']);

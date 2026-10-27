@@ -60,7 +60,10 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
       const protectedApp = application && (application.status === 'prepared' || application.skip_owner === 'user');
       const renew = old && old.state !== 'leased' && old.hold_owner !== 'user' && !protectedApp
         && (changed || (!posting.listed && record.listed !== false) || reappeared);
-      if (!old || (old.code !== 'identity_conflict' && (result.kind === 'reuse' || renew))) {
+      // Keep unlisted observations in conservation, without creating work for a
+      // posting that has never had a review. A later listing can open it normally.
+      const canOpen = record.listed !== false || result.kind !== 'review';
+      if ((!old && canOpen) || (old && old.code !== 'identity_conflict' && (result.kind === 'reuse' || renew))) {
         const state = result.kind === 'review' ? 'due' : 'done';
         const decision = result.kind === 'review' ? null : result.kind === 'reuse' ? 'reused' : 'dropped';
         db.prepare(`INSERT INTO reviews (posting_id,stage,state,decision,code,lane,flags_json,next_due,first_seen,updated_at)

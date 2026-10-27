@@ -8,8 +8,9 @@ import { migration004 } from './migrations/004-task-links.mjs';
 import { migration005 } from './migrations/005-role-queue.mjs';
 import { migration006 } from './migrations/006-funnel.mjs';
 import { migration007 } from './migrations/007-posting-merge-index.mjs';
+import { migration008 } from './migrations/008-out-of-direction.mjs';
 
-export const schemaMigrations = [migration001, migration002, migration003, migration004, migration005, migration006, migration007];
+export const schemaMigrations = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008];
 
 export function openDatabase(file) {
   const resolved = file === ':memory:' ? file : path.resolve(file);
