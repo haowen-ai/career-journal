@@ -273,3 +273,31 @@ test('[B] the judge pool refills free slots instead of waiting for the slowest i
   assert.ok(elapsed < 900, `pool finished in ${elapsed} ms`);
   assert.ok(maxInFlight <= 4, `never more than concurrency in flight (${maxInFlight})`);
 });
+
+// ------------------------------------------------------------------ T6: the pool stays cheap at real backlog sizes
+// Live drain with the first pool (2026-10-27): 25 minutes at 90 % CPU judged 7 postings. A sample showed nearly all
+// time in single-row SELECTs: the scheduler re-read every due candidate (about 26,000 rows, mostly exploration lanes)
+// one query at a time on each scheduling step. Ruling: scheduling work per started item is bounded by a small
+// constant plus one due-list read per refill cycle, independent of the exploration backlog size.
+
+test('[B] with a 20,000-item exploration backlog the pool judges its budget quickly (trial T6)', { timeout: 60000 }, async () => {
+  const { runReview } = await workerModule();
+  const db = freshDb();
+  const q = queue();
+  for (let i = 0; i < 300; i += 1) q.add(db, { id: `p-live-${i}`, text: SNAPSHOTS.eligible });
+  const insertBulk = db.prepare(`INSERT INTO postings (id, company, title, canonical_url, first_seen, last_seen, listed, availability, created_at, updated_at)
+    VALUES (?, 'Example Corp', 'Senior Engineer', ?, ?, ?, 1, 'open', ?, ?)`);
+  db.exec('BEGIN');
+  for (let i = 0; i < 20000; i += 1) {
+    const id = `p-bulk-${i}`;
+    insertBulk.run(id, `https://bulk${i % 500}.example.test/jobs/${i}`, T0, T0, T0, T0);
+    insertReview(db, { postingId: id, stage: 'fetch', firstSeen: T0, nextDue: T0, lane: 'no_student_signal' });
+  }
+  db.exec('COMMIT');
+  const started = Date.now();
+  await runReview(runOptions(db, { budget: 40, concurrency: 8, pages: q.pages, answers: () => JUDGMENTS.eligible }));
+  const elapsed = Date.now() - started;
+  const judged = db.prepare("SELECT COUNT(*) n FROM reviews WHERE posting_id LIKE 'p-live-%' AND state = 'done'").get().n;
+  assert.ok(judged >= 20, `judged ${judged} live postings`);
+  assert.ok(elapsed < 15000, `finished in ${elapsed} ms`);
+});
