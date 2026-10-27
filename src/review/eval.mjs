@@ -10,7 +10,7 @@ import { segmentSections } from './clauses.mjs';
 import { decide } from './decide.mjs';
 import { redact } from '../runtime/redact.mjs';
 
-const PROFILE_FILES = ['facts.json','review-policy.json','screening-policy.json','review-provenance.json','screening-rules.md','fit-rules.md','resume.txt'];
+const PROFILE_FILES = ['facts.json','review-policy.json','screening-policy.json','review-provenance.json','screening-rules.md','fit-rules.md','resume.txt','profile.json'];
 async function readBounded(file) {
   if ((await stat(file)).size > 2_000_000) throw new Error(`Evaluation file too_large: ${path.basename(file)}`);
   return readFile(file, 'utf8');
@@ -50,7 +50,7 @@ export async function runEval({ setDir, judges, concurrency = 3 }) {
           const content = await readBounded(path.join(directory, name));
           fixtures[`${relative}/${name}`] = content;
           await writeFile(path.join(destination, name), content, { mode: 0o600 });
-        } catch (error) { if (!(name === 'resume.txt' && error.code === 'ENOENT')) throw error; }
+        } catch (error) { if (!(['resume.txt','profile.json'].includes(name) && error.code === 'ENOENT')) throw error; }
       }
       const inputs = await loadReviewInputs(home);
       const adapters = judges ?? createJudgeAdapters(inputs.policy);
@@ -88,7 +88,8 @@ export async function runEval({ setDir, judges, concurrency = 3 }) {
             attempts.push({ tier, status: result.status, error: result.error ?? null });
             if (tier === 'escalation') { escalated = true; metrics.escalations += 1; }
             if (result.status !== 'ok') { verdict = { decision: 'unclear', code: `judge_${result.status}` }; adapterError = true; break; }
-            verdict = decide({ snapshotText: snapshot.text, judgment: result.output, facts: profile.inputs.facts, policy: profile.inputs.policy, tier });
+            verdict = decide({ snapshotText: snapshot.text, judgment: result.output, facts: profile.inputs.facts, policy: profile.inputs.policy, tier,
+              firstSeen: item.posting.firstSeen, jobType: profile.inputs.profile?.search?.jobType });
             if (tier === 'primary' && verdict.escalate) continue;
             break;
           }

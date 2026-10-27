@@ -25,19 +25,20 @@ async function readInput(file, { json = false, optional = false } = {}) {
 export async function loadReviewInputs(home) {
   const root = path.resolve(home, '.career-journal');
   const profile = path.join(root, 'profile');
-  const [facts, policy, screeningPolicy, provenance, screening, fit] = await Promise.all([
+  const [facts, policy, screeningPolicy, provenance, screening, fit, searchProfile] = await Promise.all([
     readInput(path.join(profile, 'facts.json'), { json: true }),
     readInput(path.join(profile, 'review-policy.json'), { json: true }),
     readInput(path.join(profile, 'screening-policy.json'), { json: true }),
     readInput(path.join(profile, 'review-provenance.json'), { json: true }),
     readInput(path.join(profile, 'screening-rules.md')),
     readInput(path.join(profile, 'fit-rules.md')),
+    readInput(path.join(profile, 'profile.json'), { json: true, optional: true }),
   ]);
   const [text, evalRecord] = await Promise.all([
     readInput(path.resolve(root, policy.resumeTextPath ?? 'profile/resume.txt'), { optional: true }),
     readInput(path.join(root, 'runs', 'eval-latest.json'), { json: true, optional: true }),
   ]);
-  return { facts, policy, screeningPolicy, provenance, rules: { screening, fit }, resume: text === null ? null : { text, hash: dependencyHash(text) }, evalRecord };
+  return { facts, policy, screeningPolicy, provenance, profile: searchProfile, rules: { screening, fit }, resume: text === null ? null : { text, hash: dependencyHash(text) }, evalRecord };
 }
 
 export function judgeDependencies({ inputs, adapter, skeletonVersion, schemaHash, decideVersion }) {
@@ -45,7 +46,7 @@ export function judgeDependencies({ inputs, adapter, skeletonVersion, schemaHash
   const parts = {
     facts: dependencyHash(inputs.facts),
     rules: dependencyHash(inputs.rules),
-    policy: dependencyHash({ policy: inputs.policy, screeningPolicy: inputs.screeningPolicy, provenance: inputs.provenance }),
+    policy: dependencyHash({ policy: inputs.policy, screeningPolicy: inputs.screeningPolicy, provenance: inputs.provenance, jobType: inputs.profile?.search?.jobType ?? null }),
     resume: dependencyHash(inputs.resume?.text ?? null),
     schema: schemaHash,
     prompt: dependencyHash(skeletonVersion),

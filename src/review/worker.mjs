@@ -24,9 +24,9 @@ export { scheduleRefresh } from './freshness.mjs';
 const DAY = 86400000;
 const factsMap = (facts) => Object.fromEntries(facts.map((fact) => [fact.id, dependencyHash(fact)]));
 function inputState(inputs) {
-  return { facts: factsMap(inputs.facts), rules: dependencyHash(inputs.rules), policy: dependencyHash(inputs.policy),
+  return { facts: factsMap(inputs.facts), rules: dependencyHash(inputs.rules), policy: dependencyHash({ policy: inputs.policy, jobType: inputs.profile?.search?.jobType ?? null }),
     screening: dependencyHash(inputs.screeningPolicy), provenance: dependencyHash(inputs.provenance), resume: dependencyHash(inputs.resume?.text ?? null),
-    windowsAreas: dependencyHash({ windows: inputs.policy.windows, areas: inputs.policy.areas }),
+    windowsAreas: dependencyHash({ windows: inputs.policy.windows, areas: inputs.policy.areas, jobType: inputs.profile?.search?.jobType ?? null }),
     code: dependencyHash(Object.fromEntries(['prompt.mjs','schema/judgment.schema.json','decide.mjs','clauses.mjs','deadline.mjs'].map((file) => [file, readFileSync(new URL(file, import.meta.url), 'utf8')]))) };
 }
 
@@ -291,7 +291,8 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
           break;
         }
       }
-      final = decide({ snapshotText: snapshot.text, judgment: output, facts: stageInputs.facts, policy: stageInputs.policy, tier, firstSeen: posting.first_seen });
+      final = decide({ snapshotText: snapshot.text, judgment: output, facts: stageInputs.facts, policy: stageInputs.policy, tier,
+        firstSeen: posting.first_seen, jobType: stageInputs.profile?.search?.jobType });
       if (tier === 'primary' && final.escalate) { final = null; continue; }
       break;
     }

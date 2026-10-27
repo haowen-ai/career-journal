@@ -3,11 +3,11 @@ const BULLET = /^\s*(?:[•*+-]|\d+[.)])\s+/;
 function headingKind(line) {
   const heading = line.trim().replace(/^#{1,6}\s+/, '').replace(/^\*\*(.*?)\*\*$/, '$1')
     .replace(/^[^\p{L}\p{N}]+/u, '').replace(/:\s*$/, '').trim();
-  const conversational = /^(?:what (?:you (?:will bring|bring)|we(?: require|(?: are|['’]re)? looking for))|student qualities we['’]re seeking)\b/i.test(heading);
+  const conversational = /^(?:what (?:you (?:will bring|bring|need to succeed)|we(?: require|(?: are|['’]re)? looking for))|student qualities we['’]re seeking)\b/i.test(heading);
   if ((conversational || /qualifications|requirements|skills|experience/i.test(heading)) && /\b(?:preferred|desired|nice.to.have|bonus)\b/i.test(heading)
     || /^(?:preferred|desired|nice.to.have|bonus)$/i.test(heading)) return 'preferred';
   if (conversational) return 'required';
-  if (/^(?:(?:required|minimum|basic|essential|mandatory)\s+(?:qualifications|requirements|skills|experience)|requirements|required qualifications|qualifications)$/i.test(heading)) return 'required';
+  if (/^(?:(?:required|minimum|basic|essential|mandatory)\s+(?:qualifications|requirements|skills|experience|knowledge,\s*skills and experience)|requirements|required qualifications|qualifications)$/i.test(heading)) return 'required';
   if (/^(?:eligibility|eligibility requirements|who (?:can|may) apply)$/i.test(heading)) return 'eligibility';
   if (/^(?:responsibilities|(?:your|key) responsibilities|what you(?:'|’)ll do|duties)$/i.test(heading)) return 'responsibilities';
   if (/^(?:about (?:the role|us|the team)|benefits|compensation|equal opportunity|how to apply)$/i.test(heading)) return 'other';
@@ -108,7 +108,7 @@ export function validateCriterion(text, criterion, facts) {
   const section = segmentSections(text).find((item) => item.start <= found.start && found.start < item.end)?.kind ?? 'unknown';
   const clause = clauseAt(text, found.start);
   const result = { ...base, valid: true, reason: null, section, clause };
-  if (section === 'preferred' || /\b(?:preferred|optional|nice.to.have|bonus(?: points)?|not required)\b/i.test(clause.text)) return { ...result, reason: 'non_mandatory' };
+  if (section === 'preferred' || /\b(?:preferred|optional|nice.to.have|bonus(?: points)?|not required|a plus)\b/i.test(clause.text)) return { ...result, reason: 'non_mandatory' };
   if (criterion.status !== 'conflicts') return result;
   const body = normalizeQuote(clause.text.replace(BULLET, '')).trim();
   const quote = normalizeQuote(criterion.quote.replace(BULLET, '')).trim();

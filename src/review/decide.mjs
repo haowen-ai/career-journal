@@ -1,11 +1,13 @@
 import { findQuote, normalizeQuote, validateCriterion } from './clauses.mjs';
 import { quotedClock } from './deadline.mjs';
 
-export const DECIDE_VERSION = 'structured-decisions-2';
+export const DECIDE_VERSION = 'structured-decisions-3';
 const FIT_LEVELS = ['low', 'medium', 'high'];
 const emptyDeadline = () => ({ kind: 'none', date: null, time: null, tz: null, precision: null, quote: null });
 const clean = (value) => normalizeQuote(value ?? '').toLowerCase();
 const seasons = (value) => [...new Set((clean(value).match(/\b(?:winter|spring|summer|fall|autumn)\b/g) ?? []).map((season) => season === 'autumn' ? 'fall' : season))];
+const US_STATE_TERRITORY_CODES = new Set('AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC AS GU MP PR VI UM'.split(' '));
+const cityPart = (place) => clean(place).split(',')[0].trim();
 
 function validatedQuote(text, value) { return findQuote(text, value) ? value : null; }
 
@@ -35,8 +37,12 @@ function dateEvidence(quote, value) {
   return { start: `${year}-${String(month).padStart(2, '0')}-01`, end: new Date(Date.UTC(Number(year), month, 0)).toISOString().slice(0, 10) };
 }
 
-function quoteAgreesWithTerm(term, quote) {
-  return seasons(quote).every((season) => seasons(term.label).includes(season))
+function quoteAgreesWithTerm(term, quote, own = false) {
+  const named = seasons(quote);
+  const labeled = seasons(term.label);
+  // A shared term quote may list several alternatives. It only needs to
+  // include this label's season; office/scope quotes must still agree with it.
+  return (own ? !named.length || labeled.every((season) => named.includes(season)) : named.every((season) => labeled.includes(season)))
     && (clean(quote).match(/\b\d{4}\b/g) ?? []).every((year) => Number(year) === term.year);
 }
 
@@ -46,28 +52,33 @@ function termPlacesAgree(quote, offices) {
   const city = String.raw`\p{Lu}[\p{L}\p{M}.'-]*(?:\s+\p{Lu}[\p{L}\p{M}.'-]*)*`;
   const value = normalizeQuote(quote ?? '');
   const places = [
-    ...[...value.matchAll(new RegExp(`${city},\\s*[A-Z]{2}\\b`, 'gu'))].map((match) => match[0]),
-    ...[...value.matchAll(new RegExp(`\\b(?:[Bb]ased|[Ll]ocated) in (${city}(?:,\\s*[A-Z]{2}\\b)?)`, 'gu'))].map((match) => match[1]),
+    ...[...value.matchAll(new RegExp(`${city},\\s*([A-Z]{2})\\b`, 'gu'))].filter((match) => US_STATE_TERRITORY_CODES.has(match[1])).map((match) => match[0]),
+    ...[...value.matchAll(new RegExp(`\\b(?:[Bb]ased|[Ll]ocated) in (${city})(?:,\\s*([A-Z]{2})\\b)?`, 'gu'))].filter((match) => !match[2] || US_STATE_TERRITORY_CODES.has(match[2])).map((match) => match[1]),
   ];
   return places.every((place) => offices.some((office) => {
-    const expected = place.includes(',') ? clean(office.place) : clean(office.place).split(',')[0].trim();
-    return expected && (clean(place) === expected || clean(place).endsWith(` ${expected}`));
+    const expected = cityPart(office.place);
+    const actual = cityPart(place);
+    return expected && (actual === expected || actual.endsWith(` ${expected}`));
   }));
 }
 
 function termEvidence(text, term, inferred = false) {
   if (!term || !findQuote(text, term.quote)) return false;
   const quote = clean(term.quote);
-  if (!term.label || !quoteAgreesWithTerm(term, quote)) return false;
-  if (term.year !== undefined && term.year !== null && (!Number.isInteger(term.year) || !inferred && !new RegExp(`\\b${term.year}\\b`).test(quote))) return false;
+  if (!term.label || !quoteAgreesWithTerm(term, quote, true)) return false;
+  if (!Number.isInteger(term.year) || !inferred && !new RegExp(`\\b${term.year}\\b`).test(quote)) return false;
   if (term.start && !dateValid(term.start)) return false;
   if (term.start && !dateEvidence(quote, term.start)) return false;
   return true;
 }
 
-function matchesWindow(term, window) {
+function matchesTermKind(term, kinds) {
   const labels = [term.kind, term.label].filter(Boolean).map(clean);
-  if (!window.termKinds?.some((kind) => labels.some((label) => label === clean(kind) || label.split(/\s+/).includes(clean(kind))))) return false;
+  return kinds?.some((kind) => labels.some((label) => label === clean(kind) || label.split(/\s+/).includes(clean(kind))));
+}
+
+function matchesWindow(term, window) {
+  if (!matchesTermKind(term, window.termKinds)) return false;
   if (window.year !== undefined && window.year !== null && Number(term.year) !== Number(window.year)) return false;
   if (window.startAfter || window.startBefore) {
     const range = dateEvidence(clean(term.quote), term.start);
@@ -82,11 +93,19 @@ function remoteEvidence(text, remote) {
   return Boolean(remote && /^(?:us|state:[A-Z]{2}|none|non_us)$/.test(remote.scope) && findQuote(text, remote.quote));
 }
 
-function inferTerm(term, firstSeen) {
-  if (!term || term.year != null || /\b\d{4}\b/.test(term.quote ?? '') || !/^(?:winter|spring|summer|fall|autumn)$/i.test(term.label ?? '')) return { term, inferred: false };
+function inferTerm(text, term, firstSeen, jobType) {
+  if (!term) return { term, inferred: false };
   const observed = new Date(firstSeen);
   if (!Number.isFinite(observed.getTime()) || observed.getUTCMonth() < 7) return { term, inferred: false };
-  return { term: { ...term, year: observed.getUTCFullYear() + 1 }, inferred: true };
+  const year = observed.getUTCFullYear() + 1;
+  if (term.year == null && !/\b\d{4}\b/.test(term.quote ?? '') && /^(?:winter|spring|summer|fall|autumn)$/i.test(term.label ?? '')) {
+    return { term: { ...term, year }, inferred: true };
+  }
+  if (jobType === 'internship' && term.year === year && !seasons(text).length
+    && !seasons(term.label).length && !term.kind && new RegExp(`\\b${year}\\b`).test(term.quote ?? '')) {
+    return { term: { ...term, label: 'summer', kind: 'summer' }, inferred: true };
+  }
+  return { term, inferred: false };
 }
 
 function tiedToTerm(text, term, quote, place) {
@@ -107,40 +126,47 @@ function tiedToTerm(text, term, quote, place) {
     && findQuote(segment, term.quote) && (place ? clean(segment).includes(clean(place)) : findQuote(segment, quote)));
 }
 
-function readAlternative(text, alternative, policy, firstSeen) {
+function readAlternative(text, alternative, policy, firstSeen, jobType) {
   let contradictory = false;
   let advisory = false;
-  const { term, inferred } = inferTerm(alternative.term, firstSeen);
+  const { term, inferred } = inferTerm(text, alternative.term, firstSeen, jobType);
   const quotedOffices = alternative.offices ?? [];
-  if (term && ([term.quote, ...quotedOffices.map((office) => office.quote), alternative.remote?.quote]
+  const remoteInput = alternative.remote?.scope === 'unknown' ? null : alternative.remote;
+  if (term && (!quoteAgreesWithTerm(term, term.quote, true) || [...quotedOffices.map((office) => office.quote), remoteInput?.quote]
     .some((quote) => !quoteAgreesWithTerm(term, quote)) || !termPlacesAgree(term.quote, quotedOffices))) contradictory = true;
   const offices = [];
   const keys = new Set([...(policy.areas?.keys ?? []), 'outside', 'unknown']);
   for (const office of quotedOffices) {
-    if (!findQuote(text, office.quote) || !office.place || !clean(office.quote).includes(clean(office.place)) || !keys.has(office.area)) { contradictory = true; continue; }
+    if (!findQuote(text, office.quote) || !cityPart(office.place) || !clean(office.quote).includes(cityPart(office.place)) || !keys.has(office.area)) { contradictory = true; continue; }
     let area = office.area;
-    const state = /,\s*([A-Z]{2})\b/.exec(office.place)?.[1];
+    const code = /,\s*([A-Z]{2})\b/.exec(office.place)?.[1];
+    const state = US_STATE_TERRITORY_CODES.has(code) ? code : null;
     const allowedStates = policy.areas?.allowedStates ?? [];
     if (state && allowedStates.length && !allowedStates.includes(state)) area = 'outside';
     if (state && allowedStates.includes(state) && area === 'outside') contradictory = true;
     if (term && !tiedToTerm(text, term, office.quote, office.place)) advisory = true;
     offices.push({ place: office.place, area, quote: office.quote });
   }
-  const remoteInput = alternative.remote;
   const remote = remoteEvidence(text, remoteInput)
     ? { scope: remoteInput.scope, quote: remoteInput.quote } : { scope: null, quote: null };
   if (remoteInput?.quote && !remote.quote) contradictory = true;
   if (term && remote.scope && remote.scope !== 'none' && !tiedToTerm(text, term, remote.quote)) advisory = true;
   const termOk = termEvidence(text, term, inferred);
   if (alternative.term?.quote && !termOk) contradictory = true;
-  const allowed = termOk && !contradictory ? (policy.windows ?? []).flatMap((window) => {
-    if (!matchesWindow(term, window)) return [];
+  const windows = termOk ? (policy.windows ?? []).filter((window) => matchesWindow(term, window)) : [];
+  const allowed = termOk && !contradictory ? windows.flatMap((window) => {
     const allowedOffices = offices.filter((office) => !['outside', 'unknown'].includes(office.area) && window.areas?.includes(office.area));
     const allowedRemote = window.areas?.includes('us_remote') && (remote.scope === 'us'
       || remote.scope?.startsWith('state:') && policy.areas?.homeStates?.includes(remote.scope.slice(6)));
     return allowedOffices.length || allowedRemote ? [{ term, offices: allowedOffices, remote: allowedRemote ? remote : { scope: 'none', quote: null } }] : [];
   }) : [];
-  return { term: termOk ? term : null, offices, remote, acceptable: allowed.length > 0, allowed, contradictory, advisory, inferred: termOk && inferred };
+  const knownKind = termOk && matchesTermKind(term, ['winter', 'spring', 'summer', 'fall', 'autumn', 'semester', 'quarter', 'co-op', ...(policy.windows ?? []).flatMap((window) => window.termKinds ?? [])]);
+  const datesKnown = termOk && (policy.windows ?? []).every((window) => !matchesTermKind(term, window.termKinds)
+    || window.year != null && term.year !== Number(window.year) || !(window.startAfter || window.startBefore) || dateEvidence(clean(term.quote), term.start));
+  const validated = Boolean(knownKind && datesKnown && !contradictory && offices.every((office) => office.area !== 'unknown')
+    && (offices.length || remote.scope && remote.scope !== 'none'));
+  return { term: termOk ? term : null, offices, remote, acceptable: allowed.length > 0, allowed, contradictory, advisory,
+    validated, outside: windows.length ? 'outside_area' : 'outside_window', inferred: termOk && !contradictory && inferred };
 }
 
 function normalizeDetails(text, judgment, alternatives) {
@@ -180,10 +206,10 @@ function fitFor(judgment, policy, functionValue) {
   return { level, note: notes.join('. ') };
 }
 
-export function decide({ snapshotText, judgment, facts, policy, tier, firstSeen }) {
+export function decide({ snapshotText, judgment, facts, policy, tier, firstSeen, jobType }) {
   const text = String(snapshotText ?? '');
   const judged = judgment && typeof judgment === 'object' ? judgment : {};
-  const alternatives = (judged.alternatives ?? []).map((alternative) => readAlternative(text, alternative, policy, firstSeen));
+  const alternatives = (judged.alternatives ?? []).map((alternative) => readAlternative(text, alternative, policy, firstSeen, jobType));
   const details = normalizeDetails(text, judged, alternatives);
   const functionValue = validatedQuote(text, judged.function?.quote) ? judged.function.value : null;
   const criteria = (judged.criteria ?? []).map((criterion) => ({ criterion, validation: validateCriterion(text, criterion, facts) }));
@@ -196,18 +222,30 @@ export function decide({ snapshotText, judgment, facts, policy, tier, firstSeen 
   const unclear = (code, question) => ({ ...base, decision: 'unclear', code, escalate: tier === 'primary', nextAction: 'user_review', question });
   const rejected = (code, question) => tier === 'primary' ? unclear(code, question) : { ...base, decision: 'not_eligible', code };
   const termOrArea = () => unclear('term_or_area', 'Which stated work window and office or remote scope match your policy?');
-  if (alternatives.some((alternative) => alternative.contradictory)) return termOrArea();
-  const conflicts = criteria.filter(({ criterion }) => criterion.status === 'conflicts');
-  const unresolved = criteria.find(({ criterion, validation }) => (criterion.status === 'conflicts' || criterion.status === 'unclear') && validation.reason !== 'non_mandatory' && !validation.confirmedConflict);
+  const confirmed = criteria.find(({ criterion, validation }) => criterion.status === 'conflicts' && validation.confirmedConflict);
+  if (confirmed) return rejected(confirmed.criterion.key, confirmed.validation.clause.text);
+  const advisoryCriterion = ({ criterion, validation }) => {
+    if (criterion.status !== 'unclear' || !validation.valid || !criterion.fact_ids?.length) return false;
+    const cited = criterion.fact_ids.map((id) => facts.find((fact) => fact.id === id));
+    return cited.every((fact) => fact && /^(?:availability|.+-availability)$/.test(fact.id)) || cited.every((fact) => fact?.polarity === 'has');
+  };
+  const unresolved = criteria.find((item) => (item.criterion.status === 'conflicts' || item.criterion.status === 'unclear')
+    && item.validation.reason !== 'non_mandatory' && !advisoryCriterion(item));
   if (unresolved) {
     const { criterion, validation } = unresolved;
     return unclear(validation.reason === 'missing_fact' || criterion.status === 'unclear' ? 'missing_fact' : 'requirement_unclear', validation.clause?.text ?? criterion.quote ?? 'Please clarify the mandatory requirement.');
   }
-  const confirmed = conflicts.find(({ validation }) => validation.confirmedConflict);
-  if (confirmed) return rejected(confirmed.criterion.key, confirmed.validation.clause.text);
   if (policy.functions?.outOfScope?.includes(functionValue)) return rejected('function_out_of_scope', `Is ${functionValue} work in scope?`);
   if (policy.functions?.userCall?.includes(functionValue)) return unclear('user_review', `Would you like to consider this ${functionValue} role?`);
-  if (!alternatives.some((alternative) => alternative.acceptable)
-    || tier === 'primary' && alternatives.some((alternative) => alternative.advisory)) return termOrArea();
+  if (!alternatives.some((alternative) => alternative.acceptable)) {
+    if (!alternatives.length || !alternatives.every((alternative) => alternative.validated)) return termOrArea();
+    const code = alternatives.every((alternative) => alternative.outside === 'outside_window') ? 'outside_window' : 'outside_area';
+    // Retain the validated model alternatives, including all supporting quotes,
+    // even though none can be delivered as an allowed location alternative.
+    base.evidence.push(...alternatives.map(({ term, offices, remote }) => ({ confirmed: true, code, term, offices, remote,
+      factIds: [], quote: term.quote, quotes: [term.quote, ...offices.map((office) => office.quote), remote.quote].filter(Boolean) })));
+    return rejected(code, 'The quoted alternatives all fall outside your policy.');
+  }
+  if (tier === 'primary' && alternatives.some((alternative) => alternative.acceptable && alternative.advisory)) return termOrArea();
   return { ...base, decision: 'eligible' };
 }
