@@ -31,7 +31,8 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
       const record = { ...raw, source: raw?.source ?? source, partition };
       const invalid = record.invalid || (!record.title?.trim() ? 'missing title' : !canonicalUrl(record.url) ? 'missing http(s) URL' : null);
       if (invalid) { quarantine(db, record, invalid, now); counts.quarantined += 1; continue; }
-      const resolved = resolvePosting(db, record, { now, companyAliases: policy.companyAliases, candidates });
+      const classification = classifyRole(record, { policy, profile });
+      const resolved = resolvePosting(db, record, { now, companyAliases: policy.companyAliases, candidates, classification });
       const id = resolved.postingId;
       if (resolved.created) counts.newPostings += 1;
       const posting = db.prepare('SELECT * FROM postings WHERE id=?').get(id);

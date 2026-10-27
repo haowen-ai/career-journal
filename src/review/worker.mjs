@@ -216,7 +216,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         seen.add(id); return;
       }
       db.prepare("UPDATE postings SET availability='open',updated_at=? WHERE id=?").run(now, id);
-      const reconciliation = reconcileAliases(db, id, aliasesFor({ company: posting.company, url: result.finalUrl ?? url, requisitionId: result.requisitionId }, { companyAliases: current.screeningPolicy.companyAliases }), { now, fence });
+      const reconciliation = reconcileAliases(db, id, aliasesFor({ company: posting.company, url: result.finalUrl ?? url, requisitionId: result.requisitionId }, { companyAliases: current.screeningPolicy.companyAliases }), { now, fence, companyAliases: current.screeningPolicy.companyAliases });
       if (reconciliation.action !== 'added') { seen.add(id); return; }
       const hash = dependencyHash({ text: result.text, title: result.title, requisitionId: result.requisitionId, locations: result.locations, jsonLd: result.jsonLd });
       db.prepare(`INSERT INTO snapshots(id,posting_id,content_hash,fetched_at,final_url,http_status,method,identity_ok,fields_json,sections_json,text)
