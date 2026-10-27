@@ -62,13 +62,27 @@ function termPlacesAgree(quote, offices) {
   }));
 }
 
+function titleYears(text) {
+  const title = text.match(/^[ \t]*TITLE:[ \t]*(.+)$/im)?.[1]
+    ?? text.match(/^[ \t]*#{1,6}[ \t]+(.+)$/m)?.[1]
+    ?? text.split('\n').find((line) => line.trim() && !/^[ \t]*URL:/i.test(line)) ?? '';
+  return (title.match(/\b\d{4}\b/g) ?? []).map(Number);
+}
+
 function termEvidence(text, term, inferred = false) {
   if (!term || !findQuote(text, term.quote)) return false;
   const quote = clean(term.quote);
   if (!term.label || !quoteAgreesWithTerm(term, quote, true)) return false;
-  if (!Number.isInteger(term.year) || !inferred && !new RegExp(`\\b${term.year}\\b`).test(quote)) return false;
   if (term.start && !dateValid(term.start)) return false;
   if (term.start && !dateEvidence(quote, term.start)) return false;
+  const years = titleYears(text);
+  // Missing year evidence is incomplete, not contradictory.
+  if (term.year == null && !/\b\d{4}\b/.test(quote) && !years.length) return null;
+  const labeled = seasons(term.label);
+  const named = seasons(quote);
+  const fromTitle = years.length > 0 && years.every((year) => year === term.year)
+    && labeled.length > 0 && labeled.every((season) => named.includes(season));
+  if (!Number.isInteger(term.year) || !inferred && !new RegExp(`\\b${term.year}\\b`).test(quote) && !fromTitle) return false;
   return true;
 }
 
@@ -95,10 +109,15 @@ function remoteEvidence(text, remote) {
 
 function inferTerm(text, term, firstSeen, jobType) {
   if (!term) return { term, inferred: false };
+  const yearUnknown = !/\b\d{4}\b/.test(term.quote ?? '') && !titleYears(text).length;
+  // An unsupported model year cannot bypass the first-seen inference window.
+  if (yearUnknown && term.year != null) term = { ...term, year: null };
   const observed = new Date(firstSeen);
   if (!Number.isFinite(observed.getTime()) || observed.getUTCMonth() < 7) return { term, inferred: false };
   const year = observed.getUTCFullYear() + 1;
-  if (term.year == null && !/\b\d{4}\b/.test(term.quote ?? '') && /^(?:winter|spring|summer|fall|autumn)$/i.test(term.label ?? '')) {
+  const labeled = seasons(term.label);
+  const named = labeled.length ? labeled : seasons(term.kind);
+  if (term.year == null && yearUnknown && named.length === 1) {
     return { term: { ...term, year }, inferred: true };
   }
   if (jobType === 'internship' && term.year === year && !seasons(text).length
@@ -152,7 +171,7 @@ function readAlternative(text, alternative, policy, firstSeen, jobType) {
   if (remoteInput?.quote && !remote.quote) contradictory = true;
   if (term && remote.scope && remote.scope !== 'none' && !tiedToTerm(text, term, remote.quote)) advisory = true;
   const termOk = termEvidence(text, term, inferred);
-  if (alternative.term?.quote && !termOk) contradictory = true;
+  if (alternative.term?.quote && termOk === false) contradictory = true;
   const windows = termOk ? (policy.windows ?? []).filter((window) => matchesWindow(term, window)) : [];
   const allowed = termOk && !contradictory ? windows.flatMap((window) => {
     const allowedOffices = offices.filter((office) => !['outside', 'unknown'].includes(office.area) && window.areas?.includes(office.area));

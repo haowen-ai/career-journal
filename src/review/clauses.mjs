@@ -108,7 +108,11 @@ export function validateCriterion(text, criterion, facts) {
   const section = segmentSections(text).find((item) => item.start <= found.start && found.start < item.end)?.kind ?? 'unknown';
   const clause = clauseAt(text, found.start);
   const result = { ...base, valid: true, reason: null, section, clause };
-  if (section === 'preferred' || /\b(?:preferred|optional|nice.to.have|bonus(?: points)?|not required|a plus)\b/i.test(clause.text)) return { ...result, reason: 'non_mandatory' };
+  // Parentheticals and attributive wording such as "Preferred Graduation Date"
+  // do not make the main requirement optional. Check its own predicate instead.
+  let main = clause.text.replace(BULLET, '');
+  while (/\([^()]*\)/.test(main)) main = main.replace(/\([^()]*\)/g, '');
+  if (section === 'preferred' || /\b(?:preferred|optional|nice.to.have|bonus(?: points)?|not required|a plus)\b\s*[.!?]?\s*$/i.test(main)) return { ...result, reason: 'non_mandatory' };
   if (criterion.status !== 'conflicts') return result;
   const body = normalizeQuote(clause.text.replace(BULLET, '')).trim();
   const quote = normalizeQuote(criterion.quote.replace(BULLET, '')).trim();
