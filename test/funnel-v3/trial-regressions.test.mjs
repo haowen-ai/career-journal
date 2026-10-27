@@ -209,3 +209,35 @@ test('[B] the report and the receipt group awaiting-user holds by missing fact (
     }
   }
 });
+
+// ------------------------------------------------------------------ T4: parallel fetching across hosts
+// Live drain (2026-10-27): 4,001 of 4,002 due items sat at stage fetch while only two judges ran; the worker
+// fetched each batch one posting at a time (`for … await fetchItem(row)`). Ruling: a fetch batch runs in parallel,
+// up to `concurrency` requests in flight, still at most one request at a time per host.
+
+test('[B] a fetch batch runs in parallel across hosts and stays one-at-a-time per host (trial T4)', async () => {
+  const { runReview } = await workerModule();
+  const db = freshDb();
+  const pages = {};
+  let inFlight = 0; let maxInFlight = 0; const hostBusy = new Map(); let hostOverlap = false;
+  const text = SNAPSHOTS.eligible;
+  const add = (id, host) => {
+    const url = `https://${host}/jobs/${id}`;
+    insertPosting(db, { id, url, company: 'Example Corp', title: snapshotTitle(text) });
+    insertReview(db, { postingId: id, stage: 'fetch', firstSeen: T0, nextDue: T0, lane: 'new' });
+    pages[url] = async () => {
+      inFlight += 1; maxInFlight = Math.max(maxInFlight, inFlight);
+      if (hostBusy.get(host)) hostOverlap = true;
+      hostBusy.set(host, true);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      hostBusy.set(host, false); inFlight -= 1;
+      return page(url, text);
+    };
+  };
+  for (let i = 0; i < 6; i += 1) add(`p-${i}`, `jobs${i}.example.test`);
+  add('p-same-a', 'shared.example.test'); add('p-same-b', 'shared.example.test');
+  await runReview(runOptions(db, { budget: 40, concurrency: 4, pages }));
+  assert.ok(maxInFlight >= 3, `fetches overlap across hosts (max in flight ${maxInFlight})`);
+  assert.ok(maxInFlight <= 4, `no more than concurrency in flight (max ${maxInFlight})`);
+  assert.equal(hostOverlap, false, 'one request at a time per host');
+});
