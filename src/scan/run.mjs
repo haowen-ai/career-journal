@@ -1,184 +1,110 @@
-import { createHash } from 'node:crypto';
-import { createApplication } from '../commands/application.mjs';
-import { recordEvent } from '../domain/events.mjs';
-import { dedupeRoles } from './dedupe.mjs';
-import { filterRole } from './filter.mjs';
-import { scoreFit } from './fit.mjs';
+import { randomUUID } from 'node:crypto';
+import { backup } from 'node:sqlite';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { openDatabase } from '../storage/database.mjs';
+import { ingestBatch } from '../funnel/ingest.mjs';
+import { buildExpectedManifest, assessSourceHealth } from '../funnel/health.mjs';
 import { fetchAtsBoards } from './sources/ats-boards.mjs';
 import { fetchCareerOpsRoles } from './sources/careerops.mjs';
-import { fetchSimplify } from './sources/simplify.mjs';
+import { fetchSimplify, simplifyUrls } from './sources/simplify.mjs';
+import { redact } from '../runtime/redact.mjs';
 
-const FIT_ORDER = Object.freeze({ high: 0, medium: 1, low: 2 });
-
-function rankOrLast(value) {
-  return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+// All configured partitions are collected in order; each starts only before the deadline.
+export async function collectRoles(profile, { fetchImpl, careerOpsConfig, careerOpsDependencies, timeoutMs, deadlineAt, clock = Date.now } = {}) {
+  const parts = [];
+  const beforeDeadline = () => !deadlineAt || clock() < Date.parse(deadlineAt);
+  const options = () => ({ timeoutMs: deadlineAt ? Math.max(1, Math.min(timeoutMs ?? 30_000, Date.parse(deadlineAt) - clock())) : timeoutMs });
+  for (const entry of profile.sources.atsBoards ?? []) {
+    if (!beforeDeadline()) break;
+    parts.push(await fetchAtsBoards([entry], fetchImpl, options()));
+  }
+  if (beforeDeadline()) {
+    const config = { ...careerOpsConfig };
+    if (deadlineAt) config.scanTimeoutMs = Math.max(1, Math.min(config.scanTimeoutMs ?? 1_200_000, Date.parse(deadlineAt) - clock()));
+    parts.push(await fetchCareerOpsRoles(profile.sources.careerOps, config, careerOpsDependencies));
+  }
+  const settings = profile.sources.simplify;
+  const urls = simplifyUrls(settings);
+  if (!settings?.enabled || !urls.length) {
+    if (beforeDeadline()) parts.push(await fetchSimplify(settings, fetchImpl, options()));
+  } else for (const [index, url] of urls.entries()) {
+    if (!beforeDeadline()) break;
+    const part = await fetchSimplify({ enabled: true, url }, fetchImpl, options());
+    const partition = `simplify:${index + 1}`;
+    for (const source of part.sources) source.partition = partition;
+    for (const batch of part.batches) { batch.partition = partition; for (const record of batch.records) record.partition = partition; }
+    parts.push(part);
+  }
+  return { sources: parts.flatMap((part) => part.sources), batches: parts.flatMap((part) => part.batches) };
 }
 
-function shortHash(value) {
-  return createHash('sha256').update(value).digest('hex').slice(0, 32);
-}
-
-// Fetches every configured source. Order matters for duplicates: official ATS
-// boards first, then CareerOps, then the opt-in Simplify list.
-export async function collectRoles(profile, { fetchImpl, careerOpsConfig, careerOpsDependencies, timeoutMs } = {}) {
-  const options = timeoutMs ? { timeoutMs } : {};
-  const parts = [
-    await fetchAtsBoards(profile.sources.atsBoards, fetchImpl, options),
-    await fetchCareerOpsRoles(profile.sources.careerOps, careerOpsConfig, careerOpsDependencies),
-    await fetchSimplify(profile.sources.simplify, fetchImpl, options),
-  ];
-  return { sources: parts.flatMap((part) => part.sources), roles: parts.flatMap((part) => part.roles) };
-}
-
-export function existingApplications(db) {
-  return db.prepare(`SELECT id, company, role, job_url jobUrl, source, source_id sourceId, external_id externalId, status
-    FROM applications ORDER BY created_at, id`).all();
-}
-
-function summarizeRole(role) {
-  return { source: role.source, sourceId: role.sourceId, company: role.company, title: role.title, url: role.url };
-}
-
-function insertLead(db, item, now) {
-  const { role, filter, fit, possibleDuplicate, reviewReason = null } = item;
-  const sourceKey = `${role.source}:${role.sourceId}`;
-  const note = [fit.note, possibleDuplicate ? `Possible duplicate of ${possibleDuplicate.of.id ?? `"${possibleDuplicate.of.title}"`} (title similarity ${possibleDuplicate.similarity}); check before applying` : null]
-    .filter(Boolean).join('. ');
+function startRun(db, runId, parentRunId, now) {
   db.exec('BEGIN IMMEDIATE');
   try {
-    const application = createApplication(db, {
-      company: role.company,
-      role: role.title,
-      externalId: sourceKey,
-      jobUrl: role.url,
-      status: 'lead',
-    }, now);
-    if (application.source) {
-      db.exec('ROLLBACK');
-      return null;
+    const running = db.prepare("SELECT * FROM runs WHERE kind='scan' AND status='running'").all();
+    for (const row of running) {
+      if (Date.parse(now) - Date.parse(row.heartbeat_at) < 600_000) throw Object.assign(new Error('A scan run is already running'), { code: 75 });
+      db.prepare("UPDATE runs SET status='interrupted',finished_at=? WHERE run_id=?").run(now, row.run_id);
     }
-    db.prepare(`UPDATE applications SET source = ?, source_id = ?, location = ?, posted_at = ?, deadline_at = ?,
-      fit = ?, fit_confidence = ?, fit_note = ?, skip_reason = ?, updated_at = ? WHERE id = ?`)
-      .run(role.source, role.sourceId, role.locations.length ? role.locations.join('; ') : null, role.postedAt ?? null,
-        role.deadlineAt ?? null, fit.fit, fit.confidence, note, reviewReason, now, application.id);
-    const traceId = `fit-${shortHash(sourceKey)}`;
-    db.prepare(`INSERT OR IGNORE INTO decision_traces
-      (id, application_id, engine, mode, decision_json, confidence, applied, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(traceId, application.id, fit.engine, 'role-fit', JSON.stringify({
-        fit: fit.fit,
-        confidence: fit.confidence,
-        ruleBased: fit.ruleBased,
-        note: fit.note,
-        jevAttempted: fit.jevAttempted ?? false,
-        jevOutcome: fit.jevOutcome ?? 'not-enabled',
-        ...(fit.shadow ? { shadow: fit.shadow } : {}),
-      }), fit.confidence, fit.applied ? 1 : 0, now);
-    recordEvent(db, {
-      id: `scan-${shortHash(sourceKey)}`,
-      applicationId: application.id,
-      type: 'role_found',
-      occurredAt: role.postedAt ?? null,
-      observedAt: now,
-      recordedAt: now,
-      title: 'Found by role scan',
-      note: [reviewReason, possibleDuplicate?.reason].filter(Boolean).join('. '),
-      source: {
-        kind: 'role-scan',
-        source: role.source,
-        sourceId: role.sourceId,
-        url: role.url,
-        locRank: filter.locRank ?? null,
-        ...(possibleDuplicate?.of?.id ? { possibleDuplicateOf: possibleDuplicate.of.id } : {}),
-      },
-    }, { withinTransaction: true });
+    db.prepare(`INSERT INTO runs (run_id,kind,parent_run_id,owner,started_at,heartbeat_at,status) VALUES (?,'scan',?,'scan',?,?,'running')`).run(runId, parentRunId ?? null, now, now);
     db.exec('COMMIT');
-    return application.id;
-  } catch (error) {
-    if (db.isTransaction) db.exec('ROLLBACK');
-    throw error;
-  }
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
 }
 
-// Fetch → filter → dedupe → score fit → queue as leads. With dryRun nothing is
-// written and no Jev or model call is made; fit comes from the local rule.
-export async function runScan({
-  db,
-  profile,
-  fetchImpl = globalThis.fetch,
-  adapters = {},
-  careerOpsConfig = {},
-  careerOpsDependencies = {},
-  dryRun = false,
-  now = new Date().toISOString(),
-  timeoutMs,
-}) {
-  const { sources, roles } = await collectRoles(profile, { fetchImpl, careerOpsConfig, careerOpsDependencies, timeoutMs });
-  const evaluated = roles.map((role) => ({ role, filter: filterRole(role, profile) }));
-  const dropped = evaluated.filter((item) => !item.filter.keep)
-    .map((item) => ({ ...summarizeRole(item.role), reasons: item.filter.reasons }));
-  // Best-ranked location first, so a near-identical posting keeps its best office.
-  const kept = evaluated.filter((item) => item.filter.keep)
-    .map((item, index) => ({ ...item, index }))
-    .sort((left, right) => rankOrLast(left.filter.locRank) - rankOrLast(right.filter.locRank) || left.index - right.index);
-  const deduped = dedupeRoles(kept.map((item) => item.role), existingApplications(db));
-  const duplicates = [];
-  const candidates = [];
-  deduped.forEach((result, index) => {
-    if (result.status === 'duplicate') {
-      duplicates.push({ ...summarizeRole(result.role), reason: result.reason, duplicateOf: result.of?.id ?? null });
-    } else {
-      candidates.push({ ...kept[index], possibleDuplicate: result.status === 'possible-duplicate' ? result : null });
-    }
-  });
-  const queued = [];
-  const held = [];
-  const reviewRequired = profile.search.exclusions.includes('official-review-required');
-  const reviewReason = reviewRequired ? 'Pending official eligibility, submission history and company quota review' : null;
-  for (const candidate of candidates) {
-    const fit = await scoreFit(candidate.role, profile, adapters, { rulesOnly: dryRun || reviewRequired });
-    const item = { ...candidate, fit, reviewReason };
-    const id = dryRun ? null : insertLead(db, item, now);
-    if (!dryRun && !id) continue;
-    (reviewRequired ? held : queued).push({
-      id,
-      ...summarizeRole(candidate.role),
-      location: candidate.role.locations.join('; ') || null,
-      locRank: candidate.filter.locRank ?? null,
-      postedAt: candidate.role.postedAt ?? null,
-      fit: fit.fit,
-      fitConfidence: fit.confidence,
-      fitEngine: fit.engine,
-      fitNote: fit.note,
-      possibleDuplicateOf: candidate.possibleDuplicate ? candidate.possibleDuplicate.of.id ?? candidate.possibleDuplicate.of.title : null,
-    });
+export async function runScan(options) {
+  const { db, profile, runId = `scan-${randomUUID()}`, parentRunId, now = new Date().toISOString(), deadlineAt,
+    policy = {}, collect, fetchImpl = globalThis.fetch, careerOpsConfig, careerOpsDependencies, dryRun = false } = options;
+  if (deadlineAt && !Number.isFinite(Date.parse(deadlineAt))) throw new Error('deadlineAt must be an ISO datetime');
+  if (dryRun) {
+    const temporary = await mkdtemp(path.join(os.tmpdir(), 'cj-scan-preview-'));
+    let preview;
+    try {
+      const database = path.join(temporary, 'preview.db');
+      await backup(db, database);
+      preview = openDatabase(database);
+      return { ...await runScan({ ...options, db: preview, runId, now, dryRun: false }), dryRun: true };
+    } finally { preview?.close(); await rm(temporary, { recursive: true, force: true }); }
   }
-  queued.sort((left, right) => (FIT_ORDER[left.fit] ?? 3) - (FIT_ORDER[right.fit] ?? 3)
-    || rankOrLast(left.locRank) - rankOrLast(right.locRank)
-    || String(right.postedAt ?? '').localeCompare(String(left.postedAt ?? '')));
-  const dropReasons = {};
-  for (const item of dropped) {
-    for (const reason of item.reasons) {
-      const code = reason.slice(0, reason.indexOf(':'));
-      dropReasons[code] = (dropReasons[code] ?? 0) + 1;
+  startRun(db, runId, parentRunId, now);
+  const started = Date.now();
+  const clock = () => Date.parse(now) + Date.now() - started;
+  try {
+    const collected = await (collect ?? collectRoles)(profile, { fetchImpl, careerOpsConfig, careerOpsDependencies, timeoutMs: options.timeoutMs, deadlineAt, clock });
+    const counts = { raw: 0, observed: 0, newPostings: 0, reused: 0, dropped: {}, review: 0, quarantined: 0 };
+    const reported = collected.sources.map((item) => ({ ...item }));
+    for (const batch of collected.batches ?? []) {
+      if (batch.rawCount !== batch.records.length) throw new Error(`Collector conservation violation: ${batch.partition}`);
+      counts.raw += batch.rawCount;
+      const result = ingestBatch(db, { db, runId, ...batch, now, policy, profile });
+      for (const key of ['observed', 'newPostings', 'reused', 'review', 'quarantined']) counts[key] += result[key];
+      for (const [code, count] of Object.entries(result.dropped)) counts.dropped[code] = (counts.dropped[code] ?? 0) + count;
+      const source = reported.find((item) => item.source === batch.source && item.partition === batch.partition);
+      if (!source) throw new Error(`Collector omitted partition status: ${batch.partition}`);
+      source.quarantined = (source.quarantined ?? 0) + result.quarantined;
     }
+    const careerOpsPartitions = reported.filter((item) => item.source === 'careerops' && item.partition !== 'all').map((item) => item.partition);
+    if (!careerOpsPartitions.length) careerOpsPartitions.push(...db.prepare("SELECT partition FROM expected_partitions WHERE source='careerops' AND retired_at IS NULL").all().map((item) => item.partition));
+    const manifest = buildExpectedManifest(profile, { careerOpsPartitions });
+    // An injected collector can supply its own list name when no URL inventory exists.
+    for (const source of ['simplify', 'careerops']) if ((profile.sources.expected ?? []).includes(source)) {
+      const known = reported.filter((item) => item.source === source);
+      const placeholder = manifest.findIndex((item) => item.source === source && item.partition === 'all');
+      if (placeholder >= 0 && known.length && !known.some((item) => item.partition === 'all')) manifest.splice(placeholder, 1, ...known.map(({ source, partition }) => ({ source, partition })));
+    }
+    const sources = assessSourceHealth(db, { runId, now, manifest, reported });
+    const expectedKeys = new Set(manifest.map((item) => `${item.source}\0${item.partition}`));
+    const alerts = sources.filter((item) => item.alert).map(({ source, partition, alert }) => ({ source, partition, alert }));
+    const attempted = reported.filter((item) => ['ok', 'empty', 'partial', 'error'].includes(item.status));
+    const status = attempted.length && attempted.every((item) => item.status === 'error') ? 'failed'
+      : sources.some((item) => item.alert && expectedKeys.has(`${item.source}\0${item.partition}`)) ? 'partial' : 'ok';
+    const summary = { runId, status, dryRun: false, sources, alerts, counts };
+    db.prepare('UPDATE runs SET status=?,heartbeat_at=?,finished_at=?,receipt_json=? WHERE run_id=?').run(status, now, now, redact(JSON.stringify(summary)), runId);
+    return summary;
+  } catch (error) {
+    db.prepare("UPDATE runs SET status='failed',heartbeat_at=?,finished_at=?,receipt_json=? WHERE run_id=?")
+      .run(now, now, redact(JSON.stringify({ error: error.message })), runId);
+    throw error;
   }
-  return {
-    dryRun,
-    scannedAt: now,
-    sources,
-    counts: {
-      fetched: roles.length,
-      dropped: dropped.length,
-      duplicates: duplicates.length,
-      queued: queued.length,
-      ...(reviewRequired ? { held: held.length } : {}),
-      possibleDuplicates: queued.filter((item) => item.possibleDuplicateOf).length,
-    },
-    dropReasons,
-    queued,
-    ...(reviewRequired ? { held } : {}),
-    dropped,
-    duplicates,
-  };
 }

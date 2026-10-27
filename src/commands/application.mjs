@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { openHomeDatabase } from '../runtime/home.mjs';
 import { applicationStatuses } from '../domain/status-machine.mjs';
+import { bindApplication } from '../funnel/identity.mjs';
 
 const required = (value, name) => {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required`);
@@ -17,6 +18,20 @@ function safeUrl(value) {
 }
 
 export function createApplication(db, input, now = new Date().toISOString()) {
+  db.exec('SAVEPOINT application_writer');
+  try {
+    const application = insertApplication(db, input, now);
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='postings'").get()) bindApplication(db, application.id, { now });
+    db.exec('RELEASE application_writer');
+    return application;
+  } catch (error) {
+    db.exec('ROLLBACK TO application_writer');
+    db.exec('RELEASE application_writer');
+    throw error;
+  }
+}
+
+function insertApplication(db, input, now) {
   const company = required(input.company, 'company');
   const role = required(input.role, 'role');
   const externalId = input.externalId ? String(input.externalId).trim() : null;

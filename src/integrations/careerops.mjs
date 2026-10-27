@@ -39,24 +39,35 @@ export async function detectCareerOps(config = {}) {
   return { ok: true, code: 'ready', installedVersion: metadata.version, entrypoint, root, detail: `CareerOps ${metadata.version} is ready` };
 }
 
-function executeProcess({ command, args, cwd, stdin, timeoutMs }) {
+function executeProcess({ command, args, cwd, stdin, timeoutMs, maxBytes = 50_000_000 }) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let tooLarge = false;
+    let killTimer;
+    const stop = () => { child.kill('SIGTERM'); killTimer ??= setTimeout(() => child.kill('SIGKILL'), 5000); };
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGKILL');
+      stop();
     }, timeoutMs);
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.once('error', (error) => { clearTimeout(timer); reject(error); });
+    let bytes = 0;
+    const append = (chunk, stream) => {
+      bytes += Buffer.byteLength(chunk);
+      if (bytes > maxBytes) { tooLarge = true; stop(); return; }
+      if (stream === 'stdout') stdout += chunk; else stderr += chunk;
+    };
+    child.stdout.on('data', (chunk) => append(chunk, 'stdout'));
+    child.stderr.on('data', (chunk) => append(chunk, 'stderr'));
+    child.stdin.on('error', (error) => { if (error.code !== 'EPIPE') stop(); });
+    child.once('error', (error) => { clearTimeout(timer); clearTimeout(killTimer); reject(error); });
     child.once('close', (exitCode) => {
-      clearTimeout(timer);
-      if (timedOut) reject(new Error(`CareerOps request timed out after ${timeoutMs}ms`));
+      clearTimeout(timer); clearTimeout(killTimer);
+      if (tooLarge) reject(new Error('CareerOps output exceeds byte limit'));
+      else if (timedOut) reject(new Error(`CareerOps request timed out after ${timeoutMs}ms`));
       else resolve({ exitCode, stdout, stderr });
     });
     child.stdin.end(stdin);
@@ -137,9 +148,9 @@ export async function runCareerOpsScan(config = {}, dependencies = {}) {
   const execute = dependencies.execute ?? executeProcess;
   const execution = await execute({
     command: config.nodeExecutable ?? process.execPath,
-    args: [health.entrypoint, 'scan'],
+    args: [health.entrypoint, health.builtInBridge ? 'scan-raw' : 'scan'],
     cwd: health.root,
-    stdin: JSON.stringify({ action: 'scan', readOnly: true }),
+    stdin: JSON.stringify({ action: health.builtInBridge ? 'scan-raw' : 'scan', readOnly: true }),
     // A full CareerOps portal scan takes several minutes; the built-in bridge stops its own scan at 18.
     timeoutMs: config.scanTimeoutMs ?? 1_200_000,
   });
