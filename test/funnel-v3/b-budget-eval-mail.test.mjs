@@ -460,8 +460,8 @@ const mailHit = (overrides) => ({ messageId: `<m-${Math.random().toString(36).sl
 test('[B] mail matching needs the exact owned id at a boundary', async () => {
   const { matchMailHits } = await mailModule();
   const db = freshDb();
-  insertPosting(db, { id: 'p-a', aliases: [['company_req:examplecorp:R5001', 'company_req']] });
-  insertPosting(db, { id: 'p-b', aliases: [['company_req:examplecorp:R7001', 'company_req']] });
+  insertPosting(db, { id: 'p-a', aliases: [['company_req:example:R5001', 'company_req']] });
+  insertPosting(db, { id: 'p-b', aliases: [['company_req:example:R7001', 'company_req']] });
   insertPosting(db, { id: 'p-c', url: 'https://examplecorp.wd1.myworkdayjobs.com/ext/job/X/Data-Intern_R7001', aliases: [['req:workday:examplecorp:R7001', 'req']] });
   const hits = [
     mailHit({ subject: 'Application received R50011', excerpt: 'Thank you for applying to Example Corp.' }),
@@ -832,7 +832,7 @@ test('[B] a closed posting that reappears with the same requisition is reopened 
   const { deliver } = await deliverModule();
   const db = freshDb();
   const q = queue();
-  const id = q.add(db, { requisitionId: 'R900611', aliases: [['company_req:examplecorp:R900611', 'company_req']] });
+  const id = q.add(db, { requisitionId: 'R900611', aliases: [['company_req:example:R900611', 'company_req']] });
   await runReview(runOptions(db, { pages: q.pages }));
   const lead = applicationOf(db, id);
   assert.ok(lead);
