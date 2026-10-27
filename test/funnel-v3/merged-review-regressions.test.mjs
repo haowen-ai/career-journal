@@ -712,3 +712,163 @@ test('[B] common requirement headings, with or without emoji prefixes, parse as 
   }
   assert.equal(kindUnder('Minimum Qualifications'), 'required', 'the plain form is unchanged');
 });
+
+// ===================================================================== second review round (#3b, #13b, #23, #24)
+// Rule under test: deterministic code never decides not_eligible or unclear from its own reading of the prose.
+// It checks that quotes occur verbatim, clauses are whole, the section is not preferred, and that the model's
+// structured output agrees with itself (cited fact polarities, term fields versus their own quotes). Degree words,
+// season words and line proximity are at most a reason to escalate to the stronger model. Track grouping (which
+// term goes with which office) is the alternatives[] structure of the judgment.
+
+// A master's student who already completed a bachelor's degree.
+const DEGREE_FACTS = Object.freeze([
+  ...FACTS.filter((fact) => fact.id !== 'degree'),
+  { id: 'degree', statement: 'Currently enrolled in a Master of Science program; graduation May 2028', polarity: 'constraint', value: { level: 'masters', graduation: '2028-05' } },
+  { id: 'bachelor', statement: 'Completed a Bachelor of Science in Economics in May 2025', polarity: 'has', value: { level: 'bachelors', completed: '2025-05' } },
+]);
+
+test('[B] a completed-degree requirement the candidate satisfies is not a conflict because of degree words (merged #3b)', async () => {
+  const { validateCriterion } = await clausesModule();
+  const quote = "Students must have a Bachelor's degree.";
+  const text = SNAPSHOTS.eligible.replace("• Currently pursuing a Bachelor's or Master's degree in Statistics, Computer Science, or a related field.", `• ${quote}`);
+  // The conflict claim cites the completed bachelor's (a fact the candidate has); only the code's degree-word
+  // comparison against the master's constraint could turn it into a conflict.
+  const claimed = { key: 'degree', status: 'conflicts', quote, clause_alternatives: [], fact_ids: ['degree', 'bachelor'] };
+  assert.equal(validateCriterion(text, claimed, DEGREE_FACTS).confirmedConflict, false, 'a claim that cites a satisfying fact is not a confirmed conflict');
+  const contested = await decideWith({ text, facts: DEGREE_FACTS, judged: judgment({ criteria: [claimed] }) });
+  assert.notEqual(contested.decision, 'not_eligible', `a completed bachelor's satisfies "${quote}"`);
+  const primary = await decideWith({ text, facts: DEGREE_FACTS, judged: judgment({ criteria: [claimed] }), tier: 'primary' });
+  assert.equal(primary.escalate, true, 'the self-contradictory claim goes to the stronger model');
+
+  const met = await decideWith({ text, facts: DEGREE_FACTS, judged: judgment({ criteria: [{ ...claimed, status: 'meets', fact_ids: ['bachelor', 'degree'] }] }) });
+  assert.equal(met.decision, 'eligible', 'the model judged the requirement met');
+
+  // Guards: an explicit current-enrolment restriction the model marks unmet, citing the constraint, stays rejected.
+  const real = await decideWith({ text: SNAPSHOTS.undergradOnly, facts: DEGREE_FACTS, judged: JUDGMENTS.undergradOnly });
+  assert.equal(real.decision, 'not_eligible', 'currently pursuing a Bachelor\'s degree excludes a master\'s student');
+  const only = "Undergraduate students only; must be currently pursuing a Bachelor's degree.";
+  const onlyText = SNAPSHOTS.eligible.replace("• Currently pursuing a Bachelor's or Master's degree in Statistics, Computer Science, or a related field.", `• ${only}`);
+  const onlyResult = await decideWith({ text: onlyText, facts: DEGREE_FACTS, judged: judgment({ criteria: [{ key: 'degree', status: 'conflicts', quote: only, clause_alternatives: [], fact_ids: ['degree'] }] }) });
+  assert.equal(onlyResult.decision, 'not_eligible', 'undergraduate students only stays a conflict for a master\'s student');
+});
+
+test('[B] transport retries of a higher-lane item cannot consume the exploration reservation (merged #13b)', async () => {
+  const { runReview } = await workerModule();
+  // Retries per tier for the deadline item; maxTransportRetries is 2 (fake adapters use the default).
+  for (const [primaryRetries, escalationRetries] of [[0, 2], [2, 2]]) {
+    const db = freshDb();
+    const q = queue();
+    const soon = q.add(db, { id: 'p-deadline', snapshot: 'undergradOnly', deadline: { kind: 'cutoff', date: at(3).slice(0, 10) } });
+    const noSignal = q.add(db, { id: 'p-nosignal', lane: 'no_student_signal', flags: ['no_student_signal'] });
+    const answersFor = (retries) => ({ 'p-deadline': { output: JUDGMENTS.undergradOnly, transportRetries: retries }, 'p-nosignal': { output: JUDGMENTS.eligible } });
+    const judges = { primary: fakeJudge({ tier: 'primary', answers: answersFor(primaryRetries) }), escalation: fakeJudge({ tier: 'escalation', answers: answersFor(escalationRetries) }) };
+    await runReview(runOptions(db, { budget: 4, pages: q.pages, judges }));
+    const used = db.prepare('SELECT COALESCE(SUM(1 + transport_retries), 0) n FROM attempts').get().n;
+    const label = `retries primary ${primaryRetries}, escalation ${escalationRetries}`;
+    assert.ok(used <= 4 + 1 * (2 + 1), `${label}: used ${used} stays within limit + concurrency × (maxTransportRetries + 1)`);
+    assert.ok(callsFor(judges.primary, soon) >= 1, `${label}: the imminent deadline is still judged`);
+    assert.ok(callsFor(judges.primary, noSignal) >= 1,
+      `${label}: the due no-student-signal posting receives its reserved attempt (deadline calls ${callsFor(judges.primary, soon)} + ${callsFor(judges.escalation, soon)}, units used ${used})`);
+  }
+});
+
+test('[B] a graduation season is a qualification date, not a second work window (merged #23a)', async () => {
+  const line = 'Expected graduation: Spring 2028.';
+  const text = SNAPSHOTS.eligible.replace('• Proficiency in Python or R for data analysis.', `• Proficiency in Python or R for data analysis.\n• ${line}`);
+  const judged = judgment({ criteria: [...JUDGMENTS.eligible.criteria, { key: 'graduation', status: 'meets', quote: line, clause_alternatives: [], fact_ids: ['degree'] }] });
+  const result = await decideWith({ text, judged });
+  assert.equal(result.decision, 'eligible', `Summer 2027 in Chicago is the only work window: ${result.code} ${result.question ?? ''}`);
+  assert.ok(result.location.alternatives?.length >= 1, 'the Summer 2027 / Chicago alternative is delivered as allowed');
+});
+
+test('[B] separated track blocks are grouped by the model alternatives, not by line proximity (merged #23b)', async () => {
+  const text = `Data Engineering Intern\n\nAbout the role\nWe hire for two separate tracks. Both tracks build data pipelines in Python and SQL and present results to engineering leads every other week during the program.\n\nSummer 2027 internship track\nLocation: Chicago, IL\n\nSpring 2027 co-op track\nLocation: San Jose, CA\n\nRequired Qualifications\n• Currently pursuing a Bachelor's or Master's degree in a technical field.\n• Proficiency in Python.\n`;
+  const summer = { label: 'summer', year: 2027, quote: 'Summer 2027 internship track' };
+  const spring = { label: 'spring', kind: 'co-op', year: 2027, quote: 'Spring 2027 co-op track' };
+  const chicago = { place: 'Chicago, IL', area: 'chicago', quote: 'Location: Chicago, IL' };
+  const sanJose = { place: 'San Jose, CA', area: 'california', quote: 'Location: San Jose, CA' };
+  const base = {
+    criteria: [{ key: 'degree', status: 'meets', quote: "Currently pursuing a Bachelor's or Master's degree in a technical field.", clause_alternatives: [], fact_ids: ['degree'] }],
+    function: { value: 'data_eng', quote: 'Both tracks build data pipelines in Python and SQL' },
+  };
+  const none = { scope: 'none', quote: null };
+  const grouped = judgment({ ...base, alternatives: [{ term: summer, offices: [chicago], remote: none }, { term: spring, offices: [sanJose], remote: none }] });
+  const result = await decideWith({ text, judged: grouped });
+  assert.equal(result.decision, 'eligible', `Summer 2027 is paired with Chicago by the model: ${result.code} ${result.question ?? ''}`);
+  const allowed = result.location.alternatives ?? [];
+  assert.ok(allowed.length >= 1 && allowed.every((item) => item.offices.every((office) => office.area === 'chicago')), 'only the Summer / Chicago track is allowed; the Spring co-op in San Jose is outside the off-season areas');
+
+  // Guard: the page ties San Jose only to the Spring co-op; a model pairing Summer 2027 with San Jose is not
+  // accepted by default from the primary model.
+  const mixed = judgment({ ...base, alternatives: [{ term: summer, offices: [sanJose], remote: none }] });
+  const primary = await decideWith({ text, judged: mixed, tier: 'primary' });
+  assert.notEqual(primary.decision, 'eligible', 'a Summer / San Jose pairing is not eligible by default');
+  assert.equal(primary.escalate, true, 'the doubtful pairing goes to the stronger model');
+});
+
+test('[B] a year-only title quote is term evidence for the model\'s summer label (merged #24a)', async () => {
+  const titled = (title) => SNAPSHOTS.eligible.replace('Data Science Intern\n', `${title}\n`).replace('Join our analytics team for the summer of 2027.', 'Join our analytics team as an intern.');
+  const text = titled('2027 Intern - Data Science');
+  const withTerm = (term) => judgment({ alternatives: [{ ...SUMMER_CHICAGO, term }] });
+  const result = await decideWith({ text, judged: withTerm({ label: 'summer', year: 2027, quote: '2027 Intern - Data Science' }) });
+  assert.equal(result.decision, 'eligible', `the quote names the year; the season is the model's judgment: ${result.code} ${result.question ?? ''}`);
+
+  // Guards: a quote absent from the page, a year the quote contradicts, or a season the quote contradicts escalate.
+  const guards = [
+    ['an unquoted title', text, { label: 'summer', year: 2027, quote: '2027 Summer Intern - Data Science' }],
+    ['a year the quote contradicts', titled('2028 Intern - Data Science'), { label: 'summer', year: 2027, quote: '2028 Intern - Data Science' }],
+    ['a season the quote contradicts', titled('Fall 2027 Intern - Data Science'), { label: 'summer', year: 2027, quote: 'Fall 2027 Intern - Data Science' }],
+  ];
+  for (const [name, page, term] of guards) {
+    const primary = await decideWith({ text: page, judged: withTerm(term), tier: 'primary' });
+    assert.notEqual(primary.decision, 'eligible', `${name} is not eligible`);
+    assert.equal(primary.escalate, true, `${name} escalates`);
+    const escalated = await decideWith({ text: page, judged: withTerm(term) });
+    assert.notEqual(escalated.decision, 'eligible', `${name} is not eligible from the stronger model either`);
+  }
+});
+
+test('[B] section classification is advisory: met requirements under an unrecognized heading stay eligible (merged #24b)', async () => {
+  const { segmentSections } = await clausesModule();
+  // "What you'll need" is not a recognized heading, so the parser files these bullets under Responsibilities.
+  const text = SNAPSHOTS.eligible.replace('Required Qualifications\n', "What you'll need\n");
+  const offset = text.indexOf('• Proficiency in Python');
+  assert.notEqual(segmentSections(text).find((section) => section.start <= offset && offset < section.end)?.kind, 'required', 'precondition: the parser does not see a required section');
+  const met = judgment({ criteria: [
+    ...JUDGMENTS.eligible.criteria,
+    { key: 'requirement', status: 'meets', quote: 'Proficiency in Python or R for data analysis.', clause_alternatives: ['Python', 'R'], fact_ids: ['python'] },
+  ] });
+  for (const tier of ['primary', 'escalation']) {
+    const result = await decideWith({ text, judged: met, tier });
+    assert.equal(result.decision, 'eligible', `${tier}: requirements the model marked met are not held as ${result.code}`);
+    assert.ok(!['missing_fact', 'requirement_unclear'].includes(result.code));
+  }
+
+  // The same misclassification cannot silently drop a mandatory conflict the model found either.
+  const facts = [...FACTS, { id: 'bi_tools', statement: 'Has never used commercial BI visualization software', polarity: 'lacks' }];
+  const tableau = 'Hands-on experience building Tableau workbooks.';
+  const conflictText = text.replace('• Proficiency in Python or R for data analysis.', `• ${tableau}`);
+  const conflict = judgment({ criteria: [...JUDGMENTS.eligible.criteria, { key: 'requirement', status: 'conflicts', quote: tableau, clause_alternatives: [], fact_ids: ['bi_tools'] }] });
+  const dropped = await decideWith({ text: conflictText, facts, judged: conflict });
+  assert.notEqual(dropped.decision, 'eligible', 'a section the parser did not recognize is not a preferred section');
+});
+
+test('[B] a model conflict with a verbatim mandatory quote and a cited lacks fact stays not_eligible (merged #24c)', async () => {
+  const facts = [...FACTS, { id: 'bi_tools', statement: 'Has never used commercial BI visualization software', polarity: 'lacks' }];
+  const tableau = 'Hands-on experience building Tableau workbooks.';
+  const text = SNAPSHOTS.eligible.replace('• Proficiency in Python or R for data analysis.', `• ${tableau}`);
+  const claim = (overrides) => judgment({ criteria: [...JUDGMENTS.eligible.criteria, { key: 'requirement', status: 'conflicts', quote: tableau, clause_alternatives: [], fact_ids: ['bi_tools'], ...overrides }] });
+  const result = await decideWith({ text, facts, judged: claim({}) });
+  assert.equal(result.decision, 'not_eligible', `the model's negative needs no word overlap between clause and fact: ${result.code} ${result.question ?? ''}`);
+  assert.equal(result.code, 'requirement');
+  const primary = await decideWith({ text, facts, judged: claim({}), tier: 'primary' });
+  assert.deepEqual([primary.decision, primary.escalate], ['unclear', true], 'the primary tier still only proposes the rejection');
+
+  // Guards: a quote absent from the page, or a claim citing a fact the candidate has, is not a rejection.
+  for (const [name, overrides] of [['an unquoted requirement', { quote: 'Hands-on experience building Tableau dashboards.' }], ['a claim citing a has fact', { fact_ids: ['python'] }]]) {
+    const escalated = await decideWith({ text, facts, judged: claim(overrides) });
+    assert.notEqual(escalated.decision, 'not_eligible', `${name} does not reject`);
+    const proposed = await decideWith({ text, facts, judged: claim(overrides), tier: 'primary' });
+    assert.equal(proposed.escalate, true, `${name} escalates`);
+  }
+});
