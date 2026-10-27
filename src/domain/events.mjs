@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { assertStatusTransition } from './status-machine.mjs';
+import { assertStatusTransition, assertReviewRestore } from './status-machine.mjs';
 
 function required(value, name) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required`);
@@ -34,7 +34,7 @@ function normalizedEvent(input) {
   };
 }
 
-export function recordEvent(db, input, { withinTransaction = false } = {}) {
+export function recordEvent(db, input, { withinTransaction = false, reviewRestore = false } = {}) {
   const event = normalizedEvent(input);
   const contentHash = createHash('sha256').update(JSON.stringify(event)).digest('hex');
   const existing = db.prepare('SELECT content_hash FROM application_events WHERE id = ?').get(event.id);
@@ -44,7 +44,14 @@ export function recordEvent(db, input, { withinTransaction = false } = {}) {
   }
   const application = db.prepare('SELECT status FROM applications WHERE id = ?').get(event.applicationId);
   if (!application) throw new Error(`Unknown application: ${event.applicationId}`);
-  if (event.statusAfter) assertStatusTransition(application.status, event.statusAfter);
+  if (event.statusAfter) {
+    if (reviewRestore && event.type === 'review_restored') {
+      const last = db.prepare('SELECT source_json FROM application_events WHERE application_id=? AND status_after IS NOT NULL ORDER BY recorded_at DESC,rowid DESC LIMIT 1').get(event.applicationId);
+      const automated = db.prepare("SELECT r.evidence_json FROM reviews r JOIN postings p ON p.id=r.posting_id WHERE p.application_id=?").all(event.applicationId)
+        .some((row) => JSON.parse(row.evidence_json)?.provenance === 'automated');
+      assertReviewRestore(application.status, event.statusAfter, { actor: event.source.actor, lastActor: last && JSON.parse(last.source_json).actor, automated });
+    } else assertStatusTransition(application.status, event.statusAfter);
+  }
   if (!withinTransaction) db.exec('BEGIN IMMEDIATE');
   try {
     db.prepare(`INSERT INTO application_events

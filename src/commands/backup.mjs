@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
-import { access, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { access, chmod, copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { backup as backupDatabase } from 'node:sqlite';
-import { loadConfig } from '../config/store.mjs';
+import { loadConfig, workspaceDirectory } from '../config/store.mjs';
+import { resolveMaterialPath } from '../domain/profile.mjs';
 import { openDatabase } from '../storage/database.mjs';
 
 async function exists(file) {
@@ -103,7 +105,40 @@ async function listFiles(directory, base = directory) {
 }
 
 async function digest(file) {
-  return createHash('sha256').update(await readFile(file)).digest('hex');
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(file)) hash.update(chunk);
+  return hash.digest('hex');
+}
+
+// Deliberately exclude unrelated files, credentials and artifact payloads.
+const PROFILE_FILES = [
+  'profile.json', 'answers.md', 'screening-rules.md', 'fit-rules.md',
+  'facts.json', 'facts-sources.json', 'resume.txt', 'review-policy.json',
+  'screening-policy.json', 'review-provenance.json', 'eval-record.json',
+];
+
+async function backupProfile(root, destination) {
+  const directory = path.join(workspaceDirectory(root), 'profile');
+  for (const name of PROFILE_FILES) {
+    const source = path.join(directory, name);
+    if (!await exists(source)) continue;
+    const copy = path.join(destination, 'profile', name);
+    await mkdir(path.dirname(copy), { recursive: true, mode: 0o700 });
+    await copyFile(source, copy);
+    await chmod(copy, 0o600);
+  }
+  const profileFile = path.join(directory, 'profile.json');
+  if (!await exists(profileFile)) return;
+  const profile = JSON.parse(await readFile(profileFile, 'utf8'));
+  for (const [kind, field] of [['resume', 'resumePath'], ['transcript', 'transcriptPath']]) {
+    const selected = profile.materials?.[field];
+    if (!selected) continue;
+    const source = resolveMaterialPath(selected);
+    const copy = path.join(destination, 'materials', kind, path.basename(source));
+    await mkdir(path.dirname(copy), { recursive: true, mode: 0o700 });
+    await copyFile(source, copy);
+    await chmod(copy, 0o600);
+  }
 }
 
 export async function createBackup(home, output, options = {}) {
@@ -125,6 +160,7 @@ export async function createBackup(home, output, options = {}) {
       artifactIndex = prepareBackupDatabase(copiedDatabase);
     }
     await writeFile(path.join(destination, 'artifacts-index.json'), `${JSON.stringify(artifactIndex, null, 2)}\n`, { mode: 0o600 });
+    await backupProfile(root, destination);
     const files = await listFiles(destination);
     const manifest = {
       schemaVersion: 1,

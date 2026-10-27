@@ -1,0 +1,14 @@
+{
+  "schema": 2,
+  "areas": { "keys": [], "allowedStates": [], "homeStates": [], "text": "Replace with the candidate's confirmed geographic policy." },
+  "windows": [],
+  "functions": { "userCall": [], "outOfScope": [] },
+  "fit": { "adjust": [] },
+  "judge": {
+    "primary": { "runner": "codex", "model": "", "codexHome": "", "effort": "medium", "timeoutMs": 120000 },
+    "escalation": { "runner": "codex", "model": "", "codexHome": "", "effort": "medium", "timeoutMs": 120000 }
+  },
+  "budgets": { "attempts": null, "fetches": null, "deadlineMin": null, "concurrency": null, "dailyMaxMinutes": null, "quotaCooldownHours": null },
+  "fetcher": null,
+  "retention": { "workPaths": [] }
+}

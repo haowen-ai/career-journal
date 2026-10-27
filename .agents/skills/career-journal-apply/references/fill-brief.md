@@ -9,7 +9,7 @@ The main Agent copies the template below once per role, replaces every `{{placeh
 | `{{company}}` | Company name, used in tab titles |
 | `{{role}}` | Role title as posted |
 | `{{applicationId}}` | CAREER JOURNAL application ID |
-| `{{applyUrl}}` | Official apply link verified by `queue verify` |
+| `{{applyUrl}}` | Official apply link delivered by `review run`, or verified by `queue verify` for a manual lead |
 | `{{browserTools}}` | How to load the host browser tools, for example one tool-search call that loads every browser tool at once |
 | `{{answersPath}}` | `<home>/.career-journal/profile/answers.md` |
 | `{{profilePath}}` | `<home>/.career-journal/profile/profile.json` |
@@ -56,7 +56,7 @@ On the final review page you may still fill question fields the page shows, but 
 
 - **Already applied?** Check the site's candidate dashboard or any "already applied" notice. If the user already applied to this exact role, stop and report "already applied".
 - **Location.** When the form asks for a location or office, choose in this order: {{locationOrder}}. If the role is offered only outside that list, do not fill it: stop and report the offered locations.
-- **Eligibility.** If the posting or form excludes the user's degree level, graduation window, or work authorization, or matches {{exclusions}}, stop and report the exact wording.
+- **Eligibility.** Use the judgment and quoted official-posting evidence delivered by `review run`; do not re-judge eligibility or fit. Manual leads without `verifiedAt` are checked with `queue verify` before dispatch as before. If the form reveals a new contradiction about degree level, graduation window, work authorization, or {{exclusions}}, stop and report the exact wording.
 
 ## Facts
 
@@ -67,7 +67,7 @@ On the final review page you may still fill question fields the page shows, but 
 - Voluntary disclosures (gender, race and ethnicity, veteran status, disability, and similar): use exactly what the answers sheet says, including "prefer not to say" when the user chose it. If the sheet has no answer, leave the question and report it; never guess.
 - Optional marketing, SMS, talent-community, or AI-processing opt-ins: leave them unticked or pick the opt-out option.
 - A question the answers sheet marks as "ask the user" (for example background-check willingness or availability months) stays blank and is reported, even when an answer seems obvious. Never guess it or copy it from a similar question.
-- Never invent anything: salary figures, test scores, language levels, dates, references, or contact details. If a required question is not covered, leave it, set the `❓` title, and report the exact question, its options, and whether it is required.
+- Never invent anything: salary figures, test scores, language levels, dates, references, or contact details. If a required question is not covered, leave it, choose the first matching title below (`❓` if no earlier action remains), and report the exact question, its options, and whether it is required.
 - Essays, cover letters, and why-us questions stay empty. Report the exact prompt, whether it is required, and the length limit. Short factual fields, such as a list of programming languages, may be filled from the sheet.
 
 ## Files
@@ -82,15 +82,27 @@ Follow the general and per-ATS techniques in {{atsTipsPath}}. In short: prefer J
 
 ## Blockers
 
-If the site needs the user (sign-in, account, password, emailed code, CAPTCHA, consent, or a signature awaiting authorization or action-time confirmation):
+When an action needs the user:
 
 1. Go as far as you can without doing that step, for example click Apply to reach the sign-in page.
-2. Set the tab title, in {{titleLanguage}}, to `🔑 Sign in {{company}}` (sign-in, account, password, or code), `🤖 Verify {{company}}` (CAPTCHA), `❓ Question {{company}}` (uncovered required question), or `👆 Click {{company}}` (consent, a signature awaiting authorization or action-time confirmation, or a Submit*-labelled intermediate button), and keep it set with `setInterval`.
-3. Report immediately what exactly the user must do.
+2. Choose the first matching state in the priority order below, in {{titleLanguage}}, followed by {{company}}, and keep the title set with `setInterval`. Recompute it whenever an action is resolved; use ready only when no other action remains.
+3. Report immediately what exactly the user must do, including any later actions hidden by the first title.
+
+| State | English title | Simplified Chinese title | Remaining action |
+|---|---|---|---|
+| createAccount | 🆕 Create account | 🆕 先注册 | Create an account |
+| signIn | 🔑 Sign in | 🔑 先登录 | Sign in, password, or emailed code |
+| verify | 🤖 Verify | 🤖 人机验证 | CAPTCHA or bot check |
+| question | ❓ Question | ❓ 有问题 | An uncovered required factual question |
+| essay | ✍️ Essay | ✍️ 要写作文 | The user's essay, cover letter, or supplemental answer |
+| documents | 📎 Transcript/references | 📎 要成绩单/推荐人 | Missing required transcript or references |
+| assessment | 🧪 Assessment link | 🧪 测评链接 | An assessment link for the user; never take the test |
+| click | 👆 Click | 👆 要你点 | Consent, a signature awaiting authorization or action-time confirmation, or a Submit*-labelled intermediate button |
+| ready | ✅ Ready to submit | ✅ 待提交 | Final review and submission only |
 
 ## Finish
 
-On the final review page, before any submit button, set the title to `✅ Ready to submit {{company}}` and keep it set with `setInterval`, because single-page apps reset titles.
+On the final review page, before any submit button, choose the first matching state above. Set `✅ Ready to submit {{company}}` (or `✅ 待提交 {{company}}` in Chinese) only when no other action remains; otherwise keep the earlier action title. Keep it set with `setInterval`, because single-page apps reset titles.
 
 Report back concisely:
 

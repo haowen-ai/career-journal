@@ -15,6 +15,8 @@ import { migrateCommand } from '../commands/migrate.mjs';
 import { backupCommand } from '../commands/backup.mjs';
 import { scanCommand } from '../commands/scan.mjs';
 import { queueCommand } from '../commands/queue.mjs';
+import { pruneCommand } from '../commands/prune.mjs';
+import { reviewCommand } from '../commands/review.mjs';
 
 export function createRuntime({ root, version }) {
   return {
@@ -38,6 +40,8 @@ export function createRuntime({ root, version }) {
       ['backup', backupCommand],
       ['scan', scanCommand],
       ['queue', queueCommand],
+      ['prune', pruneCommand],
+      ['review', reviewCommand],
     ]),
   };
 }

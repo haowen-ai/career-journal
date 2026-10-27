@@ -43,10 +43,10 @@ Manual EML is a one-off fallback. It does not replace daily access or satisfy se
 
 ## Held leads
 
-- When `search.exclusions` contains `official-review-required`, `scan run` keeps every new discovery with a skip reason, hides it from `queue list`, and prints the held count in its summary. A lead whose official posting could not be fetched, or whose check came out uncertain, is also held, with that reason, instead of being released or dropped.
-- Review every held lead on the same day as the scan. When a plain fetch of the official posting fails (blocked, sign-in wall, or a script-rendered page), open it in the browser before deciding. Release a lead with `queue verify --id <application> --result ok` only after the checks; otherwise keep it held or skip it, always with a reason.
+- `scan run` collects observations and pending reviews; it never creates queue leads. `review run` reads official postings, judges eligibility and fit, and delivers leads with quoted evidence. Use that judgment without re-judging queue leads during apply.
+- Read held roles with `review list --held`, including their recorded question, reason, and official link. Address them on the day of the scan; a hold stays pending until resolved, and is not an eligible queue lead.
 - Never report the queue size without the held count, for example "3 queued, 12 held for review".
-- A skip for an unmet "required" qualification quotes the exact line and confirms it is in the mandatory section, not under preferred qualifications; a requirement the candidate meets through experience counts as met. Re-review these skips against the current resume from time to time.
+- Only manual leads without `verifiedAt` retain the existing official-posting check and `queue verify --id <application> --result ok|skip --reason <text>`. A skip for an unmet required qualification quotes the exact mandatory line; preferred qualifications are not mandatory, and experience that meets a requirement counts as met.
 
 ## Role-scan schedule
 
@@ -62,7 +62,7 @@ The daily role scan is optional and is created only when the user says yes in ro
 
 - Application, event, deadline, status, or dashboard: use the CLI
 - Online assessment, coding test, or interview invitation: record it with `task add`, including the deadline from the message (`--due-at` with a UTC offset, `--due-note` for how it was computed) and the invitation URL (`--link`); mark it with `task done` once completed
-- Find roles, new roles, or the daily role scan: run `scan run` (`--dry-run` previews without writing), read each new lead's official posting, and record `queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>]`; every skip has a reason. `queue list` shows the queue in order; when queued roles have no fit yet, run `queue score` to rate them. Held leads are reviewed the same day (see Held leads). Official ATS job boards of the companies the user watches are the default source; SimplifyJobs and CareerOps sources are opt-in. When `profile status --json` reports no scan sources, resolve the user's companies first (see Scan sources)
+- Find roles, new roles, or the daily role scan: run `scan run` (`--dry-run` previews collection without writing), then `review run`; only manual leads without `verifiedAt` need the existing official-posting check and `queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>]`. Funnel leads arrive with quoted evidence and fit; do not re-judge them or run `queue score` on them. `queue list` shows the queue in order, and `review list --held` shows held roles and their questions; report both counts. Official ATS job boards of the companies the user watches are the default source; SimplifyJobs and CareerOps sources are opt-in. When `profile status --json` reports no scan sources, resolve the user's companies first (see Scan sources)
 - Apply, start applying, or fill application forms: read the `career-journal-apply` Skill. It needs profile rounds 1 and 2, fills forms only in the user's own browser, and stops before every submit
 - Profile, preferences, or form answers: use `profile show|questions|set|answer|skip|status`. Profile files live in `<home>/.career-journal/profile/` (`profile.json`, `answers.md`) and never in the repository
 - Resume or cover letter: read `careerops-materials`; verified generation requires CareerOps plus built-in and personal rules

@@ -1,0 +1,329 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Official posting judgment",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "alternatives": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "term": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/term"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "offices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "place": {
+                  "type": "string"
+                },
+                "area": {
+                  "type": "string",
+                  "description": "One configured policy.areas.keys value, outside or unknown; enforced again by the decision validator."
+                },
+                "quote": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "place",
+                "area",
+                "quote"
+              ]
+            }
+          },
+          "remote": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "scope": {
+                "type": "string",
+                "pattern": "^(us|state:[A-Z]{2}|none|non_us|unknown)$"
+              },
+              "quote": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "scope",
+              "quote"
+            ]
+          }
+        },
+        "required": [
+          "term",
+          "offices",
+          "remote"
+        ]
+      }
+    },
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "enum": [
+              "degree",
+              "graduation",
+              "authorization",
+              "clearance",
+              "defense",
+              "return_offer",
+              "requirement",
+              "closed",
+              "function"
+            ]
+          },
+          "status": {
+            "enum": [
+              "meets",
+              "conflicts",
+              "unclear"
+            ]
+          },
+          "quote": {
+            "type": "string"
+          },
+          "clause_alternatives": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "fact_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "key",
+          "status",
+          "quote",
+          "clause_alternatives",
+          "fact_ids"
+        ]
+      }
+    },
+    "function": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "quote"
+      ]
+    },
+    "program": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name_quote": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "country_scope_quote": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name_quote",
+        "country_scope_quote"
+      ]
+    },
+    "deadline": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "cutoff",
+            "posting_end",
+            "rolling",
+            "none"
+          ]
+        },
+        "date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "time": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tz": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "precision": {
+          "enum": [
+            "date",
+            "datetime",
+            null
+          ]
+        },
+        "quote": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "date",
+        "time",
+        "tz",
+        "precision",
+        "quote"
+      ]
+    },
+    "needs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "essay_quote": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "documents_quote": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "assessment_quote": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "essay_quote",
+        "documents_quote",
+        "assessment_quote"
+      ]
+    },
+    "fit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "strengths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "level",
+        "strengths",
+        "gaps"
+      ]
+    }
+  },
+  "required": [
+    "alternatives",
+    "criteria",
+    "function",
+    "program",
+    "deadline",
+    "needs",
+    "fit"
+  ],
+  "$defs": {
+    "term": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "year": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "start": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "end": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quote": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "year",
+        "quote"
+      ]
+    }
+  }
+}
