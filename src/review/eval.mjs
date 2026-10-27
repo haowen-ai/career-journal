@@ -10,6 +10,7 @@ import { segmentSections } from './clauses.mjs';
 import { decide } from './decide.mjs';
 import { reviewPrimaryVerdict } from './worker.mjs';
 import { createSecondOpinion } from './second-opinion.mjs';
+import { usesJevSplit, createJevSplit, reviewJevSplit, jevCounts, jevDependencies } from './jev-split.mjs';
 import { redact } from '../runtime/redact.mjs';
 
 const PROFILE_FILES = ['facts.json','review-policy.json','screening-policy.json','review-provenance.json','screening-rules.md','fit-rules.md','resume.txt','profile.json'];
@@ -32,7 +33,7 @@ export async function saveEvalRecord(home, record) {
   await rename(tmp, path.join(directory, 'eval-latest.json'));
 }
 
-export async function runEval({ setDir, judges, secondOpinion, judgePolicy, concurrency = 3 }) {
+export async function runEval({ setDir, judges, secondOpinion, jev, judgePolicy, concurrency = 3 }) {
   if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error('Evaluation concurrency must be positive');
   const manifestText = await readBounded(path.join(setDir, 'manifest.json'));
   const manifest = JSON.parse(manifestText);
@@ -57,7 +58,8 @@ export async function runEval({ setDir, judges, secondOpinion, judgePolicy, conc
       const inputs = await loadReviewInputs(home);
       if (judgePolicy) inputs.policy = { ...inputs.policy, judge: judgePolicy };
       const adapters = judges ?? createJudgeAdapters(inputs.policy);
-      profiles.set(id, { inputs, adapters, secondOpinion: secondOpinion ?? createSecondOpinion(inputs.policy) }); deps[id] = {};
+      profiles.set(id, { inputs, adapters, secondOpinion: secondOpinion ?? createSecondOpinion(inputs.policy), jev: jev ?? createJevSplit(inputs.policy) }); deps[id] = {};
+      if (usesJevSplit(inputs.policy)) deps[id].jev = jevDependencies(inputs.policy);
       for (const tier of ['primary','escalation']) {
         const request = await buildJudgeRequest({ posting: {}, snapshot: { text: '' }, sections: [], inputs, adapter: adapters[tier], tier });
         deps[id][tier] = request.deps.parts;
@@ -66,6 +68,7 @@ export async function runEval({ setDir, judges, secondOpinion, judgePolicy, conc
     const cases = new Array(manifest.cases.length);
     const metrics = { falseAccepts: 0, falseRejects: 0, unexpectedUnclear: 0, codeMismatches: 0, adapterErrors: 0, cases: cases.length, escalations: 0 };
     if ([...profiles.values()].some(({ inputs }) => inputs.policy.judge?.secondOpinion)) metrics.secondOpinion = { asked: 0, agreed: 0, escalated: 0, errors: 0 };
+    if ([...profiles.values()].some(({ inputs }) => usesJevSplit(inputs.policy))) metrics.jev = jevCounts();
     let next = 0;
     const execute = async () => {
       for (;;) {
@@ -82,7 +85,14 @@ export async function runEval({ setDir, judges, secondOpinion, judgePolicy, conc
         const attempts = [];
         if (!identity.identityOk) verdict = { decision: 'unclear', code: identity.reason, escalate: false };
         else {
+          let jevProbabilities;
+          if (usesJevSplit(profile.inputs.policy)) {
+            const result = await reviewJevSplit({ inputs: profile.inputs, snapshotText: snapshot.text, firstSeen: item.posting.firstSeen,
+              jev: profile.jev, counts: metrics.jev });
+            verdict = result.verdict; jevProbabilities = result.probabilities;
+          }
           for (const tier of ['primary','escalation']) {
+            if (verdict && !verdict.escalate) break;
             const adapter = profile.adapters[tier];
             const request = await buildJudgeRequest({ posting: { ...item.posting, id: item.id }, snapshot, sections: segmentSections(snapshot.text), inputs: profile.inputs, adapter, tier });
             const attemptId = randomUUID(); const outputPath = path.join(work, `${attemptId}.json`);
@@ -105,6 +115,7 @@ export async function runEval({ setDir, judges, secondOpinion, judgePolicy, conc
             if (tier === 'primary' && verdict.escalate) continue;
             break;
           }
+          if (jevProbabilities) verdict = { ...verdict, jev: jevProbabilities };
         }
         const falseAccept = verdict.decision === 'eligible' && item.expected.decision !== 'eligible';
         const falseReject = verdict.decision === 'not_eligible' && ['eligible','unclear'].includes(item.expected.decision);

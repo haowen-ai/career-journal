@@ -24,6 +24,7 @@ import { postingPartitions } from '../funnel/membership.mjs';
 import { awaitingUserSummary } from './awaiting-user.mjs';
 import { releaseHolds, MODEL_HOLD_CODES, releasedInputsHash } from './release-holds.mjs';
 import { dependencyComparison } from './dependency-compat.mjs';
+import { usesJevSplit, createJevSplit, reviewJevSplit, jevCounts, jevDependencies } from './jev-split.mjs';
 export { scheduleRefresh } from './freshness.mjs';
 
 const DAY = 86400000;
@@ -87,7 +88,7 @@ export async function reviewPrimaryVerdict({ verdict, inputs, snapshotText, firs
 }
 
 export function inputState(inputs) {
-  return { formatVersion: 2, facts: factsMap(inputs.facts), rules: dependencyHash(inputs.rules), policy: dependencyHash({ policy: screeningPolicyParts(inputs.policy), jobType: inputs.profile?.search?.jobType ?? null }),
+  return { formatVersion: 2, ...(usesJevSplit(inputs.policy) ? { jev: jevDependencies(inputs.policy).strategy } : {}), facts: factsMap(inputs.facts), rules: dependencyHash(inputs.rules), policy: dependencyHash({ policy: screeningPolicyParts(inputs.policy), jobType: inputs.profile?.search?.jobType ?? null }),
     screening: dependencyHash(inputs.screeningPolicy), provenance: dependencyHash(inputs.provenance), resume: dependencyHash(inputs.resume?.text ?? null),
     windowsAreas: dependencyHash({ windows: inputs.policy.windows, areas: inputs.policy.areas, jobType: inputs.profile?.search?.jobType ?? null }),
     code: dependencyHash({ ...normalPromptDependencies(),
@@ -145,7 +146,7 @@ export function replan(db, { inputs, now, runtimeDeps, comparison }) {
         migrated = true;
       }
       const relevantFacts = factsChanged && (usedChanged || row.decision === 'not_eligible' || row.code === 'missing_fact');
-      const relevantOther = otherChanged && (row.decision !== 'eligible' || windowsChanged);
+      const relevantOther = old.jev !== state.jev || otherChanged && (row.decision !== 'eligible' || windowsChanged);
       if (relevantFacts || relevantOther) {
         db.prepare("UPDATE reviews SET state='due',stage='judge',next_due=?,hold_owner=NULL,hold_since=NULL,lease_owner=NULL,lease_until=NULL,dep_hashes_json=?,updated_at=? WHERE posting_id=?")
           .run(now, JSON.stringify({ ...stored, inputs: state, invalidated: true }), now, row.posting_id);
@@ -168,7 +169,7 @@ function absentFromCensuses(db, postingId) {
 }
 
 export async function runReview({ db, runId, parentRunId = null, owner, now, budget, maxFetches = Infinity, concurrency = 1,
-  deadlineMs, deadlineAt, clock = Date.now, fetcher, judges, secondOpinion, attemptDir, sleep, inputs, hooks = {} }) {
+  deadlineMs, deadlineAt, clock = Date.now, fetcher, judges, secondOpinion, jev, attemptDir, sleep, inputs, hooks = {} }) {
   const receipt = { schema: 1, kind: 'review', run_id: runId, parent_run_id: parentRunId, started: now, finished: null, status: 'ok', stop_reason: null,
     previous_run_interrupted: false, counts: { attempts: 0, attempts_lost: 0, escalations: 0, fetched: 0 }, sampling: { judged: 0, found: 0 },
     breaches: [], awaiting_user: [], awaiting_user_summary: [], model_decided: [], backlog: {}, warnings: [], errors: [] };
@@ -198,6 +199,10 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   receipt.counts.attempts_lost = recovered.lost;
   db.prepare("UPDATE reviews SET state='due',lease_owner=NULL,lease_until=NULL,lease_generation=lease_generation+1 WHERE state='leased' AND (lease_until<=? OR ?)").run(now, lease.previousRunInterrupted ? 1 : 0);
   let current = await inputs();
+  if (usesJevSplit(current.policy)) {
+    receipt.jev = jevCounts(); jev ??= createJevSplit(current.policy);
+    if (!evalCurrent(current.evalRecord, jevDependencies(current.policy)).current) receipt.warnings.push('eval_stale');
+  }
   const comparison = dependencyComparison(db, current);
   const settled = new Set(db.prepare("SELECT posting_id FROM reviews WHERE state IN ('done','held')").all().map((r) => r.posting_id));
   if (current.policy.judge?.secondOpinion) receipt.counts.secondOpinion = { asked: 0, agreed: 0, escalated: 0, errors: 0 };
@@ -414,7 +419,15 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     }
     let final;
     let opinionAsked = false;
+    let jevProbabilities;
+    if (usesJevSplit(stageInputs.policy) && !expired()) {
+      receipt.jev ??= jevCounts();
+      const result = await reviewJevSplit({ inputs: stageInputs, snapshotText: snapshot.text, firstSeen: posting.first_seen,
+        jev, counts: receipt.jev });
+      final = result.verdict; jevProbabilities = result.probabilities;
+    }
     for (const tier of ['primary','escalation']) {
+      if (final) break;
       if (expired()) { receipt.stop_reason = 'deadline'; break; }
       const adapter = judges[tier];
       const request = await buildJudgeRequest({ posting, snapshot, sections: parseJson(snapshot.sections_json, []), inputs: stageInputs, adapter, tier });
@@ -471,6 +484,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       release(id, fence, { stage: 'judge' }); return;
     }
     if (final) {
+      if (jevProbabilities) final = { ...final, jev: jevProbabilities };
       // Track the applied decision separately so retained judgment provenance
       // does not requeue a settled review on every subsequent run.
       const committedDependencies = { ...dependencies, decisionRuntime };
@@ -504,7 +518,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     const fetchAhead = Math.max(concurrency * 2, FETCH_BATCH_MIN);
     const needsFetch = (row) => ['scan','fetch'].includes(row.stage);
     const canFetch = () => !expired() && clock() - start < duration * JUDGE_TIME_SHARE
-      && !primaryStopped && spending.remaining() >= 1 && receipt.counts.fetched < maxFetches;
+      && (usesJevSplit(current.policy) || !primaryStopped && spending.remaining() >= 1) && receipt.counts.fetched < maxFetches;
     const hosts = new Map();
     const hostFor = (row) => {
       if (!hosts.has(row.posting_id)) hosts.set(row.posting_id, new URL(postingUrl(row)).host);
@@ -538,7 +552,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         }
         const candidates = queue.map((id) => rows.get(id));
         let started = 0;
-        if (!primaryStopped || receipt.stop_reason === 'quota') {
+        if (usesJevSplit(current.policy) || !primaryStopped || receipt.stop_reason === 'quota') {
           for (const row of candidates) {
             if (judging.size >= concurrency || expired()) break;
             if (fetching.has(row.posting_id) || needsFetch(row)) {

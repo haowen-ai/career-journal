@@ -193,7 +193,8 @@ export function codexExecAdapter({ bin = 'codex', codexHome, model, effort, tier
 
 export function createJudgeAdapters(reviewPolicy) {
   const make = (tier) => {
-    const config = reviewPolicy?.judge?.[tier];
+    const name = tier === 'primary' && reviewPolicy?.judge?.primary?.runner === 'jev-split' ? 'fallback' : tier;
+    const config = reviewPolicy?.judge?.[name];
     required(config?.model, `${tier}.model`);
     required(config?.codexHome, `${tier}.codexHome`);
     if (config.runner !== 'codex') throw new Error(`Unsupported ${tier} judge runner: ${config.runner}`);

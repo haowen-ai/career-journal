@@ -6,6 +6,7 @@ import { redact } from '../runtime/redact.mjs';
 import { loadReviewInputs, dependencyHash } from '../review/inputs.mjs';
 import { createJudgeAdapters } from '../review/judge.mjs';
 import { createSecondOpinion } from '../review/second-opinion.mjs';
+import { createJevSplit } from '../review/jev-split.mjs';
 import { runReview } from '../review/worker.mjs';
 import { commandFetcher, builtinFetcher, politeFetcher, validateSnapshot } from '../review/fetch.mjs';
 import { bootstrapExisting } from '../funnel/bootstrap.mjs';
@@ -38,6 +39,7 @@ export async function reviewWithContext(context, runtime = {}, options = {}) {
   if (!budgets) throw new Error('Review policy requires budgets');
   const judges = runtime.review?.judges ?? createJudgeAdapters(inputs.policy);
   const secondOpinion = runtime.review?.secondOpinion ?? createSecondOpinion(inputs.policy);
+  const jev = runtime.review?.jev ?? createJevSplit(inputs.policy);
   const fetcher = runtime.review?.fetcher ?? politeFetcher(inputs.policy.fetcher?.argv
     ? commandFetcher(inputs.policy.fetcher) : builtinFetcher({ fetchImpl: runtime.fetch ?? globalThis.fetch, timeoutMs: inputs.policy.fetcher?.timeoutMs ?? 30000 }));
   const receipt = await runReview({ db: context.db, runId, parentRunId: options['parent-run-id'], owner: `review-${process.pid}`,
@@ -45,7 +47,7 @@ export async function reviewWithContext(context, runtime = {}, options = {}) {
     maxFetches: numberOption(options['max-fetches'] ?? budgets.fetches, '--max-fetches', { zero: true }),
     concurrency: numberOption(options.concurrency ?? budgets.concurrency, '--concurrency'),
     deadlineMs: numberOption(options['deadline-min'] ?? budgets.deadlineMin, '--deadline-min', { integer: false }) * 60000,
-    deadlineAt: options['deadline-at'], fetcher, judges, secondOpinion, attemptDir: path.join(context.root, '.career-journal', 'attempts'),
+    deadlineAt: options['deadline-at'], fetcher, judges, secondOpinion, jev, attemptDir: path.join(context.root, '.career-journal', 'attempts'),
     inputs: () => loadReviewInputs(context.root), hooks: runtime.review?.hooks ?? {} });
   receipt.run_date = localDate(now, context.config.timezone);
   if (receipt.status !== 'busy') {
@@ -172,7 +174,8 @@ export async function reviewCommand(parsed, io, runtime = {}) {
         const inputs = await loadReviewInputs(context.root);
         const judges = runtime.review?.judges ?? createJudgeAdapters(inputs.policy);
         const secondOpinion = runtime.review?.secondOpinion ?? createSecondOpinion(inputs.policy);
-        const result = await runEval({ setDir: required(options.set, '--set'), judges, secondOpinion,
+        const jev = runtime.review?.jev ?? createJevSplit(inputs.policy);
+        const result = await runEval({ setDir: required(options.set, '--set'), judges, secondOpinion, jev,
           judgePolicy: inputs.policy.judge, concurrency: numberOption(options.concurrency ?? 3, '--concurrency') });
         if (result.pass) await saveEvalRecord(context.root, result.record);
         emit(result); return result.pass ? 0 : 1;

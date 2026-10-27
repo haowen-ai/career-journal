@@ -133,9 +133,10 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
       program: value.program ?? null, location: value.location ?? null, factsUsed: value.factsUsed ?? [], question: value.question ?? null, holdFactIds: value.holdFactIds ?? [] };
     if (value.modelDecision) evidence.modelDecision = value.modelDecision;
     else delete evidence.modelDecision;
+    if (value.jev) evidence.jev = value.jev;
     const userHold = held && !['unavailable','quota_full','quota_reconciliation'].includes(value.code);
     db.prepare('UPDATE reviews SET flags_json=? WHERE posting_id=?')
-      .run(JSON.stringify([...new Set([...parseJson(review.flags_json, []).filter((flag) => !['term_inferred', 'model_decided', 'disputed'].includes(flag)), ...(value.flags ?? [])])]), postingId);
+      .run(JSON.stringify([...new Set([...parseJson(review.flags_json, []).filter((flag) => !['term_inferred', 'model_decided', 'disputed', 'jev_decided'].includes(flag)), ...(value.flags ?? [])])]), postingId);
     db.prepare(`UPDATE reviews SET state=?,decision=?,code=?,evidence_json=?,deadline_json=?,hold_owner=?,hold_since=?,next_due=?,stage='deliver',
       lease_owner=NULL,lease_until=NULL,updated_at=? WHERE posting_id=? AND lease_owner=? AND lease_generation=?`)
       .run(held ? 'held' : 'done', value.decision, protectedApp ? 'superseded_by_user' : value.code ?? null, JSON.stringify(evidence), JSON.stringify(value.deadline ?? {}),

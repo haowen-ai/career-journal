@@ -4,6 +4,11 @@ export function createSecondOpinion(policy) {
   const config = policy.judge?.secondOpinion;
   if (!config) return undefined;
   if (config.runner !== 'jev') throw new Error('Second opinion runner must be jev');
+  return createJevAdapter(config);
+}
+
+// System One accepts exactly one noul question for each ask, for either role.
+export function createJevAdapter(config) {
   const model = config.model ?? 'jev-latest';
   return {
     id: `jev:${model}`, runner: 'jev', model,
