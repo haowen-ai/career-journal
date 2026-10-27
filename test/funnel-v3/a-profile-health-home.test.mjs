@@ -41,7 +41,7 @@ test('[A] migrate apply backs up an existing database before 006', async () => {
 
     const first = await migrateHome(home, {});
     assert.equal(first.dryRun, false);
-    assert.deepEqual(first.applied, [6]);
+    assert.deepEqual(first.applied, [6, 7]);
     assert.equal(typeof first.backup, 'string', 'a backup is taken before migration 006 is applied');
     assert.ok(existsSync(path.join(first.backup, 'manifest.json')), 'the backup directory carries a manifest');
     const second = await migrateHome(home, {});
@@ -98,7 +98,7 @@ test('[A] home connections wait on a busy database', async () => {
     await setupHome(home);
     context = await openHomeDatabase(home);
     assert.ok(Number(context.db.prepare('PRAGMA busy_timeout').get().timeout) >= 5000, 'busy_timeout ≥ 5000 ms');
-    assert.equal(Math.max(...context.db.prepare('SELECT version FROM schema_migrations').all().map((row) => Number(row.version))), 6);
+    assert.equal(Math.max(...context.db.prepare('SELECT version FROM schema_migrations').all().map((row) => Number(row.version))), 7);
     // Another connection (the dashboard) holds the write lock for 300 ms; the worker must wait, not fail with SQLITE_BUSY.
     const script = `const { DatabaseSync } = require('node:sqlite'); const db = new DatabaseSync(process.argv[1]);
       db.exec('BEGIN IMMEDIATE'); process.stdout.write('locked\\n'); setTimeout(() => { db.exec('COMMIT'); db.close(); }, 300);`;
