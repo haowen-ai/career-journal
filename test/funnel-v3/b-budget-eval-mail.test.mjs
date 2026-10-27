@@ -163,6 +163,7 @@ test('[B] loadReviewInputs names the missing rules file', async () => {
   try {
     await writeReviewHome(home, { omit: ['fit-rules.md'] });
     await assert.rejects(async () => loadReviewInputs(home), /fit-rules\.md/);
+    await rm(path.join(home, '.career-journal', 'profile', 'resume.txt'), { force: true });
     await writeReviewHome(home, { resume: null });
     const inputs = await loadReviewInputs(home);
     assert.equal(inputs.rules.screening, RULES.screening);
