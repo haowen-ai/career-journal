@@ -5,7 +5,7 @@ import { aliasesFor, canonicalUrl } from './identity.mjs';
 const STUDENT = /\b(?:intern(?:s|ship|ships)?|co[- ]?ops?|apprentice(?:s|ship|ships)?|placements?|working students?|students?|fellow(?:s|ship|ships)?|residen(?:t|ts|cy)|graduate program(?:me)?|early career|university program(?:me)?|campus program(?:me)?|summer (?:analysts?|associates?|20\d\d program(?:me)?)|currently enrolled|class of 20\d\d)\b/i;
 // Descriptions often mention students in company-wide boilerplate. Only explicit
 // program phrases count there; titles and departments retain the broader signal.
-const PROGRAM = /\b(?:interns?|internships?|co[- ]?ops?|apprentice(?:s|ship|ships)?|summer\s+20\d\d\s+(?:interns?|analysts?|associates?|program(?:me)?)|(?:graduate|early career|university|campus)\s+program(?:me)?)\b/i;
+const PROGRAM = /\b(?:interns?|internship|co[- ]?ops?|apprentice(?:s|ship|ships)?|summer\s+20\d\d\s+(?:interns?|analysts?|associates?|program(?:me)?)|(?:graduate|early career|university|campus)\s+program(?:me)?)\b/i;
 const DIRECTION = /\b(?:data|analytics|analyst|AI|ML|machine\s+learning|product|program|project|business|insights|intelligence|solutions|strategy|BI|quant)\b/i;
 const names = new Map();
 const normalized = (value) => String(value).normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();

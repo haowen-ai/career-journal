@@ -27,7 +27,7 @@ const DAY = 86400000;
 const explorationLane = (row) => ['no_student_signal', 'out_of_direction'].includes(row.lane);
 const postingUrl = (posting) => /^https?:/.test(posting.canonical_url) ? posting.canonical_url : `https://${posting.canonical_url}`;
 const factsMap = (facts) => Object.fromEntries(facts.map((fact) => [fact.id, dependencyHash(fact)]));
-function inputState(inputs) {
+export function inputState(inputs) {
   return { facts: factsMap(inputs.facts), rules: dependencyHash(inputs.rules), policy: dependencyHash({ policy: inputs.policy, jobType: inputs.profile?.search?.jobType ?? null }),
     screening: dependencyHash(inputs.screeningPolicy), provenance: dependencyHash(inputs.provenance), resume: dependencyHash(inputs.resume?.text ?? null),
     windowsAreas: dependencyHash({ windows: inputs.policy.windows, areas: inputs.policy.areas, jobType: inputs.profile?.search?.jobType ?? null }),

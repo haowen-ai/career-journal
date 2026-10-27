@@ -20,7 +20,7 @@ export function rememberJudgment(db, postingId, envelope) {
   db.prepare('UPDATE reviews SET evidence_json=? WHERE posting_id=?').run(JSON.stringify(evidence), postingId);
 }
 
-export function cachedJudgment(db, postingId, { tier, depsHash, snapshotHash }) {
+export function cachedJudgment(db, postingId, { tier, depsHash, snapshotHash, remember = true }) {
   const evidence = object(db.prepare('SELECT evidence_json FROM reviews WHERE posting_id=?').get(postingId)?.evidence_json);
   const matches = (value) => value?.tier === tier && value.depsHash === depsHash && value.snapshotHash === snapshotHash;
   const cached = evidence.judgments?.[tier];
@@ -29,7 +29,7 @@ export function cachedJudgment(db, postingId, { tier, depsHash, snapshotHash }) 
     const payload = object(row.payload_json);
     if (!matches(payload)) continue;
     const envelope = judgmentEnvelope(payload.output, payload);
-    if (envelope) { rememberJudgment(db, postingId, envelope); return envelope.output; }
+    if (envelope) { if (remember) rememberJudgment(db, postingId, envelope); return envelope.output; }
   }
   return null;
 }

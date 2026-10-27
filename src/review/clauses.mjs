@@ -1,4 +1,6 @@
 const BULLET = /^\s*(?:[•*+-]|\d+[.)])\s+/;
+const clauseBody = (text) => text.replace(BULLET, '').replace(/^(?:TITLE|Eligibility):\s*/i, '');
+const indentation = (line) => line.match(/^[ \t]*/)[0].length;
 
 function headingKind(line) {
   const heading = line.trim().replace(/^#{1,6}\s+/, '').replace(/^\*\*(.*?)\*\*$/, '$1')
@@ -44,23 +46,20 @@ export function clauseAt(text, offset) {
   const lineIndex = lines.findIndex((line) => line.start <= offset && offset <= line.end);
   if (lineIndex >= 0) {
     let bulletIndex = lineIndex;
-    while (bulletIndex > 0 && !BULLET.test(lines[bulletIndex].text) && lines[bulletIndex - 1].text.trim()) bulletIndex -= 1;
-    if (BULLET.test(lines[bulletIndex].text)) {
+    while (bulletIndex > 0 && !BULLET.test(lines[bulletIndex].text) && /^[ \t]+\S/.test(lines[bulletIndex].text)) bulletIndex -= 1;
+    const continuation = (line) => line.text.trim() && !BULLET.test(line.text)
+      && indentation(line.text) > indentation(lines[bulletIndex].text);
+    if (BULLET.test(lines[bulletIndex].text) && lines.slice(bulletIndex + 1, lineIndex + 1).every(continuation)) {
       let endIndex = bulletIndex + 1;
-      while (endIndex < lines.length && lines[endIndex].text.trim() && !BULLET.test(lines[endIndex].text)) endIndex += 1;
+      while (endIndex < lines.length && continuation(lines[endIndex])) endIndex += 1;
       const start = lines[bulletIndex].start;
       const end = lines[endIndex - 1].end;
       return { start, end, text: text.slice(start, end) };
     }
   }
-  // Restrict unbulleted prose to its paragraph, then use deterministic sentence boundaries.
-  let start = section.start;
-  let end = section.end;
-  for (const match of text.slice(section.start, section.end).matchAll(/\n\s*\n/g)) {
-    const boundary = section.start + match.index;
-    if (boundary + match[0].length <= offset) start = boundary + match[0].length;
-    else if (boundary >= offset) { end = boundary; break; }
-  }
+  // A new prose line starts a new clause, even without sentence punctuation.
+  const start = lines[lineIndex]?.start ?? section.start;
+  const end = lines[lineIndex]?.end ?? section.end;
   const paragraph = text.slice(start, end);
   for (const sentence of new Intl.Segmenter('en', { granularity: 'sentence' }).segment(paragraph)) {
     const from = start + sentence.index;
@@ -106,20 +105,31 @@ export function validateCriterion(text, criterion, facts) {
   const base = { valid: false, reason: 'quote_not_found', section: null, clause: null, confirmedConflict: false };
   if (!found) return base;
   const section = segmentSections(text).find((item) => item.start <= found.start && found.start < item.end)?.kind ?? 'unknown';
-  const clause = clauseAt(text, found.start);
+  let clause = clauseAt(text, found.start);
+  // A whole prose line may contain several sentences. Keep fragments and
+  // partial wrapped bullets subject to the whole-clause check below.
+  const lineStart = text.lastIndexOf('\n', found.start - 1) + 1;
+  const nextLine = text.indexOf('\n', found.end);
+  const lineEnd = nextLine < 0 ? text.length : nextLine;
+  if (!BULLET.test(clause.text) && !clauseBody(text.slice(lineStart, found.start)).trim()
+    && !text.slice(found.end, lineEnd).trim()) {
+    clause = { start: lineStart, end: lineEnd, text: text.slice(lineStart, lineEnd) };
+  }
   const result = { ...base, valid: true, reason: null, section, clause };
   // Parentheticals and attributive wording such as "Preferred Graduation Date"
   // do not make the main requirement optional. Check its own predicate instead.
-  let main = clause.text.replace(BULLET, '');
+  let main = clauseBody(clause.text);
   while (/\([^()]*\)/.test(main)) main = main.replace(/\([^()]*\)/g, '');
-  if (section === 'preferred' || /\b(?:preferred|optional|nice.to.have|bonus(?: points)?|not required|a plus)\b\s*[.!?]?\s*$/i.test(main)) return { ...result, reason: 'non_mandatory' };
+  if (section === 'preferred' || /\b(?:preferred|optional|nice.to.have|bonus(?: points)?|not required|a plus)\b\s*[.!?]?\s*$/i.test(main)
+    || /\b(?:could (?:include|be required)|depending on the role)\b/i.test(main)) return { ...result, reason: 'non_mandatory' };
   if (criterion.status !== 'conflicts') return result;
-  const body = normalizeQuote(clause.text.replace(BULLET, '')).trim();
-  const quote = normalizeQuote(criterion.quote.replace(BULLET, '')).trim();
+  const body = normalizeQuote(clauseBody(clause.text)).trim();
+  const quote = normalizeQuote(clauseBody(criterion.quote)).trim();
   if (found.end > clause.end || quote !== body) return { ...result, valid: false, reason: 'partial_clause' };
   const cited = (criterion.fact_ids ?? []).map((id) => facts.find((fact) => fact.id === id));
-  if (cited.some((fact) => fact?.polarity === 'has')) return { ...result, reason: 'contradictory_fact' };
-  if (!cited.length || cited.some((fact) => !fact || !['lacks', 'constraint'].includes(fact.polarity))) return { ...result, reason: 'missing_fact' };
+  const conflicting = cited.filter((fact) => ['lacks', 'constraint'].includes(fact?.polarity));
+  if (!conflicting.length && cited.some((fact) => fact?.polarity === 'has')) return { ...result, reason: 'contradictory_fact' };
+  if (!conflicting.length || cited.some((fact) => !fact || !['has', 'lacks', 'constraint'].includes(fact.polarity))) return { ...result, reason: 'missing_fact' };
   // The model decides whether the cited facts contradict this whole requirement.
   // Word overlap, degree levels and OR-branch semantics cannot validate that claim.
   return { ...result, confirmedConflict: true };

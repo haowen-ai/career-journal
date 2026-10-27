@@ -16,8 +16,9 @@ import { postingLedger } from '../review/ledger.mjs';
 import { matchMailHits } from '../review/mail.mjs';
 import { annotateMail, unhide, deliver, logReview, parseJson } from '../review/deliver.mjs';
 import { claimItem, atomic } from '../review/lease.mjs';
+import { redecideReviews } from '../review/redecide.mjs';
 
-const usage = 'Usage: career-journal review run|bootstrap|list|report|receipt|attach|add|annotate|unhide|resolve|ledger|audit|daily-finalize|eval';
+const usage = 'Usage: career-journal review run|redecide|bootstrap|list|report|receipt|attach|add|annotate|unhide|resolve|ledger|audit|daily-finalize|eval';
 const required = (value, name) => { if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required`); return value; };
 function numberOption(value, name, { zero = false, integer = true } = {}) {
   const result = Number(value);
@@ -59,6 +60,16 @@ export async function reviewCommand(parsed, io, runtime = {}) {
   try {
     switch (parsed.subcommand) {
       case 'run': { const receipt = await reviewWithContext(context, runtime, options); emit(receipt); return reviewExitCode(receipt); }
+      case 'redecide': {
+        if (options.held !== true || options.done !== undefined && options.done !== true) throw new Error('Usage: career-journal review redecide --held [--done] [--json]');
+        if (isBusy(context.db, now)) throw new Error('A review run is active');
+        const inputs = await loadReviewInputs(context.root);
+        const judges = runtime.review?.judges ?? createJudgeAdapters(inputs.policy);
+        await Promise.all(Object.values(judges).map((adapter) => adapter.ready));
+        if (isBusy(context.db, now)) throw new Error('A review run is active');
+        emit(await redecideReviews(context.db, { inputs, judges, held: true, done: options.done === true, now }));
+        return 0;
+      }
       case 'bootstrap': { const inputs = await loadReviewInputs(context.root); emit(bootstrapExisting(context.db, { provenance: inputs.provenance, policy: inputs.screeningPolicy, now })); return 0; }
       case 'list': {
         const rows = context.db.prepare(`SELECT r.*,p.company,p.title,p.canonical_url url FROM reviews r JOIN postings p ON p.id=r.posting_id${options.held ? " WHERE r.state='held'" : ''} ORDER BY r.first_seen,r.posting_id`).all();
