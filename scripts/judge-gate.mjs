@@ -4,17 +4,21 @@ import { parseArgs } from '../src/cli/parse-args.mjs';
 import { runEval, saveEvalRecord } from '../src/review/eval.mjs';
 import { loadReviewInputs } from '../src/review/inputs.mjs';
 import { createJudgeAdapters } from '../src/review/judge.mjs';
+import { createSecondOpinion } from '../src/review/second-opinion.mjs';
 import { assertHomeOutsideCheckout } from '../src/runtime/home.mjs';
 import { redact } from '../src/runtime/redact.mjs';
 
 try {
   const { options } = parseArgs(process.argv.slice(2));
-  let judges;
+  let judges; let secondOpinion; let judgePolicy;
   if (options.home) {
     assertHomeOutsideCheckout(options.home);
-    judges = createJudgeAdapters((await loadReviewInputs(options.home)).policy);
+    const { policy } = await loadReviewInputs(options.home);
+    judges = createJudgeAdapters(policy);
+    secondOpinion = createSecondOpinion(policy);
+    judgePolicy = policy.judge;
   }
-  const result = await runEval({ setDir: options.set ?? fileURLToPath(new URL('../test/fixtures/judge-smoke/', import.meta.url)), judges, concurrency: Number(options.concurrency ?? 3) });
+  const result = await runEval({ setDir: options.set ?? fileURLToPath(new URL('../test/fixtures/judge-smoke/', import.meta.url)), judges, secondOpinion, judgePolicy, concurrency: Number(options.concurrency ?? 3) });
   if (result.pass && options.home) await saveEvalRecord(options.home, result.record);
   process.stdout.write(`${redact(JSON.stringify(options.json ? result : { pass: result.pass, metrics: result.metrics, record: result.record }, null, 2))}\n`);
   process.exitCode = result.pass ? 0 : 1;

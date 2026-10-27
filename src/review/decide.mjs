@@ -254,7 +254,9 @@ export function decide({ snapshotText, judgment, facts, policy, tier, firstSeen,
   const factsUsed = [...new Set([...facts.filter((fact) => fact.polarity === 'constraint').map((fact) => fact.id), ...criteria.flatMap(({ criterion }) => criterion.fact_ids ?? [])])];
   const base = { code: null, escalate: false, factsUsed, evidence, flags: alternatives.some((item) => item.inferred) ? ['term_inferred'] : [], fit: fitFor(judged, policy, functionValue), ...details };
   const unclear = (code, question) => ({ ...base, decision: 'unclear', code, escalate: tier === 'primary', nextAction: 'user_review', question });
-  const rejected = (code, question) => tier === 'primary' ? unclear(code, question) : { ...base, decision: 'not_eligible', code };
+  const rejected = (code, question, codeVerified = false) => tier === 'primary'
+    ? { ...unclear(code, question), primaryRejection: true, codeVerified }
+    : { ...base, decision: 'not_eligible', code };
   const termOrArea = () => unclear('term_or_area', 'Which stated work window and office or remote scope match your policy?');
   if (tier !== 'primary' && policy.functions?.outOfScope?.includes(functionValue)) return rejected('function_out_of_scope', `Is ${functionValue} work in scope?`);
   const confirmed = criteria.find(({ criterion, validation }) => criterion.status === 'conflicts' && validation.confirmedConflict);
@@ -266,7 +268,7 @@ export function decide({ snapshotText, judgment, facts, policy, tier, firstSeen,
     // even though none can be delivered as an allowed location alternative.
     base.evidence.push(...alternatives.map(({ term, offices, remote }) => ({ confirmed: true, code, term, offices, remote,
       factIds: [], quote: term?.quote ?? offices[0]?.quote ?? remote.quote, quotes: [term?.quote, ...offices.map((office) => office.quote), remote.quote].filter(Boolean) })));
-    return rejected(code, 'The quoted alternatives all fall outside your policy.');
+    return rejected(code, 'The quoted alternatives all fall outside your policy.', true);
   }
   const advisoryCriterion = ({ criterion, validation }) => {
     if (criterion.status !== 'unclear' || !validation.valid) return false;

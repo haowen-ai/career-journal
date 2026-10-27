@@ -8,6 +8,8 @@ import { validateSnapshot } from './fetch.mjs';
 import { buildJudgeRequest } from './prompt.mjs';
 import { segmentSections } from './clauses.mjs';
 import { decide } from './decide.mjs';
+import { reviewPrimaryVerdict } from './worker.mjs';
+import { createSecondOpinion } from './second-opinion.mjs';
 import { redact } from '../runtime/redact.mjs';
 
 const PROFILE_FILES = ['facts.json','review-policy.json','screening-policy.json','review-provenance.json','screening-rules.md','fit-rules.md','resume.txt','profile.json'];
@@ -30,7 +32,7 @@ export async function saveEvalRecord(home, record) {
   await rename(tmp, path.join(directory, 'eval-latest.json'));
 }
 
-export async function runEval({ setDir, judges, concurrency = 3 }) {
+export async function runEval({ setDir, judges, secondOpinion, judgePolicy, concurrency = 3 }) {
   if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error('Evaluation concurrency must be positive');
   const manifestText = await readBounded(path.join(setDir, 'manifest.json'));
   const manifest = JSON.parse(manifestText);
@@ -53,8 +55,9 @@ export async function runEval({ setDir, judges, concurrency = 3 }) {
         } catch (error) { if (!(['resume.txt','profile.json'].includes(name) && error.code === 'ENOENT')) throw error; }
       }
       const inputs = await loadReviewInputs(home);
+      if (judgePolicy) inputs.policy = { ...inputs.policy, judge: judgePolicy };
       const adapters = judges ?? createJudgeAdapters(inputs.policy);
-      profiles.set(id, { inputs, adapters }); deps[id] = {};
+      profiles.set(id, { inputs, adapters, secondOpinion: secondOpinion ?? createSecondOpinion(inputs.policy) }); deps[id] = {};
       for (const tier of ['primary','escalation']) {
         const request = await buildJudgeRequest({ posting: {}, snapshot: { text: '' }, sections: [], inputs, adapter: adapters[tier], tier });
         deps[id][tier] = request.deps.parts;
@@ -62,6 +65,7 @@ export async function runEval({ setDir, judges, concurrency = 3 }) {
     }
     const cases = new Array(manifest.cases.length);
     const metrics = { falseAccepts: 0, falseRejects: 0, unexpectedUnclear: 0, codeMismatches: 0, adapterErrors: 0, cases: cases.length, escalations: 0 };
+    if ([...profiles.values()].some(({ inputs }) => inputs.policy.judge?.secondOpinion)) metrics.secondOpinion = { asked: 0, agreed: 0, escalated: 0, errors: 0 };
     let next = 0;
     const execute = async () => {
       for (;;) {
@@ -74,7 +78,7 @@ export async function runEval({ setDir, judges, concurrency = 3 }) {
         const text = await readBounded(within(setDir, item.fetch)); fixtures[item.fetch] = text;
         const snapshot = JSON.parse(text);
         const identity = validateSnapshot(item.posting, snapshot);
-        let verdict; let escalated = false; let adapterError = false;
+        let verdict; let escalated = false; let adapterError = false; let opinionAsked = false;
         const attempts = [];
         if (!identity.identityOk) verdict = { decision: 'unclear', code: identity.reason, escalate: false };
         else {
@@ -86,10 +90,18 @@ export async function runEval({ setDir, judges, concurrency = 3 }) {
             try { result = await adapter.judge(request, { attemptId, outputPath }); }
             catch (error) { result = { status: 'error', error: error.message }; }
             attempts.push({ tier, status: result.status, error: result.error ?? null, judgment: result.output ?? null });
-            if (tier === 'escalation') { escalated = true; metrics.escalations += 1; }
+            if (tier === 'escalation') {
+              escalated = true; metrics.escalations += 1;
+              if (opinionAsked) metrics.secondOpinion.escalated += 1;
+            }
             if (result.status !== 'ok') { verdict = { decision: 'unclear', code: `judge_${result.status}` }; adapterError = true; break; }
             verdict = decide({ snapshotText: snapshot.text, judgment: result.output, facts: profile.inputs.facts, policy: profile.inputs.policy, tier,
               firstSeen: item.posting.firstSeen, jobType: profile.inputs.profile?.search?.jobType });
+            if (tier === 'primary') {
+              const result = await reviewPrimaryVerdict({ verdict, inputs: profile.inputs, snapshotText: snapshot.text,
+                firstSeen: item.posting.firstSeen, secondOpinion: profile.secondOpinion, counts: metrics.secondOpinion });
+              verdict = result.verdict; opinionAsked = result.asked;
+            }
             if (tier === 'primary' && verdict.escalate) continue;
             break;
           }
