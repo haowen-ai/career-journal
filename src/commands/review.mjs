@@ -59,7 +59,7 @@ export async function reviewCommand(parsed, io, runtime = {}) {
   try {
     switch (parsed.subcommand) {
       case 'run': { const receipt = await reviewWithContext(context, runtime, options); emit(receipt); return reviewExitCode(receipt); }
-      case 'bootstrap': { const inputs = await loadReviewInputs(context.root); emit(bootstrapExisting(context.db, { provenance: inputs.provenance, now })); return 0; }
+      case 'bootstrap': { const inputs = await loadReviewInputs(context.root); emit(bootstrapExisting(context.db, { provenance: inputs.provenance, policy: inputs.screeningPolicy, now })); return 0; }
       case 'list': {
         const rows = context.db.prepare(`SELECT r.*,p.company,p.title,p.canonical_url url FROM reviews r JOIN postings p ON p.id=r.posting_id${options.held ? " WHERE r.state='held'" : ''} ORDER BY r.first_seen,r.posting_id`).all();
         emit(rows); return 0;

@@ -16,7 +16,8 @@
 | `{{resumePath}}` | 用户为这个岗位选定的那一份简历 |
 | `{{resumeTextPath}}` | 可选：这份简历的纯文本副本，用于原样复制 bullet；没有时写 `none` |
 | `{{transcriptPath}}` | `materials.transcriptPath`，没有时写 `none` |
-| `{{locationOrder}}` | 按顺序列出 `search.locations` 的名称，并写明是否接受远程 |
+| `{{locationOrder}}` | `search.locations` 的地点偏好顺序，用于排列已核实的备选项 |
+| `{{allowedAlternatives}}` | `review run` 为本岗位核实的地点、办公室和远程备选项，来自交付的 review 证据 `location.alternatives`；保留每个工作时段与其允许地点或远程范围的对应关系；手工岗位使用 `queue verify` 证据 |
 | `{{exclusions}}` | 用平实语言写出 `search.exclusions` |
 | `{{atsTipsPath}}` | 本仓库中 `references/ats-tips.zh-CN.md` 的路径 |
 | `{{titleLanguage}}` | 标签标题说明文字使用的语言，例如英文或简体中文 |
@@ -55,7 +56,7 @@ Next、Continue、Save and Continue 这类中间按钮可以点。宿主的权�
 ## 填表前
 
 - **是否已投过？** 查看网站的候选人后台或“已申请”提示。用户已经投过这个岗位时，停下并报告“已投过”。
-- **地点。** 表单要求选择地点或办公室时，按这个顺序选：{{locationOrder}}。岗位只在这些地点以外开放时不要填写，停下并报告岗位提供的地点。
+- **地点。** 只能选择本岗位已核实的工作时段与地点备选项：{{allowedAlternatives}}。用 {{locationOrder}} 为这些备选项排序，其余已核实的选项仍可选择。表单提供的选项全部超出 {{allowedAlternatives}} 时，停下并报告提供的地点及其工作时段。缺少已核实的备选项时，停下并索取已记录的 review 证据后再选择地点。
 - **资格。** 沿用 `review run` 交付的判断和官网原文引用证据，不重新判定资格或匹配度。`verifiedAt` 为空的手工岗位在派发前仍按原流程用 `queue verify` 核实。表单出现关于学历层次、毕业时间、工作身份或 {{exclusions}} 的新矛盾时，停下并报告原文。
 
 ## 事实

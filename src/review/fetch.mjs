@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { executeCareerOpsProcess } from '../integrations/careerops-process.mjs';
 import { providerRequisition } from '../funnel/identity.mjs';
 
 export function commandFetcher({ argv, timeoutMs, maxBytes = 2_000_000, runImpl }) {
@@ -7,26 +7,7 @@ export function commandFetcher({ argv, timeoutMs, maxBytes = 2_000_000, runImpl 
     const controller = new AbortController();
     let failure;
     const timer = setTimeout(() => { failure = 'timeout'; controller.abort(); }, timeoutMs);
-    const execute = runImpl ?? ((spec) => new Promise((resolve, reject) => {
-      const child = spawn(spec.command, spec.args, { stdio: ['pipe', 'pipe', 'pipe'] });
-      const chunks = []; let bytes = 0; let killTimer;
-      const stop = () => { child.kill('SIGTERM'); killTimer ??= setTimeout(() => child.kill('SIGKILL'), 5000); };
-      spec.signal.addEventListener('abort', stop, { once: true });
-      if (spec.signal.aborted) stop();
-      const consume = (keep) => (chunk) => {
-        bytes += chunk.length;
-        if (bytes > maxBytes) { failure = 'too_large'; controller.abort(); return; }
-        if (keep) chunks.push(chunk);
-      };
-      child.stdout.on('data', consume(true)); child.stderr.on('data', consume(false));
-      child.stdin.on('error', () => {});
-      child.once('error', reject);
-      child.once('close', (exitCode) => {
-        clearTimeout(killTimer); spec.signal.removeEventListener('abort', stop);
-        resolve({ exitCode, stdout: Buffer.concat(chunks).toString('utf8') });
-      });
-      child.stdin.end(spec.stdin);
-    }));
+    const execute = runImpl ?? executeCareerOpsProcess;
     try {
       const execution = Promise.resolve().then(() => execute({ command: argv[0], args: argv.slice(1), argv, stdin: JSON.stringify(request), signal: controller.signal, timeoutMs, maxBytes }));
       let result;
@@ -36,7 +17,7 @@ export function commandFetcher({ argv, timeoutMs, maxBytes = 2_000_000, runImpl 
       if (Buffer.byteLength(result.stdout ?? '') > maxBytes) return { ok: false, error: 'too_large' };
       if ((result.exitCode ?? 0) !== 0) return { ok: false, error: `fetch command exited ${result.exitCode}` };
       return JSON.parse(result.stdout);
-    } catch (error) { return { ok: false, error: failure ?? error.message }; }
+    } catch (error) { return { ok: false, error: error.code === 'PROCESS_TOO_LARGE' ? 'too_large' : failure ?? error.message }; }
     finally { clearTimeout(timer); }
   } };
 }
@@ -81,7 +62,10 @@ export function builtinFetcher({ fetchImpl = globalThis.fetch, timeoutMs = 30000
             return { ok: true, httpStatus: 200, finalUrl: request.url, method: 'ats_api', title: data.title ?? data.text,
               company: request.known?.company, requisitionId: String(data.id ?? req.id), locations: [location, ...offices.map((o) => o.name ?? o)].filter(Boolean), offices,
               remote: data.isRemote ?? null, workplaceType: data.workplaceType ?? null, employmentType: data.employmentType ?? data.categories?.commitment,
-              text: plainText(data.content ?? data.descriptionHtml ?? data.descriptionPlain ?? data.description ?? ''), jsonLd: null, closedWording: null };
+              text: req.provider === 'lever' ? [data.descriptionPlain || data.description,
+                ...(data.lists ?? []).flatMap((list) => [list.text, list.content]), data.additionalPlain || data.additional]
+                .filter(Boolean).map(plainText).join('\n\n')
+                : plainText(data.content ?? data.descriptionHtml ?? data.descriptionPlain ?? data.description ?? ''), jsonLd: null, closedWording: null };
           }
         }
       }
@@ -136,7 +120,7 @@ export function validateSnapshot(posting, result) {
     if (host(url) !== host(result.finalUrl ?? url)) return fail('host_mismatch');
   } catch { return fail('host_mismatch'); }
   const text = String(result.text ?? '');
-  if (/please sign in to continue|verify (?:that )?you are human|captcha|access denied|search results|enable javascript and cookies/i.test(text)) return fail('challenge');
+  if (/\b(?:please sign in to continue|verify (?:that )?you are human|captcha|access denied|search results|enable javascript and cookies)\b/i.test(text)) return fail('challenge');
   const req = posting.requisition ?? posting.requisitionId ?? providerRequisition(/^https?:/.test(url) ? url : `https://${url}`)?.id;
   const fetchedReq = result.requisitionId;
   const workday = /myworkday(?:jobs|site)\.com/i.test(url);

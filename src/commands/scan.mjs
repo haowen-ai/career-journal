@@ -64,7 +64,7 @@ export async function scanWithContext(context, profile, runtime = {}, { dryRun =
 }
 
 export function scanExitCode(summary) {
-  return summary.status === 'failed' ? 1 : summary.status === 'partial' ? 2 : 0;
+  return summary.status === 'failed' ? 1 : summary.status === 'busy' ? 75 : summary.status === 'partial' ? 2 : 0;
 }
 export function scanFailed(summary) { return scanExitCode(summary) === 1; }
 
@@ -91,5 +91,8 @@ export async function scanCommand(parsed, io, runtime = {}) {
       return 1;
     }
     return scanExitCode(summary);
+  } catch (error) {
+    if (error.code === 75) { io.err(error.message); return 75; }
+    throw error;
   } finally { context.db.close(); }
 }

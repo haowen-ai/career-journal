@@ -1,4 +1,5 @@
 import { findQuote, normalizeQuote, validateCriterion } from './clauses.mjs';
+import { quotedClock } from './deadline.mjs';
 
 export const DECIDE_VERSION = 'clause-decisions-1';
 const FIT_LEVELS = ['low', 'medium', 'high'];
@@ -33,11 +34,11 @@ function dateEvidence(quote, value) {
   return { start: `${year}-${String(month).padStart(2, '0')}-01`, end: new Date(Date.UTC(Number(year), month, 0)).toISOString().slice(0, 10) };
 }
 
-function termEvidence(text, term) {
+function termEvidence(text, term, inferred = false) {
   if (!term || !findQuote(text, term.quote)) return false;
   const quote = clean(term.quote);
   if (!term.label || ![term.label, term.kind].filter(Boolean).every((label) => quote.includes(clean(label)))) return false;
-  if (term.year !== undefined && term.year !== null && (!Number.isInteger(term.year) || !new RegExp(`\\b${term.year}\\b`).test(quote))) return false;
+  if (term.year !== undefined && term.year !== null && (!Number.isInteger(term.year) || !inferred && !new RegExp(`\\b${term.year}\\b`).test(quote))) return false;
   if (term.start && !dateValid(term.start)) return false;
   if (term.start && !dateEvidence(quote, term.start)) return false;
   return true;
@@ -70,8 +71,33 @@ function remoteEvidence(text, remote) {
   return true;
 }
 
-function readAlternative(text, alternative, policy) {
+function inferTerm(term, firstSeen) {
+  if (!term || /\b\d{4}\b/.test(term.quote ?? '') || !/^(?:winter|spring|summer|fall|autumn)$/i.test(term.label ?? '')) return { term, inferred: false };
+  const observed = new Date(firstSeen);
+  if (!Number.isFinite(observed.getTime()) || observed.getUTCMonth() < 7) return { term, inferred: false };
+  return { term: { ...term, year: observed.getUTCFullYear() + 1 }, inferred: true };
+}
+
+function tiedToTerm(text, term, quote, place) {
+  const seasons = (value) => [...new Set(clean(value).match(/\b(?:winter|spring|summer|fall|autumn)\b/g) ?? [])];
+  const own = seasons(term.quote);
+  const other = seasons(quote);
+  if (other.some((season) => !own.includes(season))) return false;
+  const years = quote.match(/\b\d{4}\b/g) ?? [];
+  if (years.some((year) => Number(year) !== term.year)) return false;
+  const statedWindows = new Set([...clean(text).matchAll(/\b(winter|spring|summer|fall|autumn)(?:\s+(?:of\s+)?(\d{4}))?\b|\b(\d{4})\s+(winter|spring|summer|fall|autumn)\b/g)]
+    .map((match) => `${match[1] ?? match[4]}:${match[2] ?? match[3] ?? term.year ?? ''}`));
+  if (statedWindows.size <= 1) return true; // A single window can use the page's global location.
+  // Several tracks need a local statement linking the term to this office/scope.
+  // A sentence can itself list several alternatives, so split those boundaries too.
+  const segments = text.split(/\n|;|[.!?](?:\s|$)|,\s*(?:and|or)\s+(?=(?:an?\s+)?(?:winter|spring|summer|fall|autumn)\b)/i);
+  return segments.some((segment) => seasons(segment).every((season) => own.includes(season))
+    && findQuote(segment, term.quote) && (place ? clean(segment).includes(clean(place)) : findQuote(segment, quote)));
+}
+
+function readAlternative(text, alternative, policy, firstSeen) {
   let contradictory = false;
+  const { term, inferred } = inferTerm(alternative.term, firstSeen);
   const offices = [];
   const keys = new Set([...(policy.areas?.keys ?? []), 'outside', 'unknown']);
   for (const office of alternative.offices ?? []) {
@@ -81,21 +107,24 @@ function readAlternative(text, alternative, policy) {
     const allowedStates = policy.areas?.allowedStates ?? [];
     if (state && allowedStates.length && !allowedStates.includes(state)) area = 'outside';
     if (state && allowedStates.includes(state) && area === 'outside') contradictory = true;
+    if (term && !tiedToTerm(text, term, office.quote, office.place)) { contradictory = true; continue; }
     offices.push({ place: office.place, area, quote: office.quote });
   }
   const remoteInput = alternative.remote;
   const remote = remoteEvidence(text, remoteInput)
     ? { scope: remoteInput.scope, quote: remoteInput.quote } : { scope: null, quote: null };
   if (remoteInput?.quote && !remote.quote) contradictory = true;
-  const termOk = termEvidence(text, alternative.term);
+  if (term && remote.scope && remote.scope !== 'none' && !tiedToTerm(text, term, remote.quote)) { contradictory = true; remote.scope = null; remote.quote = null; }
+  const termOk = termEvidence(text, term, inferred);
   if (alternative.term?.quote && !termOk) contradictory = true;
-  const acceptable = termOk && (policy.windows ?? []).some((window) => {
-    if (!matchesWindow(alternative.term, window)) return false;
-    if (offices.some((office) => !['outside', 'unknown'].includes(office.area) && window.areas?.includes(office.area))) return true;
-    if (!window.areas?.includes('us_remote')) return false;
-    return remote.scope === 'us' || (remote.scope?.startsWith('state:') && policy.areas?.homeStates?.includes(remote.scope.slice(6)));
-  });
-  return { offices, remote, acceptable, contradictory };
+  const allowed = termOk && !contradictory ? (policy.windows ?? []).flatMap((window) => {
+    if (!matchesWindow(term, window)) return [];
+    const allowedOffices = offices.filter((office) => !['outside', 'unknown'].includes(office.area) && window.areas?.includes(office.area));
+    const allowedRemote = window.areas?.includes('us_remote') && (remote.scope === 'us'
+      || remote.scope?.startsWith('state:') && policy.areas?.homeStates?.includes(remote.scope.slice(6)));
+    return allowedOffices.length || allowedRemote ? [{ term, offices: allowedOffices, remote: allowedRemote ? remote : { scope: 'none', quote: null } }] : [];
+  }) : [];
+  return { term: termOk ? term : null, offices, remote, acceptable: allowed.length > 0, allowed, contradictory, inferred: termOk && inferred };
 }
 
 function normalizeDetails(text, judgment, alternatives) {
@@ -114,11 +143,12 @@ function normalizeDetails(text, judgment, alternatives) {
   if (quote && ['cutoff', 'posting_end', 'rolling'].includes(given.kind)) {
     if (given.kind === 'rolling') deadline = { ...emptyDeadline(), kind: 'rolling', quote };
     else if (dateValid(given.date) && dateEvidence(clean(quote), given.date)?.start === given.date && dateEvidence(clean(quote), given.date)?.end === given.date) {
-      const hasTime = typeof given.time === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(given.time) && typeof given.tz === 'string' && given.tz.length > 0;
+      const hasTime = quotedClock(quote, given.time, given.tz, given.date);
       deadline = { kind: given.kind, date: given.date, time: hasTime ? given.time : null, tz: hasTime ? given.tz : null, precision: hasTime ? 'datetime' : 'date', quote };
     }
   }
-  return { program, location: { offices, remote, display }, deadline, needs };
+  const allowed = alternatives.flatMap((item) => item.allowed);
+  return { program, location: { offices, remote, display, alternatives: allowed }, deadline, needs };
 }
 
 function fitFor(judgment, policy, functionValue) {
@@ -134,10 +164,10 @@ function fitFor(judgment, policy, functionValue) {
   return { level, note: notes.join('. ') };
 }
 
-export function decide({ snapshotText, judgment, facts, policy, tier }) {
+export function decide({ snapshotText, judgment, facts, policy, tier, firstSeen }) {
   const text = String(snapshotText ?? '');
   const judged = judgment && typeof judgment === 'object' ? judgment : {};
-  const alternatives = (judged.alternatives ?? []).map((alternative) => readAlternative(text, alternative, policy));
+  const alternatives = (judged.alternatives ?? []).map((alternative) => readAlternative(text, alternative, policy, firstSeen));
   const details = normalizeDetails(text, judged, alternatives);
   const functionValue = validatedQuote(text, judged.function?.quote) ? judged.function.value : null;
   const criteria = (judged.criteria ?? []).map((criterion) => ({ criterion, validation: validateCriterion(text, criterion, facts) }));
@@ -146,7 +176,7 @@ export function decide({ snapshotText, judgment, facts, policy, tier }) {
     factIds: [...(criterion.fact_ids ?? [])], quote: criterion.quote,
   }));
   const factsUsed = [...new Set([...facts.filter((fact) => fact.polarity === 'constraint').map((fact) => fact.id), ...criteria.flatMap(({ criterion }) => criterion.fact_ids ?? [])])];
-  const base = { code: null, escalate: false, factsUsed, evidence, fit: fitFor(judged, policy, functionValue), ...details };
+  const base = { code: null, escalate: false, factsUsed, evidence, flags: alternatives.some((item) => item.inferred) ? ['term_inferred'] : [], fit: fitFor(judged, policy, functionValue), ...details };
   const unclear = (code, question) => ({ ...base, decision: 'unclear', code, escalate: tier === 'primary', nextAction: 'user_review', question });
   const rejected = (code, question) => tier === 'primary' ? unclear(code, question) : { ...base, decision: 'not_eligible', code };
   const conflicts = criteria.filter(({ criterion }) => criterion.status === 'conflicts');

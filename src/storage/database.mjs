@@ -38,7 +38,7 @@ function appliedVersions(db) {
 export function migrate(db, { dryRun = false, migrations = schemaMigrations } = {}) {
   assertSchemaNotNewer(db);
   const existing = appliedVersions(db);
-  const pending = migrations.filter((item) => !existing.has(item.version));
+  const pending = migrations.filter((item) => !existing.has(item.version) || item.needsRepair?.(db));
   if (dryRun) return { pending: pending.map((item) => item.version), applied: [] };
   const applied = [];
   for (const item of pending) {
@@ -49,8 +49,10 @@ export function migrate(db, { dryRun = false, migrations = schemaMigrations } = 
         name TEXT NOT NULL,
         applied_at TEXT NOT NULL
       );`);
-      db.exec(item.sql);
-      db.prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)')
+      const repairing = existing.has(item.version);
+      db.exec(repairing ? item.repairSql : item.sql);
+      if (repairing) db.prepare('UPDATE schema_migrations SET name=?,applied_at=? WHERE version=?').run(item.name, new Date().toISOString(), item.version);
+      else db.prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)')
         .run(item.version, item.name, new Date().toISOString());
       db.exec('COMMIT');
       applied.push(item.version);

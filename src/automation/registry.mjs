@@ -324,6 +324,10 @@ export async function runTask(db, id, { dryRun = false, handler, externalId = nu
   db.prepare('UPDATE automations SET last_attempt_at = ?, error = NULL WHERE id = ?').run(attemptedAt, id);
   try {
     const result = await handler(task);
+    if (result.exitCode != null && result.exitCode !== 0) {
+      db.prepare('UPDATE automations SET error=? WHERE id=?').run(result.message ?? `Task exited ${result.exitCode}`, id);
+      return { taskId: id, ...result, externalRun: Boolean(claimedExternalId) };
+    }
     const successAt = new Date().toISOString();
     const config = claimedExternalId ? {
       ...task.config,

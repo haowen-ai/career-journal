@@ -57,6 +57,7 @@ export function bootstrapExisting(db, { provenance, now, policy = {}, companyAli
       db.prepare(`INSERT INTO reviews (posting_id,stage,state,decision,code,lane,flags_json,next_due,hold_owner,hold_since,first_seen,updated_at)
         VALUES (?,'fetch',?,?,?,?, '[]',?,?,?,?,?)`)
         .run(id, state, decision, code, lane, state === 'due' ? now : null, holdOwner, holdOwner ? now : null, now, now);
+      if (owner === 'review') db.prepare('UPDATE reviews SET evidence_json=? WHERE posting_id=?').run(JSON.stringify({ provenance: 'automated' }), id);
     }
     db.exec('COMMIT');
     return counts;

@@ -7,6 +7,9 @@ import { createGzip } from 'node:zlib';
 import { workspaceDirectory, loadConfig } from '../config/store.mjs';
 import { resolveMaterialPath } from '../domain/profile.mjs';
 import { inventory, measureStorage, rotateBackups, tableBytes } from './storage.mjs';
+import { recoverLost } from '../review/budget.mjs';
+import { preserveJudgments } from '../review/judgment-cache.mjs';
+import { preservePartitions } from '../funnel/membership.mjs';
 
 const DAY = 86_400_000;
 const MB = 1024 * 1024;
@@ -88,62 +91,6 @@ async function workRoots(home, directory, policy) {
   return { roots, reportsRoot };
 }
 
-// C1 recovery is restricted to attempts older than a day. B3's worker recovery
-// also covers freshly interrupted runs; no live dispatched row is reclaimed here.
-async function recoveryInputs(db, { attemptDir, cutoff }) {
-  const inputs = [];
-  for (const attempt of db.prepare("SELECT * FROM attempts WHERE state = 'dispatched' AND dispatched_at < ?").all(cutoff)) {
-    let output = null;
-    const outputPath = attempt.output_path ? await canonicalPath(attempt.output_path) : null;
-    if (outputPath && within(outputPath, attemptDir)) {
-      try {
-        const info = await lstat(outputPath);
-        if (info.isFile() && info.size <= 2_000_000) {
-          const parsed = JSON.parse(await readFile(outputPath, 'utf8'));
-          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) output = parsed;
-        }
-      } catch (error) { if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error; }
-    }
-    inputs.push({ attempt, output });
-  }
-  return inputs;
-}
-
-function recoverLost(db, { now, inputs }) {
-  const original = new Map(db.prepare('SELECT * FROM reviews').all().map((row) => [row.posting_id, row]));
-  db.prepare(`UPDATE reviews SET state = 'due', lease_owner = NULL, lease_until = NULL,
-    lease_generation = lease_generation + 1, next_due = ?, updated_at = ?
-    WHERE state = 'leased' AND lease_until <= ?`).run(now, now, now);
-  for (const { attempt, output } of inputs) {
-    const claimed = db.prepare('UPDATE attempts SET state = ?, finished_at = ?, error = ? WHERE id = ? AND state = ?')
-      .run(output ? 'adopted' : 'lost', now, output ? null : 'Output unavailable after dispatch', attempt.id, 'dispatched');
-    if (!claimed.changes) continue;
-    if (output) {
-      db.prepare(`INSERT INTO review_log (posting_id, at, stage, kind, attempt_id, payload_json)
-        VALUES (?, ?, ?, 'llm_raw', ?, ?)`)
-        .run(attempt.posting_id, now, attempt.stage, attempt.id, JSON.stringify(output));
-    } else {
-      db.prepare('UPDATE reviews SET lost_attempts = lost_attempts + 1 WHERE posting_id = ?').run(attempt.posting_id);
-      const review = original.get(attempt.posting_id);
-      const newerAttempt = db.prepare('SELECT 1 FROM attempts WHERE posting_id = ? AND dispatched_at > ? LIMIT 1')
-        .get(attempt.posting_id, attempt.dispatched_at);
-      // The schema has no attempt generation. Only transition a still-current
-      // expired claim or an untouched due item, never a newer worker/user result.
-      const expired = review?.state === 'leased' && review.lease_until <= now;
-      const untouched = review?.state === 'due' && review.updated_at <= attempt.dispatched_at;
-      if (newerAttempt || review?.hold_owner === 'user' || (!expired && !untouched)) continue;
-      db.prepare(`UPDATE reviews SET
-        state = CASE WHEN lost_attempts >= 2 THEN 'held' ELSE 'due' END,
-        code = CASE WHEN lost_attempts >= 2 THEN 'system_failure' ELSE code END,
-        hold_owner = CASE WHEN lost_attempts >= 2 THEN 'system' ELSE hold_owner END,
-        hold_since = CASE WHEN lost_attempts >= 2 THEN ? ELSE hold_since END,
-        last_error = 'Output unavailable after dispatch', lease_owner = NULL, lease_until = NULL,
-        lease_generation = lease_generation + 1, next_due = ?, updated_at = ? WHERE posting_id = ? AND state IN ('due','held')`)
-        .run(now, now, now, attempt.posting_id);
-    }
-  }
-}
-
 async function protectedReceipts(directory, db, explicit) {
   const ids = new Set(explicit);
   const latest = path.join(directory, 'runs', 'latest.json');
@@ -195,11 +142,15 @@ export async function prune(db, home, { now, policy, dryRun = true, protectRunId
   let freed = 0;
   const attemptDir = path.join(directory, 'attempts');
   const attempts = db.prepare('SELECT * FROM attempts').all();
-  const recovery = await recoveryInputs(db, { attemptDir, cutoff: cutoff(1) });
   const pendingAttemptIds = new Set();
   db.exec('SAVEPOINT retention_prune');
   try {
-    recoverLost(db, { now, inputs: recovery });
+    await recoverLost(db, { attemptDir, now, before: cutoff(1) });
+    db.prepare(`UPDATE reviews SET state='due',lease_owner=NULL,lease_until=NULL,
+      lease_generation=lease_generation+1,next_due=?,updated_at=?
+      WHERE state='leased' AND lease_until<=?`).run(now, now, now);
+    preserveJudgments(db);
+    preservePartitions(db);
     db.exec('CREATE TEMP TABLE IF NOT EXISTS retention_pending_logs (id INTEGER PRIMARY KEY, attempt_id TEXT); DELETE FROM retention_pending_logs');
     const seen = new Set();
     for (const row of db.prepare(`SELECT l.id, l.attempt_id, l.posting_id, COALESCE(a.tier, 'unknown') tier

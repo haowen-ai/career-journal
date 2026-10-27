@@ -1,8 +1,12 @@
 const BULLET = /^\s*(?:[•*+-]|\d+[.)])\s+/;
 
 function headingKind(line) {
-  const heading = line.trim().replace(/^#{1,6}\s+/, '').replace(/^\*\*(.*?)\*\*$/, '$1').replace(/:\s*$/, '').trim();
-  if (/^(?:preferred|desired|nice.to.have|bonus)(?:\s+(?:qualifications|requirements|skills|experience))?$/i.test(heading)) return 'preferred';
+  const heading = line.trim().replace(/^#{1,6}\s+/, '').replace(/^\*\*(.*?)\*\*$/, '$1')
+    .replace(/^[^\p{L}\p{N}]+/u, '').replace(/:\s*$/, '').trim();
+  const conversational = /^(?:what (?:you (?:will bring|bring)|we(?: require|(?: are|['’]re)? looking for))|student qualities we['’]re seeking)\b/i.test(heading);
+  if ((conversational || /qualifications|requirements|skills|experience/i.test(heading)) && /\b(?:preferred|desired|nice.to.have|bonus)\b/i.test(heading)
+    || /^(?:preferred|desired|nice.to.have|bonus)$/i.test(heading)) return 'preferred';
+  if (conversational) return 'required';
   if (/^(?:(?:required|minimum|basic|essential|mandatory)\s+(?:qualifications|requirements|skills|experience)|requirements|required qualifications|qualifications)$/i.test(heading)) return 'required';
   if (/^(?:eligibility|eligibility requirements|who (?:can|may) apply)$/i.test(heading)) return 'eligibility';
   if (/^(?:responsibilities|(?:your|key) responsibilities|what you(?:'|’)ll do|duties)$/i.test(heading)) return 'responsibilities';
@@ -103,14 +107,32 @@ function words(text) {
   return normalizeQuote(text).toLowerCase().replace(/[^\p{L}\p{N}+#]+/gu, ' ').trim();
 }
 
-function relatedFact(fact, text, key) {
-  if (!fact || !['lacks', 'constraint'].includes(fact.polarity)) return false;
+function relatedFact(fact, text) {
+  if (!fact || fact.polarity !== 'lacks') return false;
   const branch = words(text);
   const identity = words(`${fact.id} ${fact.statement} ${JSON.stringify(fact.value ?? '')}`);
-  if (fact.id === key && key !== 'requirement' && (branch.split(' ').includes(key) || (key === 'degree' && /\b(?:undergraduate|graduate|bachelor|master|degree)\b/.test(branch)))) return true;
   const tokens = branch.split(' ').filter((word) => word.length > 2 && !['the','and','for','with','from','experience','programming','proficiency','required','must','have','one','any','such','including','skills'].includes(word));
   return tokens.some((token) => identity.split(' ').includes(token));
 }
+
+function incompatibleConstraint(fact, text) {
+  if (fact?.polarity !== 'constraint') return false;
+  const level = words(fact.value?.level ?? '');
+  const clause = words(text);
+  // A level constraint describes current enrolment. A matching category or a
+  // higher completed degree alone cannot prove a mandatory conflict.
+  const levels = [
+    ['bachelors', /\b(?:undergraduate|bachelor(?:s)?)\b/],
+    ['masters', /\bmaster(?:s)?\b/],
+    ['doctoral', /\b(?:doctoral|doctorate|phd|ph d)\b/],
+  ];
+  const actual = levels.find(([name, pattern]) => name === level || pattern.test(level))?.[0];
+  const required = levels.filter(([, pattern]) => pattern.test(clause)).map(([name]) => name);
+  return Boolean(actual && required.length && !required.includes(actual)
+    && /\b(?:pursuing|enrolled|standing|students?|only|exclusively)\b/.test(clause));
+}
+
+const conflictsWith = (fact, text) => relatedFact(fact, text) || incompatibleConstraint(fact, text);
 
 function alternativeBranches(clause) {
   const text = normalizeQuote(clause).replace(BULLET, '').replace(/[.!?]+$/, '');
@@ -126,6 +148,7 @@ export function validateCriterion(text, criterion, facts) {
   const section = segmentSections(text).find((item) => item.start <= found.start && found.start < item.end)?.kind ?? 'unknown';
   const clause = clauseAt(text, found.start);
   const result = { ...base, valid: true, reason: null, section, clause };
+  if (/\b(?:preferred|optional|nice.to.have|bonus(?: points)?|not required)\b/i.test(clause.text)) return { ...result, reason: 'non_mandatory' };
   if (criterion.status !== 'conflicts') return result;
   if (!['required', 'eligibility'].includes(section)) return { ...result, reason: 'non_mandatory' };
   if (/\bor\s+equivalent(?:\s+practical)?\s+experience\b/i.test(clause.text)) return { ...result, reason: 'equivalent_experience' };
@@ -148,7 +171,8 @@ export function validateCriterion(text, criterion, facts) {
       const identity = words(`${fact.id} ${fact.statement} ${JSON.stringify(fact.value ?? '')}`).split(' ');
       return distinctive.every((token) => identity.includes(token));
     };
-    if (!branches.every((branch, index) => !facts.some((fact) => fact.polarity === 'has' && branchFact(fact, index)) && cited.some((fact) => ['lacks', 'constraint'].includes(fact?.polarity) && branchFact(fact, index)))) return { ...result, reason: 'missing_fact' };
-  } else if (!cited.some((fact) => relatedFact(fact, clause.text, criterion.key))) return { ...result, reason: 'missing_fact' };
+    if (!branches.every((branch, index) => !facts.some((fact) => fact.polarity === 'has' && branchFact(fact, index))
+      && cited.some((fact) => fact?.polarity === 'lacks' && branchFact(fact, index) || incompatibleConstraint(fact, branch)))) return { ...result, reason: 'missing_fact' };
+  } else if (!cited.some((fact) => conflictsWith(fact, clause.text))) return { ...result, reason: 'missing_fact' };
   return { ...result, confirmedConflict: true };
 }

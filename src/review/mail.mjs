@@ -16,7 +16,7 @@ export function matchMailHits(db, hits, { now } = {}) {
     for (const alias of aliases) {
       const posting = postings.find((p) => p.id === alias.posting_id);
       if (!posting) continue;
-      if (alias.kind !== 'url') {
+      if (alias.kind !== 'url' && confirmed) {
         const token = alias.alias.split(':').at(-1);
         if (companyMatches(posting) && new RegExp(`(?<![A-Za-z0-9])${escape(token)}(?![A-Za-z0-9-])`).test(text)) matches.set(posting.id, token);
       } else if (confirmed) {

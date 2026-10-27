@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { SUBMITTED_STATUSES, EXPLORATION_SHARE, FETCH_BATCH_MIN, JUDGE_TIME_SHARE, NO_SIGNAL_PROMOTE_DAYS } from '../funnel/contract.mjs';
+import { EXPLORATION_SHARE, FETCH_BATCH_MIN, JUDGE_TIME_SHARE, NO_SIGNAL_PROMOTE_DAYS } from '../funnel/contract.mjs';
 import { aliasesFor, reconcileAliases, providerRequisition } from '../funnel/identity.mjs';
 import { createBudget, recoverLost } from './budget.mjs';
 import { acquireRunLease, heartbeat, finishRun, claimItem, assertFence, atomic } from './lease.mjs';
@@ -16,6 +16,9 @@ import { validateSnapshot } from './fetch.mjs';
 import { deliver, logReview, parseJson } from './deliver.mjs';
 import { scheduleRefresh, recheckHolds } from './freshness.mjs';
 import { redact } from '../runtime/redact.mjs';
+import { userDecided } from './ownership.mjs';
+import { cachedJudgment, judgmentEnvelope, rememberJudgment } from './judgment-cache.mjs';
+import { postingPartitions } from '../funnel/membership.mjs';
 export { scheduleRefresh } from './freshness.mjs';
 
 const DAY = 86400000;
@@ -24,12 +27,7 @@ function inputState(inputs) {
   return { facts: factsMap(inputs.facts), rules: dependencyHash(inputs.rules), policy: dependencyHash(inputs.policy),
     screening: dependencyHash(inputs.screeningPolicy), provenance: dependencyHash(inputs.provenance), resume: dependencyHash(inputs.resume?.text ?? null),
     windowsAreas: dependencyHash({ windows: inputs.policy.windows, areas: inputs.policy.areas }),
-    code: dependencyHash(Object.fromEntries(['prompt.mjs','schema/judgment.schema.json','decide.mjs','clauses.mjs'].map((file) => [file, readFileSync(new URL(file, import.meta.url), 'utf8')]))) };
-}
-function userDecided(db, row) {
-  const app = row.application_id && db.prepare('SELECT * FROM applications WHERE id=?').get(row.application_id);
-  return app && (app.applied_at || SUBMITTED_STATUSES.includes(app.status) || app.status === 'prepared' || ['user','legacy'].includes(app.skip_owner))
-    || row.code === 'user_declined' || db.prepare("SELECT 1 FROM review_log WHERE posting_id=? AND kind='user'").get(row.posting_id);
+    code: dependencyHash(Object.fromEntries(['prompt.mjs','schema/judgment.schema.json','decide.mjs','clauses.mjs','deadline.mjs'].map((file) => [file, readFileSync(new URL(file, import.meta.url), 'utf8')]))) };
 }
 
 export function replan(db, { inputs, now }) {
@@ -82,11 +80,11 @@ function ordered(rows, { now, policy, budget }) {
 }
 
 function absentFromCensuses(db, postingId) {
-  const partitions = db.prepare('SELECT DISTINCT source,partition FROM observation_sightings WHERE posting_id=?').all(postingId);
-  return partitions.length > 0 && partitions.every(({ source, partition }) => {
-    const recent = db.prepare(`SELECT s.run_id FROM run_sources s JOIN runs r ON r.run_id=s.run_id
+  const partitions = postingPartitions(db, postingId);
+  return partitions.length > 0 && partitions.every(({ source, partition, lastSeen }) => {
+    const recent = db.prepare(`SELECT s.run_id,r.started_at FROM run_sources s JOIN runs r ON r.run_id=s.run_id
       WHERE s.source=? AND s.partition=? AND s.status IN ('ok','empty') ORDER BY r.started_at DESC,r.rowid DESC LIMIT 2`).all(source, partition);
-    return recent.length === 2 && recent.every((r) => !db.prepare('SELECT 1 FROM observation_sightings WHERE run_id=? AND posting_id=? AND source=? AND partition=?').get(r.run_id, postingId, source, partition));
+    return recent.length === 2 && recent.every((r) => r.started_at >= lastSeen && !db.prepare('SELECT 1 FROM observation_sightings WHERE run_id=? AND posting_id=? AND source=? AND partition=?').get(r.run_id, postingId, source, partition));
   });
 }
 
@@ -118,7 +116,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   const spending = createBudget(db, { runId, limit: budget, concurrency, maxTransportRetries: maxRetries });
   const recovered = await recoverLost(db, { attemptDir, now });
   receipt.counts.attempts_lost = recovered.lost;
-  db.prepare("UPDATE reviews SET state='due',lease_owner=NULL,lease_until=NULL WHERE state='leased' AND (lease_until<=? OR ?)").run(now, lease.previousRunInterrupted ? 1 : 0);
+  db.prepare("UPDATE reviews SET state='due',lease_owner=NULL,lease_until=NULL,lease_generation=lease_generation+1 WHERE state='leased' AND (lease_until<=? OR ?)").run(now, lease.previousRunInterrupted ? 1 : 0);
   let current = await inputs();
   const runtimeDeps = {};
   for (const tier of ['primary','escalation']) {
@@ -143,6 +141,18 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   attemptDir ??= await mkdtemp(path.join(os.tmpdir(), 'cj-review-attempts-'));
   await mkdir(attemptDir, { recursive: true, mode: 0o700 });
   const seen = new Set();
+  const exploration = new Set(db.prepare("SELECT * FROM reviews WHERE state='due' AND lane='no_student_signal' AND (next_due IS NULL OR next_due<=?)").all(now)
+    .filter((row) => !userDecided(db, row)).map((row) => row.posting_id));
+  const explorationTarget = Math.min(exploration.size, budget ? Math.max(1, Math.ceil(budget * EXPLORATION_SHARE)) : 0);
+  const explorationReserved = () => {
+    const spent = db.prepare('SELECT posting_id,1+transport_retries n FROM attempts WHERE run_id=?').all(runId)
+      .filter((row) => exploration.has(row.posting_id)).reduce((sum, row) => sum + row.n, 0);
+    const available = [...exploration].filter((id) => {
+      const row = db.prepare('SELECT * FROM reviews WHERE posting_id=?').get(id);
+      return row && ['due','leased'].includes(row.state) && (!row.next_due || row.next_due <= now) && !userDecided(db, row);
+    }).length;
+    return Math.min(available, Math.max(0, explorationTarget - spent));
+  };
   const failures = {};
   let primaryStopped = false;
   let lastHeartbeat = start;
@@ -151,7 +161,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     assertFence(db, id, fence);
     db.prepare("UPDATE reviews SET state='due',stage=COALESCE(?,stage),next_due=?,lease_owner=NULL,lease_until=NULL WHERE posting_id=?").run(stage ?? null, nextDue, id);
   });
-  const due = () => ordered(db.prepare("SELECT * FROM reviews WHERE state='due' AND (next_due IS NULL OR next_due<=?)").all(now).filter((r) => !seen.has(r.posting_id)), { now, policy: current.policy, budget });
+  const due = () => ordered(db.prepare("SELECT * FROM reviews WHERE state='due' AND (next_due IS NULL OR next_due<=?)").all(now).filter((r) => !seen.has(r.posting_id) && !userDecided(db, r)), { now, policy: current.policy, budget });
   const refreshInputs = async () => { current = await inputs(); return current; };
   async function commitVerdict(id, fence, verdict) {
     atomic(db, () => {
@@ -192,7 +202,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         seen.add(id); return;
       }
       db.prepare("UPDATE postings SET availability='open',updated_at=? WHERE id=?").run(now, id);
-      const reconciliation = reconcileAliases(db, id, aliasesFor({ company: posting.company, url: result.finalUrl ?? url, requisitionId: result.requisitionId }), { now, fence });
+      const reconciliation = reconcileAliases(db, id, aliasesFor({ company: posting.company, url: result.finalUrl ?? url, requisitionId: result.requisitionId }, { companyAliases: current.screeningPolicy.companyAliases }), { now, fence });
       if (reconciliation.action !== 'added') { seen.add(id); return; }
       const hash = dependencyHash({ text: result.text, title: result.title, requisitionId: result.requisitionId, locations: result.locations, jsonLd: result.jsonLd });
       db.prepare(`INSERT INTO snapshots(id,posting_id,content_hash,fetched_at,final_url,http_status,method,identity_ok,fields_json,sections_json,text)
@@ -223,15 +233,13 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       const request = await buildJudgeRequest({ posting, snapshot, sections: parseJson(snapshot.sections_json, []), inputs: stageInputs, adapter, tier });
       const depsHash = dependencyHash(request.deps.parts);
       if (tier === 'primary' && !evalCurrent(stageInputs.evalRecord, request.deps).current && !receipt.warnings.includes('eval_stale')) receipt.warnings.push('eval_stale');
-      const raw = db.prepare("SELECT * FROM review_log WHERE posting_id=? AND kind='llm_raw' ORDER BY id DESC").all(id)
-        .map((entry) => ({ entry, payload: parseJson(entry.payload_json) }))
-        .find(({ payload, entry }) => (payload.tier ?? db.prepare('SELECT tier FROM attempts WHERE id=?').get(entry.attempt_id)?.tier) === tier
-          && payload.snapshotHash === snapshot.content_hash
-          && payload.depsHash === depsHash && !stored.invalidated);
-      let output = raw?.payload.output;
+      let output = !stored.invalidated && cachedJudgment(db, id, { tier, depsHash, snapshotHash: snapshot.content_hash });
       if (!output) {
         if (tier === 'primary' && primaryStopped) break;
         if (activeCooldown(db, `judge:${tier}`, { now })) { receipt.stop_reason ??= 'quota_cooldown'; if (tier === 'primary') primaryStopped = true; break; }
+        // Reservations are paid attempts, including escalations and retries.
+        // Higher lanes may continue next run after exploration has been served.
+        if (!exploration.has(id) && explorationReserved() > 0 && spending.remaining() <= explorationReserved()) break;
         const attempt = atomic(db, () => {
           assertFence(db, id, fence);
           return spending.reserve({ postingId: id, stage: 'judge', runner: adapter.runner, model: adapter.model, tier, now });
@@ -242,7 +250,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
           assertFence(db, id, fence);
           db.prepare('UPDATE attempts SET output_path=? WHERE id=?').run(outputPath, attempt.id);
           logReview(db, id, { now, stage: 'judge', kind: 'outcome', attemptId: attempt.id,
-            payload: { attemptContext: { tier, depsHash, snapshotHash: snapshot.content_hash } } });
+            payload: { attemptContext: { tier, depsHash, snapshotHash: snapshot.content_hash, fence } } });
         });
         await hooks.afterDispatch?.({ attempt, outputPath });
         const controller = new AbortController();
@@ -261,6 +269,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
           atomic(db, () => {
             assertFence(db, id, fence);
             logReview(db, id, { now, stage: 'judge', kind: 'llm_raw', attemptId: attempt.id, payload: { output, tier, depsHash, snapshotHash: snapshot.content_hash } });
+            rememberJudgment(db, id, judgmentEnvelope(output, { tier, depsHash, snapshotHash: snapshot.content_hash }));
             spending.markResponded(attempt.id, { usage: result.usage, transportRetries: result.transportRetries, now });
           });
           failures[tier] = null;
@@ -272,14 +281,17 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
             receipt.stop_reason = 'quota'; if (tier === 'primary') primaryStopped = true;
           } else {
             const error = result.error ?? result.status;
-            failures[tier] = failures[tier]?.error === error ? { error, count: failures[tier].count + 1 } : { error, count: 1 };
-            if (failures[tier].count >= 3) { receipt.status = 'failed'; receipt.stop_reason = 'adapter_failure'; primaryStopped = true; receipt.errors.push(error); }
+            const code = result.errorCode ?? error;
+            if (receipt.status !== 'failed') receipt.status = 'partial';
+            if (!receipt.errors.includes(error)) receipt.errors.push(error);
+            failures[tier] = failures[tier]?.code === code ? { code, count: failures[tier].count + 1 } : { code, count: 1 };
+            if (failures[tier].count >= 3) { receipt.status = 'failed'; receipt.stop_reason = 'adapter_failure'; primaryStopped = true; }
             logReview(db, id, { now, stage: 'judge', kind: 'error', attemptId: attempt.id, payload: { error } });
           }
           break;
         }
       }
-      final = decide({ snapshotText: snapshot.text, judgment: output, facts: stageInputs.facts, policy: stageInputs.policy, tier });
+      final = decide({ snapshotText: snapshot.text, judgment: output, facts: stageInputs.facts, policy: stageInputs.policy, tier, firstSeen: posting.first_seen });
       if (tier === 'primary' && final.escalate) { final = null; continue; }
       break;
     }

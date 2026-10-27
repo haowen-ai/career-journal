@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 const active = new Set();
 
 // Each wrapper owns its child's group. Bridge signal handlers also stop nested groups.
-export function executeCareerOpsProcess({ command, args, cwd, env, stdin, timeoutMs, maxBytes = 50_000_000 }) {
+export function executeCareerOpsProcess({ command, args, cwd, env, stdin, timeoutMs, maxBytes = 50_000_000, signal, onStdout, onStderr, onLimit }) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, env, detached: process.platform !== 'win32',
       stdio: [stdin == null ? 'ignore' : 'pipe', 'pipe', 'pipe'], windowsHide: true });
@@ -20,12 +20,13 @@ export function executeCareerOpsProcess({ command, args, cwd, env, stdin, timeou
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
       active.delete(handle);
       if (error) reject(error); else resolve(result);
     };
-    const stop = (message, graceMs = 400) => {
+    const stop = (message, graceMs = 400, code = 'PROCESS_CANCELLED') => {
       if (stopping) return stopping;
-      failure = new Error(message);
+      failure = Object.assign(new Error(message), { code });
       clearTimeout(timer);
       signalTree('SIGTERM');
       stopping = new Promise((done) => setTimeout(() => {
@@ -38,12 +39,14 @@ export function executeCareerOpsProcess({ command, args, cwd, env, stdin, timeou
       return stopping;
     };
     const handle = { stop };
+    const onAbort = () => stop('Process cancelled');
     active.add(handle);
-    timer = setTimeout(() => stop(`CareerOps request timed out after ${timeoutMs}ms`), timeoutMs);
+    timer = setTimeout(() => stop(`CareerOps request timed out after ${timeoutMs}ms`, 400, 'PROCESS_TIMEOUT'), timeoutMs);
     const append = (chunk, stream) => {
       bytes += Buffer.byteLength(chunk);
-      if (bytes > maxBytes) { stop('CareerOps output exceeds byte limit'); return; }
+      if (bytes > maxBytes) { stop('CareerOps output exceeds byte limit', 400, 'PROCESS_TOO_LARGE'); onLimit?.(); return; }
       if (stream === 'stdout') stdout += chunk; else stderr += chunk;
+      (stream === 'stdout' ? onStdout : onStderr)?.(chunk);
     };
     child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk) => append(chunk, 'stdout'));
@@ -52,6 +55,8 @@ export function executeCareerOpsProcess({ command, args, cwd, env, stdin, timeou
     child.once('close', (exitCode, signal) => {
       if (!failure) finish(null, { exitCode, signal, stdout, stderr });
     });
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
     if (child.stdin) {
       child.stdin.on('error', (error) => { if (error.code !== 'EPIPE') stop(error.message); });
       child.stdin.end(stdin);

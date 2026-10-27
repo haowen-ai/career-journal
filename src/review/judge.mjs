@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { executeCareerOpsProcess } from '../integrations/careerops-process.mjs';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
@@ -7,7 +7,6 @@ import { JUDGMENT_SCHEMA_PATH } from './prompt.mjs';
 
 export const QUOTA_PATTERNS = Object.freeze([/usage limit|rate limit reached|quota/i]);
 const MAX_BYTES = 2_000_000;
-const KILL_GRACE_MS = 5000;
 const schema = JSON.parse(readFileSync(JUDGMENT_SCHEMA_PATH, 'utf8'));
 
 function required(value, name) {
@@ -29,36 +28,7 @@ export function buildCodexArgv({ bin = 'codex', codexHome, model, effort, schema
 
 // runImpl receives this same streaming/abort boundary; no implicit retries occur here.
 function runCommand(spec) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(spec.command, spec.args, { env: spec.env, cwd: spec.cwd, stdio: ['pipe', 'pipe', 'pipe'] });
-    const chunks = { stdout: [], stderr: [] };
-    let bytes = 0;
-    let killTimer;
-    let tooLarge = false;
-    const stop = () => {
-      if (child.exitCode !== null || child.signalCode !== null) return;
-      child.kill('SIGTERM');
-      killTimer ??= setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS);
-    };
-    const onData = (kind) => (chunk) => {
-      bytes += chunk.length;
-      if (bytes > (spec.maxBytes ?? MAX_BYTES)) { tooLarge = true; spec.onLimit?.(); stop(); return; }
-      chunks[kind].push(chunk);
-      spec[kind === 'stdout' ? 'onStdout' : 'onStderr']?.(chunk.toString('utf8'));
-    };
-    child.stdout.on('data', onData('stdout'));
-    child.stderr.on('data', onData('stderr'));
-    spec.signal?.addEventListener('abort', stop, { once: true });
-    if (spec.signal?.aborted) stop();
-    const cleanup = () => { clearTimeout(killTimer); spec.signal?.removeEventListener('abort', stop); };
-    child.once('error', (error) => { cleanup(); reject(error); });
-    child.once('close', (exitCode, signal) => {
-      cleanup();
-      resolve({ exitCode, signal, stdout: Buffer.concat(chunks.stdout).toString('utf8'), stderr: Buffer.concat(chunks.stderr).toString('utf8'), tooLarge });
-    });
-    child.stdin.on('error', () => { /* spawn errors and early exits are reported by close/error */ });
-    child.stdin.end(spec.stdin ?? '');
-  });
+  return executeCareerOpsProcess({ ...spec, timeoutMs: spec.timeoutMs ?? 120000, maxBytes: spec.maxBytes ?? MAX_BYTES });
 }
 
 function schemaValid(value, rule) {
@@ -76,6 +46,8 @@ function schemaValid(value, rule) {
   return true;
 }
 
+export const validJudgment = (value) => schemaValid(value, schema);
+
 async function versionOf(spec, timeoutMs, signal) {
   const controller = new AbortController();
   const onAbort = () => controller.abort();
@@ -83,7 +55,7 @@ async function versionOf(spec, timeoutMs, signal) {
   if (signal?.aborted) onAbort();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const result = await runCommand({ ...spec, args: ['--version'], signal: controller.signal });
+    const result = await runCommand({ ...spec, args: ['--version'], timeoutMs, signal: controller.signal });
     if (controller.signal.aborted || result.tooLarge || result.exitCode !== 0) throw new Error(`codex --version failed (exit ${result.exitCode}, signal ${result.signal ?? 'none'}${controller.signal.aborted ? ', cancelled or timed out' : ''}): ${result.stderr.trim()}`);
     return result.stdout.trim();
   } finally { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); }
@@ -170,7 +142,7 @@ export function codexExecAdapter({ bin = 'codex', codexHome, model, effort, tier
         }
         if (stopReason) return finish(stopReason === 'timeout' ? 'timeout' : 'error', { error: stopReason });
         await rm(outputPath, { force: true });
-        invocation = Promise.resolve().then(() => (runImpl ?? runCommand)({ ...spec, cwd: attemptWorkDir, stdin: request.prompt, signal: controller.signal, maxBytes: MAX_BYTES, onStdout, onStderr, onLimit: () => stop('too_large') }));
+        invocation = Promise.resolve().then(() => (runImpl ?? runCommand)({ ...spec, cwd: attemptWorkDir, stdin: request.prompt, timeoutMs, signal: controller.signal, maxBytes: MAX_BYTES, onStdout, onStderr, onLimit: () => stop('too_large') }));
         let result = await Promise.race([invocation, cancelled]);
         // Native processes own real capacity until close, including the kill grace.
         // Injected runners may ignore cancellation entirely, so their wait is bounded
@@ -191,13 +163,14 @@ export function codexExecAdapter({ bin = 'codex', codexHome, model, effort, tier
         if (refused) return finish('refused');
         if (result.exitCode !== 0) return finish('error', { error: stderr || `Judge exited ${result.exitCode}` });
         const outputStat = await stat(outputPath);
-        if (!outputStat.isFile() || outputStat.size > MAX_BYTES) return finish('invalid', { error: 'Judge output is missing or too large' });
+        if (!outputStat.isFile() || outputStat.size > MAX_BYTES) return finish('invalid', { errorCode: 'output_missing_or_too_large', error: 'Judge output is missing or too large' });
         const rawText = await readFile(outputPath, 'utf8');
         let output;
-        try { output = JSON.parse(rawText); } catch { return finish('invalid', { rawText, error: 'Judge output is not JSON' }); }
-        if (!schemaValid(output, schema)) return finish('invalid', { rawText, error: 'Judge output does not match judgment schema' });
+        try { output = JSON.parse(rawText); } catch { return finish('invalid', { rawText, errorCode: 'output_not_json', error: 'Judge output is not JSON' }); }
+        if (!validJudgment(output)) return finish('invalid', { rawText, errorCode: 'output_schema', error: 'Judge output does not match judgment schema' });
         return finish('ok', { output, rawText });
       } catch (error) {
+        if (error.code === 'ENOENT' && completed) return finish('invalid', { errorCode: 'output_missing', error: 'Judge output file is missing' });
         return finish(stopReason === 'timeout' ? 'timeout' : stopReason ? 'error' : error.code === 'ENOENT' && completed ? 'invalid' : 'error', { error: error.message });
       } finally {
         clearTimeout(timer);

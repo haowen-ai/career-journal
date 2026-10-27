@@ -36,7 +36,7 @@ export async function buildJudgeRequest({ posting, snapshot, sections, inputs, a
   const text = String(snapshot.text ?? '');
   let decideVersion;
   try {
-    decideVersion = dependencyHash(Object.fromEntries(['decide.mjs', 'clauses.mjs'].map((name) => [name, readFileSync(new URL(`./${name}`, import.meta.url), 'utf8')])));
+    decideVersion = dependencyHash(Object.fromEntries(['decide.mjs', 'clauses.mjs', 'deadline.mjs'].map((name) => [name, readFileSync(new URL(`./${name}`, import.meta.url), 'utf8')])));
   }
   catch (error) { if (error.code !== 'ENOENT') throw error; decideVersion = 'not-installed'; }
   const deps = judgeDependencies({ inputs, adapter, skeletonVersion: { version: SKELETON_VERSION, text: SKELETON, renderer: dependencyHash(readFileSync(new URL(import.meta.url), 'utf8')) }, schemaHash: dependencyHash(readFileSync(JUDGMENT_SCHEMA_PATH, 'utf8')), decideVersion });

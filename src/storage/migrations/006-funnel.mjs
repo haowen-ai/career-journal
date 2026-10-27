@@ -1,15 +1,42 @@
 import { REVIEW_STAGES, REVIEW_STATES, DECISIONS, LANES, RUN_KINDS, PARTITION_STATUS } from '../../funnel/contract.mjs';
 
 const values = (items) => items.map((item) => `'${item}'`).join(',');
+const partitionStorage = `
+  CREATE TABLE IF NOT EXISTS posting_partitions (
+    posting_id TEXT NOT NULL REFERENCES postings(id), source TEXT NOT NULL, partition TEXT NOT NULL,
+    last_seen TEXT NOT NULL, PRIMARY KEY (posting_id,source,partition)
+  );
+  CREATE TRIGGER IF NOT EXISTS posting_partition_sighting AFTER INSERT ON observation_sightings
+    BEGIN
+      INSERT INTO posting_partitions(posting_id,source,partition,last_seen)
+        VALUES (NEW.posting_id,NEW.source,NEW.partition,NEW.seen_at)
+        ON CONFLICT(posting_id,source,partition) DO UPDATE SET last_seen=MAX(last_seen,excluded.last_seen);
+    END;
+`;
 export const migration006 = {
   version: 6,
   name: 'funnel',
+  // The merged pre-release schema 6 may already exist in a rehearsal home.
+  // Detect its additive repair read-only; migrate --apply backs it up first.
+  needsRepair(db) {
+    return db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name IN ('posting_partitions','posting_partition_sighting')").get().n !== 2;
+  },
+  repairSql: `${partitionStorage}
+    INSERT INTO posting_partitions(posting_id,source,partition,last_seen)
+      SELECT posting_id,source,partition,MAX(seen_at) FROM (
+        SELECT posting_id,source,partition,seen_at FROM observation_sightings
+        UNION ALL SELECT posting_id,source,partition,observed_at FROM observations
+      ) GROUP BY posting_id,source,partition
+      ON CONFLICT(posting_id,source,partition) DO UPDATE SET last_seen=MAX(last_seen,excluded.last_seen);
+    UPDATE applications SET deadline_source='legacy' WHERE deadline_at IS NOT NULL AND deadline_source IS NULL;
+  `,
   sql: `
     ALTER TABLE applications ADD COLUMN skip_owner TEXT CHECK (skip_owner IN ('review','user','legacy'));
     ALTER TABLE applications ADD COLUMN deadline_precision TEXT CHECK (deadline_precision IN ('datetime','date'));
     ALTER TABLE applications ADD COLUMN deadline_source TEXT CHECK (deadline_source IN ('review','user','legacy'));
     ALTER TABLE applications ADD COLUMN posting_end_at TEXT;
     UPDATE applications SET skip_owner = 'legacy' WHERE skip_reason IS NOT NULL;
+    UPDATE applications SET deadline_source = 'legacy' WHERE deadline_at IS NOT NULL;
     CREATE TRIGGER applications_legacy_scan_guard BEFORE INSERT ON applications
       WHEN NEW.external_id GLOB '[a-z]*:*' AND NEW.external_id NOT GLOB 'posting:*'
       BEGIN SELECT RAISE(ABORT, 'legacy scan writer blocked by schema 6'); END;
@@ -42,6 +69,7 @@ export const migration006 = {
       observation_id TEXT NOT NULL REFERENCES observations(id), source TEXT NOT NULL, partition TEXT NOT NULL,
       seen_at TEXT NOT NULL, PRIMARY KEY (run_id,posting_id,source,partition)
     );
+    ${partitionStorage}
     CREATE TABLE runs (
       run_id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN (${values(RUN_KINDS)})), parent_run_id TEXT,
       owner TEXT NOT NULL, started_at TEXT NOT NULL, heartbeat_at TEXT NOT NULL, finished_at TEXT,

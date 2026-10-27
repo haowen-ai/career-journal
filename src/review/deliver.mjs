@@ -5,6 +5,7 @@ import { SUBMITTED_STATUSES } from '../funnel/contract.mjs';
 import { recordEvent } from '../domain/events.mjs';
 import { atomic, assertFence } from './lease.mjs';
 import { redact } from '../runtime/redact.mjs';
+import { validTimezone } from './deadline.mjs';
 
 const key = (value) => String(value ?? '').normalize('NFKD').toLowerCase().replace(/[^a-z0-9]/g, '');
 const words = (value) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
@@ -17,8 +18,7 @@ export function logReview(db, postingId, { now, stage = 'deliver', kind = 'outco
 // Resolve a wall clock in an IANA zone without inventing a time for date-only cutoffs.
 export function deadlineValue(deadline) {
   if (!deadline?.date) return null;
-  if (!deadline.time) return deadline.date;
-  if (!deadline.tz) throw new Error('Timed cutoff requires a timezone');
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(deadline.time ?? '') || !validTimezone(deadline.tz)) return deadline.date;
   const local = `${deadline.date}T${deadline.time.length === 5 ? `${deadline.time}:00` : deadline.time}`;
   if (/^(?:Z|[+-]\d\d:\d\d)$/.test(deadline.tz)) return `${local}${deadline.tz === 'Z' ? '+00:00' : deadline.tz}`;
   const base = Date.parse(`${local}Z`);
@@ -88,8 +88,8 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
     else if (app?.status === 'prepared') { action = 'prepared'; held = false; }
     else {
       if (!app && value.decision !== 'not_eligible' && value.decision !== 'dropped') {
-        app = createApplication(db, { company: posting.company, role: posting.title, jobUrl: /^https?:/.test(posting.canonical_url) ? posting.canonical_url : `https://${posting.canonical_url}`, externalId: `posting:${postingId}` }, now);
-        const bound = bindApplication(db, app.id, { now });
+        app = createApplication(db, { company: posting.company, role: posting.title, jobUrl: /^https?:/.test(posting.canonical_url) ? posting.canonical_url : `https://${posting.canonical_url}`, externalId: `posting:${postingId}`, companyAliases: policy.companyAliases }, now);
+        const bound = bindApplication(db, app.id, { now, companyAliases: policy.companyAliases });
         if (bound.action === 'conflict' || bound.postingId !== postingId) throw new Error('Delivery identity conflict');
         db.prepare('UPDATE postings SET application_id=? WHERE id=?').run(app.id, postingId);
         action = 'created';
@@ -114,16 +114,18 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
         const cutoff = deadline.kind === 'cutoff' ? deadlineValue(deadline) : null;
         const end = deadline.kind === 'posting_end' ? deadlineValue(deadline) : null;
         db.prepare(`UPDATE applications SET fit=?,fit_note=?,location=?,verified_at=?,updated_at=?,posting_end_at=?,
-          deadline_at=CASE WHEN deadline_source IS NULL OR deadline_source='review' THEN ? ELSE deadline_at END,
-          deadline_precision=CASE WHEN deadline_source IS NULL OR deadline_source='review' THEN ? ELSE deadline_precision END,
-          deadline_source=CASE WHEN deadline_source IS NULL OR deadline_source='review' THEN ? ELSE deadline_source END WHERE id=?`)
+          deadline_at=CASE WHEN (deadline_source IS NULL AND deadline_at IS NULL) OR deadline_source='review' THEN ? ELSE deadline_at END,
+          deadline_precision=CASE WHEN (deadline_source IS NULL AND deadline_at IS NULL) OR deadline_source='review' THEN ? ELSE deadline_precision END,
+          deadline_source=CASE WHEN (deadline_source IS NULL AND deadline_at IS NULL) OR deadline_source='review' THEN ? ELSE deadline_source END WHERE id=?`)
           .run(value.fit?.level ?? app.fit, value.fit?.note ?? app.fit_note, value.location?.display ?? app.location, now, now, end,
-            cutoff, cutoff ? (deadline.time ? 'datetime' : 'date') : null, cutoff ? 'review' : null, app.id);
+            cutoff, cutoff ? (cutoff.length > 10 ? 'datetime' : 'date') : null, cutoff ? 'review' : null, app.id);
       } else action = 'no_application';
     }
     const evidence = { ...oldEvidence, evidence: value.evidence ?? [], needs: value.needs ?? {}, fit: value.fit ?? null, deadline: value.deadline ?? { kind: 'none' },
       program: value.program ?? null, location: value.location ?? null, factsUsed: value.factsUsed ?? [], question: value.question ?? null };
     const userHold = held && !['unavailable','quota_full','quota_reconciliation'].includes(value.code);
+    if (value.flags) db.prepare('UPDATE reviews SET flags_json=? WHERE posting_id=?')
+      .run(JSON.stringify([...new Set([...parseJson(review.flags_json, []).filter((flag) => flag !== 'term_inferred'), ...value.flags])]), postingId);
     db.prepare(`UPDATE reviews SET state=?,decision=?,code=?,evidence_json=?,deadline_json=?,hold_owner=?,hold_since=?,next_due=?,stage='deliver',
       lease_owner=NULL,lease_until=NULL,updated_at=? WHERE posting_id=? AND lease_owner=? AND lease_generation=?`)
       .run(held ? 'held' : 'done', value.decision, protectedApp ? 'superseded_by_user' : value.code ?? null, JSON.stringify(evidence), JSON.stringify(value.deadline ?? {}),

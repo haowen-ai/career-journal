@@ -16,7 +16,8 @@ The main Agent copies the template below once per role, replaces every `{{placeh
 | `{{resumePath}}` | The one resume the user chose for this role |
 | `{{resumeTextPath}}` | Optional plain-text copy of that resume for copying bullets, or `none` |
 | `{{transcriptPath}}` | `materials.transcriptPath`, or `none` |
-| `{{locationOrder}}` | `search.locations` labels in order, plus whether remote is acceptable |
+| `{{locationOrder}}` | `search.locations` labels as preferences for ordering the validated alternatives |
+| `{{allowedAlternatives}}` | This role's office and remote alternatives validated by `review run`, from the delivered review evidence `location.alternatives`, keeping each term tied to its allowed offices or remote scope; for a manual lead, use its `queue verify` evidence |
 | `{{exclusions}}` | `search.exclusions` in plain words |
 | `{{atsTipsPath}}` | Path to `references/ats-tips.md` in this repository |
 | `{{titleLanguage}}` | Language for tab-title labels, for example English or Simplified Chinese |
@@ -55,7 +56,7 @@ On the final review page you may still fill question fields the page shows, but 
 ## Before filling
 
 - **Already applied?** Check the site's candidate dashboard or any "already applied" notice. If the user already applied to this exact role, stop and report "already applied".
-- **Location.** When the form asks for a location or office, choose in this order: {{locationOrder}}. If the role is offered only outside that list, do not fill it: stop and report the offered locations.
+- **Location.** Choose only among the role's validated term and location alternatives: {{allowedAlternatives}}. Use {{locationOrder}} to order those alternatives, keeping other validated choices available. If the form offers only choices outside {{allowedAlternatives}}, stop and report the offered locations and their terms. If the validated alternatives are missing, stop and request the recorded review evidence before choosing a location.
 - **Eligibility.** Use the judgment and quoted official-posting evidence delivered by `review run`; do not re-judge eligibility or fit. Manual leads without `verifiedAt` are checked with `queue verify` before dispatch as before. If the form reveals a new contradiction about degree level, graduation window, work authorization, or {{exclusions}}, stop and report the exact wording.
 
 ## Facts

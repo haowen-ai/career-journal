@@ -25,10 +25,10 @@ import { syncImapEmailAccount } from '../email/imap-sync.mjs';
 import { isLiveVerifiedEmailAccount, listEmailAccounts } from '../email/accounts.mjs';
 import { configuredDecisionAdapters } from './email.mjs';
 import { loadScanProfile } from '../scan/profile-input.mjs';
-import { scanFailed, scanWithContext } from './scan.mjs';
+import { scanExitCode, scanWithContext } from './scan.mjs';
 import { loadReviewInputs } from '../review/inputs.mjs';
 import { reviewWithContext } from './review.mjs';
-import { reviewExitCode } from '../review/receipt.mjs';
+import { reviewExitCode, worstExit } from '../review/receipt.mjs';
 
 const HOST_SYNC_RUN_MAX_AGE_MS = 30 * 60 * 1000;
 
@@ -192,13 +192,16 @@ export async function automationCommand(parsed, io, runtime) {
         'deadline-review': async (task) => runDeadlineReview(context.db, task),
         'role-scan': async () => {
           const profile = await loadScanProfile(context.root);
-          const summary = await scanWithContext(context, profile, runtime);
-          if (scanFailed(summary)) throw new Error('Every role-scan source failed; nothing new was queued');
+          let summary;
+          try { summary = await scanWithContext(context, profile, runtime); }
+          catch (error) {
+            if (error.code !== 75) throw error;
+            return { changed: 0, scan: { status: 'busy' }, exitCode: 75, message: error.message };
+          }
           let configured = true;
           try { await loadReviewInputs(context.root); }
           catch (error) { if (error.cause?.code === 'ENOENT') configured = false; else throw error; }
           const reviewed = configured ? await reviewWithContext(context, runtime) : null;
-          if (reviewed?.status === 'failed' || reviewed?.status === 'busy') throw new Error(`Role review ${reviewed.status}: ${reviewed.errors?.join('; ') ?? ''}`);
           const queuedIds = reviewed ? context.db.prepare("SELECT DISTINCT p.application_id id FROM postings p JOIN attempts a ON a.posting_id=p.id WHERE a.run_id=? AND p.application_id IS NOT NULL").all(reviewed.run_id).map((r) => r.id) : [];
           return {
             cursor: `sha256:${createHash('sha256').update(JSON.stringify({ type: 'role-scan', at: summary.scannedAt, queuedIds })).digest('hex')}`,
@@ -209,6 +212,8 @@ export async function automationCommand(parsed, io, runtime) {
             sources: summary.sources,
             queued: queuedIds,
             review: reviewed,
+            scan: { status: summary.status },
+            exitCode: worstExit([scanExitCode(summary), reviewed ? reviewExitCode(reviewed) : 0]),
           };
         },
         'daily-consolidation': async (task) => runDailyConsolidation(context.db, task, { home: context.root }),
@@ -229,8 +234,8 @@ export async function automationCommand(parsed, io, runtime) {
         },
       });
       if (parsed.options['dry-run'] !== true) await persistAutomationState(context);
-      if (result.changed || parsed.options['dry-run'] || Object.hasOwn(result, 'review')) io.out(JSON.stringify(result, null, 2));
-      return result.review ? reviewExitCode(result.review) : 0;
+      if (result.changed || parsed.options['dry-run'] || Object.hasOwn(result, 'review') || result.scan) io.out(JSON.stringify(result, null, 2));
+      return result.exitCode ?? (result.review ? reviewExitCode(result.review) : 0);
     }
     if (parsed.subcommand === 'install') {
       const tasks = listTasks(context.db);
