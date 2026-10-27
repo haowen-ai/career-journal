@@ -34,7 +34,7 @@ export function providerRequisition(value) {
   if (/(^|\.)lever\.co$/.test(host)) return result('lever', parts[0] ?? '-', uuid?.toLowerCase());
   if (/(^|\.)ashbyhq\.com$/.test(host)) return result('ashby', parts[0] ?? '-', uuid?.toLowerCase());
   if (/(^|\.)(?:myworkdayjobs|myworkdaysite)\.com$/.test(host)) {
-    const id = /_([A-Za-z]{0,4}[-_]?\d{3,}(?:-\d+)?)$/i.exec(parts.at(-1) ?? '')?.[1];
+    const id = /_((?:[A-Za-z]{1,4}\d{2}_|[A-Za-z]{0,4}[-_]?)\d{3,}(?:-\d+)?)$/i.exec(parts.at(-1) ?? '')?.[1];
     const tenant = host === 'myworkdaysite.com' ? parts[parts.indexOf('recruiting') + 1] : host.split('.')[0];
     return result('workday', tenant ?? '-', id?.toUpperCase());
   }

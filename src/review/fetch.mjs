@@ -1,5 +1,6 @@
 import { executeCareerOpsProcess } from '../integrations/careerops-process.mjs';
 import { providerRequisition } from '../funnel/identity.mjs';
+import { titleSimilarity, titleContainment } from '../scan/dedupe.mjs';
 
 export function commandFetcher({ argv, timeoutMs, maxBytes = 2_000_000, runImpl }) {
   if (!Array.isArray(argv) || !argv.length || !Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('Fetcher requires argv and a positive timeoutMs');
@@ -110,24 +111,47 @@ export function politeFetcher(inner, { perHost = 1, minGapMs = 1000, sleep = (ms
 }
 
 const normalize = (text) => String(text ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const decode = (value) => { try { return decodeURIComponent(value); } catch { return value; } };
+const containsId = (value, id) => {
+  const escaped = String(id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?=$|[^a-z0-9])`, 'i').test(value);
+};
 export function validateSnapshot(posting, result) {
   const fail = (reason) => ({ identityOk: false, reason });
   if ([404, 410].includes(result.httpStatus)) return fail('not_found');
   if (!result.ok) return fail(result.error ?? 'fetch_failed');
   const url = posting.url ?? posting.canonical_url;
+  let requested, final, retainedIdAndTitle;
   try {
-    const host = (value) => new URL(/^https?:/.test(value) ? value : `https://${value}`).hostname.replace(/^www\./, '');
-    if (host(url) !== host(result.finalUrl ?? url)) return fail('host_mismatch');
+    const parse = (value) => new URL(/^https?:/.test(value) ? value : `https://${value}`);
+    requested = parse(url); final = parse(result.finalUrl ?? url);
+    const jobId = providerRequisition(requested.href)?.id
+      ?? decode(requested.pathname).split('/').findLast((part) => /^[a-z0-9_-]{5,}$/i.test(part) && /\d/.test(part));
+    retainedIdAndTitle = Boolean(jobId && String(jobId).length >= 5 && /\d/.test(jobId)
+      && containsId(decode(final.pathname), jobId)
+      && (titleSimilarity(posting.title, result.title) >= 0.4 || titleContainment(posting.title, result.title) >= 0.6));
+    const host = (parsed) => /(^|\.)greenhouse\.io$/.test(parsed.hostname) ? 'greenhouse.io' : parsed.hostname.replace(/^www\./, '');
+    if (host(requested) !== host(final) && !retainedIdAndTitle) return fail('host_mismatch');
   } catch { return fail('host_mismatch'); }
   const text = String(result.text ?? '');
-  if (/\b(?:please sign in to continue|verify (?:that )?you are human|captcha|access denied|search results|enable javascript and cookies)\b/i.test(text)) return fail('challenge');
-  const req = posting.requisition ?? posting.requisitionId ?? providerRequisition(/^https?:/.test(url) ? url : `https://${url}`)?.id;
+  const hasPostingSection = /^\s*(?:(?:required|minimum|preferred|basic|key|job)\s+)?(?:requirements|qualifications|responsibilities|required skills|minimum education)\b/im.test(text);
+  if (/\b(?:please sign in to continue|verify (?:that )?you are human|captcha|access denied|enable javascript and cookies)\b/i.test(text)
+    || (/\bsearch results\b/i.test(text) && !hasPostingSection)) return fail('challenge');
+  const req = posting.requisition ?? posting.requisitionId ?? providerRequisition(requested.href)?.id;
   const fetchedReq = result.requisitionId;
-  const workday = /myworkday(?:jobs|site)\.com/i.test(url);
-  const reqKey = (id) => workday ? String(id).toUpperCase() : String(id);
-  if (req && fetchedReq && reqKey(req) !== reqKey(fetchedReq)
-    && !(workday && reqKey(req).replace(/-\d+$/, '') === reqKey(fetchedReq))) return fail('req_conflict');
-  if (!(req && fetchedReq) && normalize(posting.title) !== normalize(result.title)) return fail('wrong_posting');
+  const workday = /(^|\.)(?:myworkdayjobs|myworkdaysite)\.com$/.test(requested.hostname);
+  const reqKey = (id) => workday ? String(id).toUpperCase().replace(/[^A-Z0-9]/g, '') : String(id);
+  if (req && fetchedReq) {
+    const left = reqKey(req), right = reqKey(fetchedReq);
+    const suffixMatch = workday && (left.endsWith(right) || right.endsWith(left))
+      && Math.min(left.replace(/\D/g, '').length, right.replace(/\D/g, '').length) >= 4;
+    if (left !== right && !suffixMatch
+      && !(workday && reqKey(String(req).replace(/-\d+$/, '')) === right)) return fail('req_conflict');
+  }
+  const keyedApi = !req && result.method === 'ats_api' && result.finalUrl === url;
+  const reqInUrl = fetchedReq && containsId(decode(`${requested.pathname}${requested.search}`), fetchedReq);
+  if (!(req && fetchedReq) && !keyedApi && !reqInUrl && !retainedIdAndTitle
+    && normalize(posting.title) !== normalize(result.title)) return fail('wrong_posting');
   const hasJob = result.jsonLd && ([result.jsonLd['@type']].flat().includes('JobPosting') || result.jsonLd.title);
   if (text.length < 600 && !hasJob && !/requirements|qualifications|required skills|minimum education/i.test(text)) return fail('too_short');
   return { identityOk: true, reason: null };
