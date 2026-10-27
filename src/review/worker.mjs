@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { EXPLORATION_SHARE, FETCH_BATCH_MIN, JUDGE_TIME_SHARE } from '../funnel/contract.mjs';
+import { FETCH_BATCH_MIN, JUDGE_TIME_SHARE } from '../funnel/contract.mjs';
 import { aliasesFor, reconcileAliases, providerRequisition } from '../funnel/identity.mjs';
 import { createBudget, recoverLost } from './budget.mjs';
 import { acquireRunLease, heartbeat, finishRun, claimItem, assertFence, atomic } from './lease.mjs';
@@ -16,7 +16,8 @@ import { validateSnapshot } from './fetch.mjs';
 import { deliver, logReview, parseJson } from './deliver.mjs';
 import { scheduleRefresh, recheckHolds } from './freshness.mjs';
 import { redact } from '../runtime/redact.mjs';
-import { userDecided } from './ownership.mjs';
+import { reviewOwnershipJoins, userDecisionSql } from './ownership.mjs';
+import { createReviewScheduler } from './schedule.mjs';
 import { cachedJudgment, judgmentEnvelope, rememberJudgment } from './judgment-cache.mjs';
 import { postingPartitions } from '../funnel/membership.mjs';
 import { awaitingUserSummary } from './awaiting-user.mjs';
@@ -38,8 +39,8 @@ export function replan(db, { inputs, now }) {
   const state = inputState(current);
   let requeued = 0;
   atomic(db, () => {
-    for (const row of db.prepare('SELECT r.*,p.application_id FROM reviews r JOIN postings p ON p.id=r.posting_id').all()) {
-      if (userDecided(db, row)) continue;
+    for (const row of db.prepare(`SELECT r.*,p.application_id FROM reviews r JOIN postings p ON p.id=r.posting_id
+      ${reviewOwnershipJoins} WHERE NOT ${userDecisionSql}`).all()) {
       const stored = parseJson(row.dep_hashes_json);
       const old = stored.inputs;
       if (!old) continue;
@@ -49,8 +50,7 @@ export function replan(db, { inputs, now }) {
       const usedChanged = [...used].some((id) => old.facts?.[id] !== state.facts[id]);
       const otherChanged = ['rules','policy','screening','provenance','resume','code'].some((part) => old[part] !== state[part]);
       const windowsChanged = old.windowsAreas !== state.windowsAreas;
-      const answered = Boolean(db.prepare("SELECT 1 FROM review_log WHERE posting_id=? AND kind='user'").get(row.posting_id));
-      const relevantFacts = factsChanged && (usedChanged || row.decision === 'not_eligible' || row.code === 'missing_fact' && !answered);
+      const relevantFacts = factsChanged && (usedChanged || row.decision === 'not_eligible' || row.code === 'missing_fact');
       const relevantOther = otherChanged && (row.decision !== 'eligible' || windowsChanged);
       if (relevantFacts || relevantOther) {
         db.prepare("UPDATE reviews SET state='due',stage='judge',next_due=?,hold_owner=NULL,hold_since=NULL,lease_owner=NULL,lease_until=NULL,dep_hashes_json=?,updated_at=? WHERE posting_id=?")
@@ -62,28 +62,6 @@ export function replan(db, { inputs, now }) {
     }
   });
   return { requeued };
-}
-
-function ordered(rows, { now, policy, budget, explorationLeft }) {
-  const age = (row) => (Date.parse(now) - Date.parse(row.first_seen)) / DAY;
-  const deadline = (row) => { const d = parseJson(row.deadline_json); return d.kind === 'cutoff' ? Date.parse(d.date) : Infinity; };
-  const soon = (row) => deadline(row) <= Date.parse(now) + 7 * DAY;
-  const aged = (row) => !explorationLane(row) && (row.lane === 'aged' || age(row) >= (policy.serviceTargets?.agedAfterDays ?? 2));
-  const byAge = (a, b) => a.first_seen.localeCompare(b.first_seen) || a.posting_id.localeCompare(b.posting_id);
-  const sorted = [...rows].sort(byAge); const chosen = [];
-  const exploration = sorted.filter(explorationLane).slice(0, explorationLeft);
-  // A due-list rebuild must not grant another exploration share or let the
-  // remainder of either lane enter via the deadline/ordinary fallbacks.
-  const eligible = sorted.filter((row) => !explorationLane(row) || exploration.includes(row));
-  const take = (candidates, count = Infinity) => { for (const row of candidates) if (!chosen.includes(row) && count-- > 0) chosen.push(row); };
-  const deadlines = eligible.filter(soon).sort((a, b) => deadline(a) - deadline(b) || byAge(a,b));
-  // One imminent deadline, then reserved shares, then the rest of the paid order.
-  take(deadlines, 1);
-  take(sorted.filter(aged), Math.max(1, Math.ceil(budget * (policy.serviceTargets?.agedReserveShare ?? .25))));
-  take(exploration);
-  take(deadlines); take(sorted.filter(aged));
-  for (const lane of ['bootstrap','new','refresh']) take(sorted.filter((r) => r.lane === lane));
-  take(eligible); return chosen;
 }
 
 function absentFromCensuses(db, postingId) {
@@ -135,8 +113,9 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   scheduleRefresh(db, { now, policy: current.policy }); recheckHolds(db, { now, screeningPolicy: current.screeningPolicy }); replan(db, { inputs: current, now });
   // Actual adapter/CLI dependencies are available only after adapter.ready.
   atomic(db, () => {
-    for (const row of db.prepare('SELECT r.*,p.application_id FROM reviews r JOIN postings p ON p.id=r.posting_id').all()) {
-      if (userDecided(db, row) || row.decision === 'eligible' || row.decision === 'reused' || row.decision === 'dropped') continue;
+    for (const row of db.prepare(`SELECT r.* FROM reviews r JOIN postings p ON p.id=r.posting_id
+      ${reviewOwnershipJoins} WHERE NOT ${userDecisionSql}`).all()) {
+      if (row.decision === 'eligible' || row.decision === 'reused' || row.decision === 'dropped') continue;
       const old = parseJson(row.dep_hashes_json);
       if (!old.runtime || dependencyHash(old.runtime) === dependencyHash(runtimeDeps)) continue;
       db.prepare("UPDATE reviews SET state='due',stage='judge',next_due=?,hold_owner=NULL,hold_since=NULL,lease_owner=NULL,lease_until=NULL,dep_hashes_json=?,updated_at=? WHERE posting_id=?")
@@ -153,17 +132,17 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   // their existing scheduling and absence-based closure behavior.
   const unlistedOnly = new Set(db.prepare('SELECT posting_id FROM observations GROUP BY posting_id HAVING MAX(listed)=0').all().map((row) => row.posting_id));
   const reviewable = (row) => !unlistedOnly.has(row.posting_id);
-  const exploration = new Set(db.prepare("SELECT * FROM reviews WHERE state='due' AND lane IN ('no_student_signal','out_of_direction') AND (next_due IS NULL OR next_due<=?)").all(now)
-    .filter((row) => reviewable(row) && !userDecided(db, row)).map((row) => row.posting_id));
-  const explorationTarget = Math.min(exploration.size, budget ? Math.max(1, Math.ceil(budget * EXPLORATION_SHARE)) : 0);
+  const scheduler = createReviewScheduler(db, { now, owner, policy: current.policy, budget, unlistedOnly });
+  const { explorationTarget } = scheduler;
+  const explored = new Set();
+  const markSeen = (row) => { seen.add(row.posting_id); if (explorationLane(row)) explored.add(row.posting_id); };
+  let explorationSpent = 0;
   const explorationReserved = () => {
-    const spent = db.prepare('SELECT posting_id,1+transport_retries n FROM attempts WHERE run_id=?').all(runId)
-      .filter((row) => exploration.has(row.posting_id)).reduce((sum, row) => sum + row.n, 0);
-    const available = [...exploration].filter((id) => {
-      const row = db.prepare('SELECT * FROM reviews WHERE posting_id=?').get(id);
-      return row && ['due','leased'].includes(row.state) && (!row.next_due || row.next_due <= now) && !userDecided(db, row);
-    }).length;
-    return Math.min(available, Math.max(0, explorationTarget - spent));
+    // Failed sample fetches consume admission slots, but cannot spend attempts
+    // this run. Keep reservations for admitted judges until their work settles.
+    const slots = explorationTarget - explored.size + [...judging].filter((id) => explored.has(id)).length;
+    return explorationSpent >= explorationTarget || slots <= 0 ? 0
+      : Math.min(slots, scheduler.explorationAvailable(), explorationTarget - explorationSpent);
   };
   const failures = {};
   let primaryStopped = false;
@@ -178,14 +157,6 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     assertFence(db, id, fence);
     db.prepare("UPDATE reviews SET state='due',stage=COALESCE(?,stage),next_due=?,lease_owner=NULL,lease_until=NULL WHERE posting_id=?").run(stage ?? null, nextDue, id);
   });
-  const due = () => {
-    const explored = [...seen].filter((id) => exploration.has(id)).length;
-    // Keep our in-flight fetches in the order and exploration share until they
-    // become ready, so later arrivals cannot bypass or replace their slots.
-    return ordered(db.prepare("SELECT * FROM reviews WHERE state IN ('due','leased') AND (next_due IS NULL OR next_due<=?)").all(now)
-      .filter((row) => (row.state === 'due' || fetching.has(row.posting_id)) && reviewable(row) && !seen.has(row.posting_id) && !userDecided(db, row)),
-    { now, policy: current.policy, budget, explorationLeft: Math.max(0, explorationTarget - explored) });
-  };
   const refreshInputs = async () => { current = await inputs(); return current; };
   async function commitVerdict(id, fence, verdict) {
     atomic(db, () => {
@@ -214,7 +185,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       if (result.closedWording && (validation.identityOk || validation.reason === 'too_short') || validation.reason === 'not_found' && absentFromCensuses(db, id)) {
         db.prepare("UPDATE postings SET availability='closed_verified',updated_at=? WHERE id=?").run(now, id);
         deliver(db, { postingId: id, fence, verdict: { decision: 'not_eligible', code: 'closed_verified' }, now, policy: current.screeningPolicy });
-        seen.add(id); return;
+        markSeen(row); return;
       }
       if (!validation.identityOk) {
         const review = db.prepare('SELECT attempts FROM reviews WHERE posting_id=?').get(id);
@@ -224,11 +195,11 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         if (review.attempts >= 3) deliver(db, { postingId: id, fence, now, policy: current.screeningPolicy, verdict: { decision: 'unclear', code: 'browser_review', question: `Open the official posting: ${url}` } });
         else release(id, fence, { stage: 'fetch', nextDue: new Date(Date.parse(now) + (unavailable ? [1,3,7][Math.min(review.attempts - 1,2)] : 1) * DAY).toISOString() });
         db.prepare('UPDATE reviews SET last_error=? WHERE posting_id=?').run(validation.reason, id);
-        seen.add(id); return;
+        markSeen(row); return;
       }
       db.prepare("UPDATE postings SET availability='open',updated_at=? WHERE id=?").run(now, id);
       const reconciliation = reconcileAliases(db, id, aliasesFor({ company: posting.company, url: result.finalUrl ?? url, requisitionId: result.requisitionId }, { companyAliases: current.screeningPolicy.companyAliases }), { now, fence, companyAliases: current.screeningPolicy.companyAliases });
-      if (reconciliation.action !== 'added') { seen.add(id); return; }
+      if (reconciliation.action !== 'added') { markSeen(row); return; }
       const hash = dependencyHash({ text: result.text, title: result.title, requisitionId: result.requisitionId, locations: result.locations, jsonLd: result.jsonLd });
       db.prepare(`INSERT INTO snapshots(id,posting_id,content_hash,fetched_at,final_url,http_status,method,identity_ok,fields_json,sections_json,text)
         VALUES (?,?,?,?,?,?,?,1,?,?,?)`).run(randomUUID(), id, hash, now, result.finalUrl ?? url, result.httpStatus ?? 200, result.method ?? 'html', JSON.stringify({ ...result, text: undefined }), JSON.stringify(segmentSections(result.text)), result.text);
@@ -237,7 +208,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   }
 
   async function judgeItem(row) {
-    const id = row.posting_id; seen.add(id);
+    const id = row.posting_id; markSeen(row);
     const fence = claimItem(db, id, { owner, now }); if (!fence) return;
     const posting = db.prepare('SELECT * FROM postings WHERE id=?').get(id);
     const snapshot = db.prepare('SELECT * FROM snapshots WHERE posting_id=? AND identity_ok=1 AND text IS NOT NULL ORDER BY fetched_at DESC,rowid DESC LIMIT 1').get(id);
@@ -264,12 +235,14 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         if (activeCooldown(db, `judge:${tier}`, { now })) { receipt.stop_reason ??= 'quota_cooldown'; if (tier === 'primary') primaryStopped = true; break; }
         // Hold the full retry allowance while exploration is outstanding.
         // Higher lanes may continue next run after exploration has been served.
-        if (!exploration.has(id) && explorationReserved() > 0 && spending.remaining() <= explorationReserved() * (1 + maxRetries)) break;
+        const reserved = explorationLane(row) ? 0 : explorationReserved();
+        if (reserved > 0 && spending.remaining() <= reserved * (1 + maxRetries)) break;
         const attempt = atomic(db, () => {
           assertFence(db, id, fence);
           return spending.reserve({ postingId: id, stage: 'judge', runner: adapter.runner, model: adapter.model, tier, now });
         });
         if (!attempt) { receipt.stop_reason ??= 'budget'; break; }
+        if (explorationLane(row)) explorationSpent += 1;
         const outputPath = path.join(attemptDir, `${attempt.id}.json`); attempt.outputPath = outputPath;
         atomic(db, () => {
           assertFence(db, id, fence);
@@ -296,11 +269,13 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
             logReview(db, id, { now, stage: 'judge', kind: 'llm_raw', attemptId: attempt.id, payload: { output, tier, depsHash, snapshotHash: snapshot.content_hash } });
             rememberJudgment(db, id, judgmentEnvelope(output, { tier, depsHash, snapshotHash: snapshot.content_hash }));
             spending.markResponded(attempt.id, { usage: result.usage, transportRetries: result.transportRetries, now });
+            if (explorationLane(row)) explorationSpent += result.transportRetries ?? 0;
           });
           failures[tier] = null;
           await hooks.afterLlmLog?.({ attempt });
         } else {
           spending.markFailed(attempt.id, { error: result.error ?? result.status, transportRetries: result.transportRetries, now });
+          if (explorationLane(row)) explorationSpent += result.transportRetries ?? 0;
           if (result.status === 'quota') {
             setCooldown(db, `judge:${tier}`, { until: new Date(Date.parse(now) + (stageInputs.policy.budgets?.quotaCooldownHours ?? 6) * 3600000).toISOString(), reason: 'quota' });
             receipt.stop_reason = 'quota'; if (tier === 'primary') primaryStopped = true;
@@ -356,18 +331,25 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     const needsFetch = (row) => ['scan','fetch'].includes(row.stage);
     const canFetch = () => !expired() && clock() - start < duration * JUDGE_TIME_SHARE
       && !primaryStopped && spending.remaining() >= 1 && receipt.counts.fetched < maxFetches;
+    const hosts = new Map();
+    const hostFor = (row) => {
+      if (!hosts.has(row.posting_id)) hosts.set(row.posting_id, new URL(postingUrl(row)).host);
+      return hosts.get(row.posting_id);
+    };
     let queue = [];
     try {
       for (;;) {
         if (poolFailure) break;
         tick();
-        const available = due();
+        const fetchingAllowed = canFetch();
+        const { rows: available, pending } = scheduler.refill({ seen, fetching, queued: queue, policy: current.policy,
+          explorationLeft: Math.max(0, explorationTarget - explored.size), fetchAllowed: fetchingAllowed,
+          limit: Math.max(queue.length, Math.min(fetchAhead, Math.max(1, spending.remaining()) + fetching.size)) });
         if (expired()) {
-          if (available.length || fetching.size) receipt.stop_reason = 'deadline';
+          if (pending || fetching.size) receipt.stop_reason = 'deadline';
           break;
         }
         const rows = new Map(available.map((row) => [row.posting_id, row]));
-        const fetchingAllowed = canFetch();
         // Keep the admitted order as slots refill: rebuilding the due list must
         // not repeatedly put another deadline ahead of reserved lane capacity.
         const schedulable = (row) => fetchingAllowed || fetching.has(row.posting_id) || !needsFetch(row);
@@ -397,12 +379,12 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         for (const row of candidates) {
           if (fetching.size >= concurrency || !canFetch()) break;
           if (fetching.has(row.posting_id) || !needsFetch(row)) continue;
-          const host = new URL(postingUrl(db.prepare('SELECT canonical_url FROM postings WHERE id=?').get(row.posting_id))).host;
+          const host = hostFor(row);
           if (activeHosts.has(host)) continue;
           dispatch(row, fetching, fetchItem, host);
         }
         if (!active.size) {
-          if (available.length) {
+          if (pending) {
             if (primaryStopped || spending.remaining() < 1) receipt.stop_reason ??= 'budget';
             else if (receipt.counts.fetched >= maxFetches) receipt.stop_reason ??= 'fetch_budget';
             else if (clock() - start >= duration * JUDGE_TIME_SHARE) receipt.stop_reason ??= 'deadline';

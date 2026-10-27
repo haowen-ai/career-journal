@@ -1,5 +1,5 @@
 import { parseJson } from './deliver.mjs';
-import { SUBMITTED_STATUSES } from '../funnel/contract.mjs';
+import { reviewOwnershipJoins, userDecisionSql } from './ownership.mjs';
 export function recheckHolds(db, { now, screeningPolicy }) {
   let requeued = 0;
   for (const row of db.prepare("SELECT * FROM reviews WHERE state='held' AND code='quota_full' AND next_due IS NOT NULL").all()) {
@@ -13,10 +13,8 @@ export function recheckHolds(db, { now, screeningPolicy }) {
 export function scheduleRefresh(db, { now, policy }) {
   let requeued = 0;
   const days = 86400000;
-  for (const row of db.prepare(`SELECT r.*,p.application_id,p.availability,a.status,a.applied_at,a.skip_owner
-    FROM reviews r JOIN postings p ON p.id=r.posting_id LEFT JOIN applications a ON a.id=p.application_id WHERE r.state='done'`).all()) {
-    if (row.applied_at || SUBMITTED_STATUSES.includes(row.status) || row.status === 'prepared' || ['user','legacy'].includes(row.skip_owner) || row.code === 'user_declined') continue;
-    if (db.prepare("SELECT 1 FROM review_log WHERE posting_id=? AND kind='user'").get(row.posting_id)) continue;
+  for (const row of db.prepare(`SELECT r.* FROM reviews r JOIN postings p ON p.id=r.posting_id
+    ${reviewOwnershipJoins} WHERE r.state='done' AND NOT ${userDecisionSql}`).all()) {
     const age = (Date.parse(now) - Date.parse(row.updated_at)) / days;
     const deadline = parseJson(row.deadline_json);
     const near = deadline.kind === 'cutoff' && Date.parse(deadline.date) - Date.parse(now) <= 3 * days;
