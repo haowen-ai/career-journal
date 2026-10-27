@@ -167,6 +167,11 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   };
   const failures = {};
   let primaryStopped = false;
+  const fetching = new Set();
+  const judging = new Set();
+  const activeHosts = new Set();
+  const active = new Set();
+  let poolFailure;
   let lastHeartbeat = start;
   const tick = () => { if (leaseError) throw leaseError; if (clock() - lastHeartbeat >= 60000) { keepAlive(); if (leaseError) throw leaseError; lastHeartbeat = clock(); } };
   const release = (id, fence, { stage, nextDue = now } = {}) => atomic(db, () => {
@@ -175,8 +180,10 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   });
   const due = () => {
     const explored = [...seen].filter((id) => exploration.has(id)).length;
-    return ordered(db.prepare("SELECT * FROM reviews WHERE state='due' AND (next_due IS NULL OR next_due<=?)").all(now)
-      .filter((row) => reviewable(row) && !seen.has(row.posting_id) && !userDecided(db, row)),
+    // Keep our in-flight fetches in the order and exploration share until they
+    // become ready, so later arrivals cannot bypass or replace their slots.
+    return ordered(db.prepare("SELECT * FROM reviews WHERE state IN ('due','leased') AND (next_due IS NULL OR next_due<=?)").all(now)
+      .filter((row) => (row.state === 'due' || fetching.has(row.posting_id)) && reviewable(row) && !seen.has(row.posting_id) && !userDecided(db, row)),
     { now, policy: current.policy, budget, explorationLeft: Math.max(0, explorationTarget - explored) });
   };
   const refreshInputs = async () => { current = await inputs(); return current; };
@@ -227,30 +234,6 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         VALUES (?,?,?,?,?,?,?,1,?,?,?)`).run(randomUUID(), id, hash, now, result.finalUrl ?? url, result.httpStatus ?? 200, result.method ?? 'html', JSON.stringify({ ...result, text: undefined }), JSON.stringify(segmentSections(result.text)), result.text);
       release(id, fence, { stage: 'judge' });
     });
-  }
-
-  async function fetchBatch(batch) {
-    const pending = batch.map((row) => ({ row, host: new URL(postingUrl(db.prepare('SELECT canonical_url FROM postings WHERE id=?').get(row.posting_id))).host }));
-    const activeHosts = new Set();
-    let failure;
-    await Promise.all(Array.from({ length: Math.min(concurrency, pending.length) }, async () => {
-      try {
-        while (pending.length && !failure) {
-          if (expired()) { receipt.stop_reason = 'deadline'; return; }
-          if (clock() - start >= duration * JUDGE_TIME_SHARE && due().some((r) => !['scan','fetch'].includes(r.stage))) return;
-          if (primaryStopped || spending.remaining() < 1 || receipt.counts.fetched >= maxFetches) return;
-          // Skip busy hosts rather than occupying a worker with a queued request.
-          const index = pending.findIndex(({ host }) => !activeHosts.has(host));
-          if (index < 0) return; // Active workers will drain their hosts' remaining rows.
-          const [{ row, host }] = pending.splice(index, 1);
-          activeHosts.add(host);
-          try { await fetchItem(row); }
-          finally { activeHosts.delete(host); }
-        }
-      } catch (error) { failure ??= { error }; }
-    }));
-    // Let every started fetch settle before propagating an error or finishing the run.
-    if (failure) throw failure.error;
   }
 
   async function judgeItem(row) {
@@ -356,32 +339,85 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     } else release(id, fence, { stage: 'judge' });
   }
 
-  let drainingCycle = false;
+  function dispatch(row, pool, work, host) {
+    const id = row.posting_id;
+    pool.add(id);
+    if (host) activeHosts.add(host);
+    const task = work(row).catch((error) => { poolFailure ??= { error }; }).finally(() => {
+      pool.delete(id);
+      if (host) activeHosts.delete(host);
+      active.delete(task);
+    });
+    active.add(task);
+  }
+
   try {
-    for (;;) {
-      tick();
-      const candidates = due(); if (!candidates.length) break;
-      if (expired()) { receipt.stop_reason = 'deadline'; break; }
-      const ready = candidates.filter((row) => row.stage !== 'fetch' && row.stage !== 'scan');
-      const firstNeedsFetch = ['fetch','scan'].includes(candidates[0].stage);
-      const canFetch = !primaryStopped && spending.remaining() >= 1 && receipt.counts.fetched < maxFetches
-        && clock() - start < duration * JUDGE_TIME_SHARE;
-      if (ready.length && (drainingCycle || !(firstNeedsFetch && canFetch))) {
-        if (primaryStopped && receipt.stop_reason !== 'quota') break;
-        const batch = ready.slice(0, concurrency);
-        await Promise.all(batch.map(judgeItem));
-        if (primaryStopped && !due().some((r) => r.stage === 'judge')) break;
-        continue;
+    const fetchAhead = Math.max(concurrency * 2, FETCH_BATCH_MIN);
+    const needsFetch = (row) => ['scan','fetch'].includes(row.stage);
+    const canFetch = () => !expired() && clock() - start < duration * JUDGE_TIME_SHARE
+      && !primaryStopped && spending.remaining() >= 1 && receipt.counts.fetched < maxFetches;
+    let queue = [];
+    try {
+      for (;;) {
+        if (poolFailure) break;
+        tick();
+        const available = due();
+        if (expired()) {
+          if (available.length || fetching.size) receipt.stop_reason = 'deadline';
+          break;
+        }
+        const rows = new Map(available.map((row) => [row.posting_id, row]));
+        const fetchingAllowed = canFetch();
+        // Keep the admitted order as slots refill: rebuilding the due list must
+        // not repeatedly put another deadline ahead of reserved lane capacity.
+        const schedulable = (row) => fetchingAllowed || fetching.has(row.posting_id) || !needsFetch(row);
+        queue = queue.filter((id) => rows.has(id) && schedulable(rows.get(id)));
+        const queued = new Set(queue);
+        for (const row of available) {
+          if (queue.length >= fetchAhead) break;
+          if (!queued.has(row.posting_id) && schedulable(row)) queue.push(row.posting_id);
+        }
+        const candidates = queue.map((id) => rows.get(id));
+        let started = 0;
+        if (!primaryStopped || receipt.stop_reason === 'quota') {
+          for (const row of candidates) {
+            if (judging.size >= concurrency || expired()) break;
+            if (fetching.has(row.posting_id) || needsFetch(row)) {
+              // Preserve paid order while fetching is available. Once fetching
+              // stops, drain already-fetched work until the actual deadline.
+              if (canFetch() || fetching.has(row.posting_id) && clock() - start < duration * JUDGE_TIME_SHARE) break;
+              continue;
+            }
+            dispatch(row, judging, judgeItem);
+            started += 1;
+          }
+        }
+        // Fetch independently of judging, with a bounded ready buffer. Busy hosts
+        // do not occupy slots that another host can use (T4).
+        for (const row of candidates) {
+          if (fetching.size >= concurrency || !canFetch()) break;
+          if (fetching.has(row.posting_id) || !needsFetch(row)) continue;
+          const host = new URL(postingUrl(db.prepare('SELECT canonical_url FROM postings WHERE id=?').get(row.posting_id))).host;
+          if (activeHosts.has(host)) continue;
+          dispatch(row, fetching, fetchItem, host);
+        }
+        if (!active.size) {
+          if (available.length) {
+            if (primaryStopped || spending.remaining() < 1) receipt.stop_reason ??= 'budget';
+            else if (receipt.counts.fetched >= maxFetches) receipt.stop_reason ??= 'fetch_budget';
+            else if (clock() - start >= duration * JUDGE_TIME_SHARE) receipt.stop_reason ??= 'deadline';
+          }
+          break;
+        }
+        if (started) continue; // Fill the buffer vacated by newly started judges.
+        // Any completion can supply a ready item or free a judge/fetch slot.
+        await Promise.race(active);
       }
-      drainingCycle = false;
-      if (primaryStopped || spending.remaining() < 1) { receipt.stop_reason ??= 'budget'; break; }
-      if (receipt.counts.fetched >= maxFetches) { receipt.stop_reason ??= 'fetch_budget'; break; }
-      if (clock() - start >= duration * JUDGE_TIME_SHARE && receipt.counts.fetched) { receipt.stop_reason ??= 'deadline'; break; }
-      const batch = candidates.filter((r) => ['scan','fetch'].includes(r.stage)).slice(0, Math.min(Math.max(concurrency * 2, FETCH_BATCH_MIN), maxFetches - receipt.counts.fetched));
-      if (!batch.length) break;
-      await fetchBatch(batch);
-      drainingCycle = true;
+    } finally {
+      // No task may write after the receipt is closed or an error is propagated.
+      await Promise.all(active);
     }
+    if (poolFailure) throw poolFailure.error;
     receipt.counts.attempts = db.prepare('SELECT COUNT(*) n FROM attempts WHERE run_id=?').get(runId).n;
     receipt.counts.escalations = db.prepare("SELECT COUNT(*) n FROM attempts WHERE run_id=? AND tier='escalation'").get(runId).n;
     const pending = db.prepare("SELECT * FROM reviews WHERE state IN ('due','held','failed')").all().filter(reviewable);
