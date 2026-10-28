@@ -8,8 +8,10 @@ export function applicationGroup(application) {
   const status = String(application?.status ?? '').toLowerCase();
   if (waitingStatuses.has(status)) return 'waiting';
   if (interviewStatuses.has(status)) return 'interview';
-  if (closedStatuses.has(status)) return 'closed';
-  if (preparingStatuses.has(status) && application?.skipReason != null) return 'closed';
+  // Closed is history of roles actually sent; a role that never went out
+  // (screened out, duplicate, held) is listed under Screened out instead.
+  if (closedStatuses.has(status)) return wasApplied(application) ? 'closed' : 'skipped';
+  if (preparingStatuses.has(status) && application?.skipReason != null) return 'skipped';
   if (preparingStatuses.has(status)) return 'preparing';
   return 'unknown';
 }
@@ -23,7 +25,7 @@ export function wasApplied(application) {
 }
 
 export function applicationStats(applications) {
-  const stats = { applied: 0, waiting: 0, interview: 0, closed: 0, preparing: 0 };
+  const stats = { applied: 0, waiting: 0, interview: 0, closed: 0, preparing: 0, skipped: 0 };
   for (const application of applications ?? []) {
     const group = applicationGroup(application);
     if (group in stats && group !== 'applied') stats[group] += 1;

@@ -209,7 +209,7 @@ img { display: block; }
 .status::before { width: 5px; height: 5px; content: ""; border-radius: 50%; background: currentColor; }
 .status-waiting { color: #98701f; background: #faf4e5; }
 .status-interview { color: #456c9c; background: #eaf1fa; }
-.status-closed { color: #896779; background: #f7eef1; }
+.status-closed, .status-skipped { color: #896779; background: #f7eef1; }
 .status-preparing { color: #287f6c; background: #e8f5ed; }
 .status-unknown { color: #6c5f84; background: #f2edf8; }
 .card-facts { display: grid; grid-template-columns: 1fr .8fr 1.8fr; gap: 23px; margin: 0 27px 20px; }

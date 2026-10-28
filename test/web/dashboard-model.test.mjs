@@ -60,14 +60,15 @@ test('unreviewed retained leads do not appear in preparing counts or the apply q
   assert.equal(isQueued(held), false);
 });
 
-test('hidden unsubmitted records stay out of the default list but remain in closed history', () => {
+test('hidden unsubmitted records stay out of the default list and Closed, and remain under Screened out', () => {
   const ready = application({ id: 'ready' });
   const held = application({ id: 'held', skipReason: 'Unverified required skill' });
   const excluded = application({ id: 'excluded', status: 'withdrawn', skipReason: 'Annual quota reached' });
   const submitted = application({ id: 'submitted', status: 'applied', skipReason: 'Old queue note' });
   const records = [ready, held, excluded, submitted];
   assert.deepEqual(filterApplications(records).map(item => item.id), ['ready', 'submitted']);
-  assert.deepEqual(filterApplications(records, { group: 'closed' }).map(item => item.id), ['held', 'excluded']);
+  assert.deepEqual(filterApplications(records, { group: 'closed' }).map(item => item.id), []);
+  assert.deepEqual(filterApplications(records, { group: 'skipped' }).map(item => item.id), ['held', 'excluded']);
   assert.equal(records.length, 4);
 });
 
@@ -89,13 +90,24 @@ test('groups every supported status for the five-card dashboard summary', () => 
   assert.equal(applicationGroup(applications[2]), 'waiting');
   assert.equal(applicationGroup(applications[4]), 'interview');
   assert.equal(applicationGroup(applications[6]), 'closed');
+  assert.equal(applicationGroup(applications[8]), 'skipped');
+  assert.equal(applicationGroup(applications[9]), 'closed');
   assert.deepEqual(applicationStats(applications), {
     applied: 8,
     waiting: 2,
     interview: 2,
-    closed: 5,
+    closed: 4,
     preparing: 2,
+    skipped: 1,
   });
+});
+
+test('a never-submitted role skipped for location stays out of Closed', () => {
+  const location = application({ id: 'wisconsin', status: 'withdrawn', stage: 'review_withdrawn', skipReason: 'Location not allowed: Mequon, Wisconsin' });
+  const rejected = application({ id: 'rejected', status: 'rejected', appliedAt: '2026-10-01' });
+  assert.equal(applicationGroup(location), 'skipped');
+  assert.deepEqual(filterApplications([location, rejected], { group: 'closed' }).map((item) => item.id), ['rejected']);
+  assert.deepEqual(filterApplications([location, rejected], { group: 'skipped' }).map((item) => item.id), ['wisconsin']);
 });
 
 test('filters by semantic group and normalized company, role, or identifier text', () => {

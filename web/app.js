@@ -34,7 +34,7 @@ const copy = {
     reminderTitle: 'Keep progress moving', reminderBody: "When enabled, daily checks follow this workspace's local time zone.",
     statApplied: 'Applications sent', statAppliedNote: 'Confirmed submissions', statWaiting: 'Waiting',
     statWaitingNote: 'Submitted or in assessment', statInterview: 'Interview / Offer', statInterviewNote: 'Active interview or decision',
-    statClosed: 'Closed', statClosedNote: 'Finished, withdrawn, or rejected', statPreparing: 'Preparing',
+    statClosed: 'Closed', statClosedNote: 'Sent, then finished, withdrawn, or rejected', statPreparing: 'Preparing',
     statPreparingNote: 'Not yet confirmed as submitted', applicationsTitle: 'All applications',
     applicationsBody: 'Different roles at the same company stay separate.', searchLabel: 'Search applications',
     searchPlaceholder: 'Search company, role, or ID', filterAll: 'All', filterWaiting: 'Waiting',
@@ -53,7 +53,7 @@ const copy = {
     filterTasks: 'Assessments / interviews', markDone: 'Mark done', undo: 'Undo', taskUpdateError: 'Could not update',
     completedTasks: (count) => `Completed (${count})`, taskCompleted: 'Completed', platform: 'Platform', openLink: 'Open link', deadline: 'Deadline',
     openSteps: 'Open steps', cardTasks: 'Assessment and interview steps', cardTasksNote: 'Deadlines use the workspace time zone.',
-    filterQueue: 'Queue', queueFacts: 'Role queue details', location: 'Location', skipReason: 'Skip reason',
+    filterQueue: 'Queue', filterSkipped: 'Screened out', queueFacts: 'Role queue details', location: 'Location', skipReason: 'Skip reason',
     sortLabel: 'Sort by', sortDeadline: 'Deadline (soonest first)', sortFit: 'Fit', sortNewest: 'Newest',
     fitFilterLabel: 'Fit', fitAll: 'All', fitHigh: 'High', fitMedium: 'Medium', fitLow: 'Low', fitNone: 'Unrated',
     filterSent: 'Sent', statCardLabel: (stat, count) => `${{
@@ -71,7 +71,7 @@ const copy = {
     heroBody: '申请进展、实际提交的材料与面试记录，放在一起查看。',
     reminderTitle: '每天，留一点时间看进展', reminderBody: '启用后，每日检查会按照当前工作区保存的本地时区运行。',
     statApplied: '实际已投', statAppliedNote: '已确认投递的申请', statWaiting: '等待进展', statWaitingNote: '已投递或正在测评',
-    statInterview: '面试 / Offer', statInterviewNote: '面试推进或等待决定', statClosed: '已结束', statClosedNote: '结束、撤回、拒绝或录用',
+    statInterview: '面试 / Offer', statInterviewNote: '面试推进或等待决定', statClosed: '已结束', statClosedNote: '投递后结束、撤回、拒绝或录用',
     statPreparing: '准备中', statPreparingNote: '尚未确认投递', applicationsTitle: '全部申请', applicationsBody: '同一家公司的不同职位，分别记录。',
     searchLabel: '搜索申请', searchPlaceholder: '搜索公司、职位或编号', filterAll: '全部', filterWaiting: '等待进展',
     filterInterview: '面试 / Offer', filterClosed: '已结束', filterPreparing: '准备中', loading: '正在加载申请…',
@@ -88,7 +88,7 @@ const copy = {
     filterTasks: '测评 / 面试', markDone: '标记完成', undo: '撤销', taskUpdateError: '更新失败',
     completedTasks: (count) => `已完成（${count}）`, taskCompleted: '已完成', platform: '平台', openLink: '打开链接', deadline: '截止时间',
     openSteps: '待完成步骤', cardTasks: '测评与面试步骤', cardTasksNote: '截止时间按工作区时区显示。',
-    filterQueue: '投递队列', queueFacts: '待投岗位信息', location: '地点', skipReason: '跳过原因',
+    filterQueue: '投递队列', filterSkipped: '已筛掉', queueFacts: '待投岗位信息', location: '地点', skipReason: '跳过原因',
     sortLabel: '排序', sortDeadline: '截止时间（最近的在前）', sortFit: '匹配度', sortNewest: '最新加入',
     fitFilterLabel: '匹配度', fitAll: '全部', fitHigh: '高', fitMedium: '中', fitLow: '低', fitNone: '未评',
     filterSent: '已投递', statCardLabel: (stat, count) => `${{
@@ -556,7 +556,7 @@ function render() {
     document.querySelector(`[data-stat="${key}"]`).setAttribute('aria-label', t('statCardLabel')(key, stats[key]));
   }
   const filterCounts = {
-    all: filterApplications(state.applications).length, sent: stats.applied, waiting: stats.waiting, interview: stats.interview, closed: stats.closed, preparing: stats.preparing,
+    all: filterApplications(state.applications).length, sent: stats.applied, waiting: stats.waiting, interview: stats.interview, closed: stats.closed, preparing: stats.preparing, skipped: stats.skipped,
     tasks: state.applications.filter(hasOpenTask).length, queue: state.applications.filter(isQueued).length,
   };
   for (const [key, value] of Object.entries(filterCounts)) document.querySelector(`[data-count="${key}"]`).textContent = value;
