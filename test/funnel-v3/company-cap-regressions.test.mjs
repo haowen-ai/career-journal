@@ -173,11 +173,13 @@ test('[B] the worker settles a due review of a capped company without fetching o
   const q = queue();
   q.add(db, 'p-cap-new');
   q.add(db, 'p-cap-bootstrap', { title: 'Analytics Intern', lane: 'bootstrap' });
+  q.add(db, 'p-cap-explore', { title: 'Hardware Engineer Intern', lane: 'out_of_direction' });
   q.add(db, 'p-free-new', { company: FREE });
   const { fetcher, judges: j } = await review(db, { pages: q.pages, answers: q.answers });
   assert.deepEqual(judgedIds(j), ['p-free-new'], 'only the uncapped company is judged');
   assert.deepEqual(fetcher.calls.map((call) => call.url), [urlOf('p-free-new')], 'only the uncapped company is fetched');
-  const problems = ['p-cap-new', 'p-cap-bootstrap'].flatMap((id) => cappedProblems(db, id));
+  // Exploration lanes keep the cap code too, or the posting could never be restored.
+  const problems = ['p-cap-new', 'p-cap-bootstrap', 'p-cap-explore'].flatMap((id) => cappedProblems(db, id));
   assert.deepEqual(problems, [], `C2: a capped company gets no new lead:\n${problems.join('\n')}`);
   assert.equal(applicationOf(db, 'p-cap-new'), undefined, 'no application for a capped posting');
   assert.ok(queued(db).includes(applicationOf(db, 'p-free-new')?.id), 'the uncapped posting becomes a visible lead');

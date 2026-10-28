@@ -119,7 +119,8 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
     if ((policy.userExcludedCompanies ?? []).some((c) => key(c) === key(posting.company))) value = { ...value, decision: 'not_eligible', code: 'company_excluded' };
     // Exploration never creates a user question, including delivery-time holds
     // such as company quotas. Keep the sampled lane as the negative reason.
-    if (['no_student_signal', 'out_of_direction'].includes(review.lane)) {
+    // A cap settlement keeps its own code so the startup pass can restore it.
+    if (['no_student_signal', 'out_of_direction'].includes(review.lane) && value.code !== 'company_cap') {
       value = value.decision === 'eligible'
         ? { ...value, flags: [...new Set([...(value.flags ?? []), 'found_by_sampling'])] }
         : { ...value, decision: 'not_eligible', code: review.lane, question: null, holdFactIds: [], nextAction: null };
