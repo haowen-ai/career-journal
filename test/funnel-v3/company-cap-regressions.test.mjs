@@ -201,10 +201,14 @@ test('[B] the startup pass withdraws visible leads of a capped company and resto
   db.prepare(`INSERT INTO application_events (id, application_id, event_type, observed_at, recorded_at, title, note, source_json, status_after, content_hash)
     VALUES ('user-skip', ?, 'queue_skipped', ?, ?, 'skipped', 'not interested', ?, 'withdrawn', 'h-user-skip')`).run(skipped, at(-0.5), at(-0.5), JSON.stringify({ actor: 'user' }));
   q.add(db, 'p-cap-unjudged', { title: 'Analytics Intern' });
+  // A second company stays capped through T0+15, past the 14-day negative refresh.
+  const still = [3, 4, 5, 6, 7].map((daysAgo) => submission(db, { company: 'Still Capped Example', daysAgo, now: at(15) }));
+  const stillLead = deliveredLead(db, 'p-still-lead', { company: 'Still Capped Example', now: at(-1) });
+  submitted.push(...still);
   const before = submittedState(db, submitted);
   const userRows = () => JSON.stringify([prepared, skipped].map((id) => ({ row: db.prepare('SELECT * FROM applications WHERE id = ?').get(id), events: eventsOf(db, id) })));
   const users = userRows();
-  assert.deepEqual(queued(db).sort(), [lead, freeLead].sort(), 'fixture: both delivered leads are visible');
+  assert.deepEqual(queued(db).sort(), [lead, freeLead, stillLead].sort(), 'fixture: the delivered leads are visible');
 
   const first = await review(db, { budget: 0, now: T0 });
   assert.equal(attemptsCount(db), 0, 'the cap makes no paid attempt');
@@ -215,7 +219,7 @@ test('[B] the startup pass withdraws visible leads of a capped company and resto
   if (app.skip_owner !== 'review') problems.push(`lead skip_owner ${app.skip_owner}, expected review`);
   const withdrawal = [...eventsOf(db, lead)].reverse().find((event) => event.statusAfter);
   if (withdrawal?.statusAfter !== 'withdrawn' || withdrawal.source?.actor !== 'review-worker') problems.push(`last status event ${withdrawal?.type} by ${withdrawal?.source?.actor}, expected a review-worker withdrawal`);
-  problems.push(...cappedProblems(db, 'p-cap-unjudged'));
+  problems.push(...cappedProblems(db, 'p-cap-unjudged'), ...cappedProblems(db, 'p-still-lead'));
   assert.deepEqual(problems, [], `C3: visible leads of a capped company are withdrawn:\n${problems.join('\n')}`);
   assert.deepEqual(queued(db), [freeLead], 'the other company keeps its lead');
   assert.equal(userRows(), users, 'prepared and user-skipped leads are untouched');
@@ -238,6 +242,10 @@ test('[B] the startup pass withdraws visible leads of a capped company and resto
   assert.equal(reviewOf(db, 'p-cap-unjudged').state, 'due', 'C4: a review capped before judgment is due again');
   assert.notEqual(reviewOf(db, 'p-cap-unjudged').code, 'company_cap');
   assert.equal(userRows(), users, 'C4: a user skip is never restored');
+  // The refresh that re-queued the still-capped review neither re-judges nor un-caps it, and keeps its verdict.
+  assert.deepEqual(cappedProblems(db, 'p-still-lead'), [], 'a refresh of a still-capped review is settled again');
+  assert.equal(evidenceOf(db, 'p-still-lead').companyCap?.judged, true, 'the capped eligible verdict is kept for a later restore');
+  assert.ok(!queued(db).includes(stillLead));
   assert.equal(submittedState(db, submitted), before, 'the submitted applications are untouched (C7)');
 });
 

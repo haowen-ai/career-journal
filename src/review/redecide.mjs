@@ -3,7 +3,7 @@ import { buildJudgeRequest } from './prompt.mjs';
 import { inputState } from './worker.mjs';
 import { cachedJudgment, judgmentEnvelope } from './judgment-cache.mjs';
 import { decide } from './decide.mjs';
-import { deliver, parseJson, suppressSubmittedDuplicates } from './deliver.mjs';
+import { applyCompanyCap, deliver, deliveryPolicy, parseJson, suppressSubmittedDuplicates } from './deliver.mjs';
 import { atomic, claimItem } from './lease.mjs';
 import { reviewOwnershipJoins, userDecisionSql, userDecided } from './ownership.mjs';
 
@@ -13,6 +13,7 @@ const without = (parts, key) => Object.fromEntries(Object.entries(parts ?? {}).f
 // original hashes: they were produced by those dependencies, not today's code.
 export async function redecideReviews(db, { inputs, judges, held, done = false, now }) {
   suppressSubmittedDuplicates(db, { now, policy: inputs.screeningPolicy });
+  applyCompanyCap(db, { now, policy: deliveryPolicy(inputs) });
   const runtime = {};
   for (const tier of ['primary', 'escalation']) {
     const request = await buildJudgeRequest({ posting: {}, snapshot: { text: '' }, sections: [], inputs, adapter: judges[tier], tier });
@@ -48,7 +49,7 @@ export async function redecideReviews(db, { inputs, judges, held, done = false, 
       if (!verdict || verdict.escalate) return;
       const fence = claimItem(db, id, { owner: `redecide-${process.pid}`, now });
       if (!fence) return;
-      deliver(db, { postingId: id, fence, verdict, now, policy: inputs.screeningPolicy });
+      deliver(db, { postingId: id, fence, verdict, now, policy: deliveryPolicy(inputs) });
       const delivered = db.prepare('SELECT decision,code FROM reviews WHERE posting_id=?').get(id);
       report.redecided += 1;
       if (delivered.decision !== row.decision || delivered.code !== row.code) report.changed += 1;

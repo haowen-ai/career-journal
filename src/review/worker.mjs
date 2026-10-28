@@ -14,7 +14,7 @@ import { dependencyHash, evalCurrent, screeningPolicyParts } from './inputs.mjs'
 import { segmentSections } from './clauses.mjs';
 import { decide } from './decide.mjs';
 import { validateSnapshot } from './fetch.mjs';
-import { deliver, logReview, parseJson, suppressSubmittedDuplicates } from './deliver.mjs';
+import { applyCompanyCap, deliver, deliveryPolicy, logReview, parseJson, suppressSubmittedDuplicates } from './deliver.mjs';
 import { scheduleRefresh, recheckHolds } from './freshness.mjs';
 import { redact } from '../runtime/redact.mjs';
 import { reviewOwnershipJoins, userDecisionSql } from './ownership.mjs';
@@ -243,6 +243,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   });
   db.prepare("UPDATE reviews SET state='due',stage='fetch',hold_owner=NULL WHERE state='held' AND code='unavailable' AND next_due<=?").run(now);
   suppressSubmittedDuplicates(db, { now, policy: current.screeningPolicy, owner });
+  applyCompanyCap(db, { now, policy: deliveryPolicy(current), owner });
   attemptDir ??= await mkdtemp(path.join(os.tmpdir(), 'cj-review-attempts-'));
   await mkdir(attemptDir, { recursive: true, mode: 0o700 });
   const seen = new Set();
@@ -280,7 +281,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   async function commitVerdict(id, fence, verdict, dependencies) {
     atomic(db, () => {
       hooks.insideDeliver?.({ postingId: id });
-      deliver(db, { postingId: id, verdict, fence, now, policy: current.screeningPolicy });
+      deliver(db, { postingId: id, verdict, fence, now, policy: deliveryPolicy(current) });
       if (dependencies) db.prepare('UPDATE reviews SET dep_hashes_json=? WHERE posting_id=?').run(JSON.stringify(dependencies), id);
     });
   }
@@ -304,7 +305,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       db.prepare('UPDATE reviews SET attempts=attempts+1 WHERE posting_id=?').run(id);
       if (result.closedWording && (validation.identityOk || validation.reason === 'too_short') || validation.reason === 'not_found' && absentFromCensuses(db, id)) {
         db.prepare("UPDATE postings SET availability='closed_verified',updated_at=? WHERE id=?").run(now, id);
-        deliver(db, { postingId: id, fence, verdict: { decision: 'not_eligible', code: 'closed_verified' }, now, policy: current.screeningPolicy });
+        deliver(db, { postingId: id, fence, verdict: { decision: 'not_eligible', code: 'closed_verified' }, now, policy: deliveryPolicy(current) });
         markSeen(row); return;
       }
       if (!validation.identityOk) {
@@ -312,7 +313,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         const unavailable = validation.reason === 'not_found';
         if (unavailable) db.prepare("UPDATE postings SET availability='unavailable',updated_at=? WHERE id=?").run(now, id);
         logReview(db, id, { now, stage: 'fetch', kind: 'error', payload: { error: validation.reason } });
-        if (review.attempts >= 3) deliver(db, { postingId: id, fence, now, policy: current.screeningPolicy, verdict: { decision: 'unclear', code: 'browser_review', question: `Open the official posting: ${url}` } });
+        if (review.attempts >= 3) deliver(db, { postingId: id, fence, now, policy: deliveryPolicy(current), verdict: { decision: 'unclear', code: 'browser_review', question: `Open the official posting: ${url}` } });
         else release(id, fence, { stage: 'fetch', nextDue: new Date(Date.parse(now) + (unavailable ? [1,3,7][Math.min(review.attempts - 1,2)] : 1) * DAY).toISOString() });
         db.prepare('UPDATE reviews SET last_error=? WHERE posting_id=?').run(validation.reason, id);
         markSeen(row); return;
