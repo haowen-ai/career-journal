@@ -3,7 +3,7 @@ import { buildJudgeRequest } from './prompt.mjs';
 import { inputState } from './worker.mjs';
 import { cachedJudgment, judgmentEnvelope } from './judgment-cache.mjs';
 import { decide } from './decide.mjs';
-import { deliver, parseJson } from './deliver.mjs';
+import { deliver, parseJson, suppressSubmittedDuplicates } from './deliver.mjs';
 import { atomic, claimItem } from './lease.mjs';
 import { reviewOwnershipJoins, userDecisionSql, userDecided } from './ownership.mjs';
 
@@ -12,6 +12,7 @@ const without = (parts, key) => Object.fromEntries(Object.entries(parts ?? {}).f
 // Replay only the deterministic decision layer. Cached judgments retain their
 // original hashes: they were produced by those dependencies, not today's code.
 export async function redecideReviews(db, { inputs, judges, held, done = false, now }) {
+  suppressSubmittedDuplicates(db, { now, policy: inputs.screeningPolicy });
   const runtime = {};
   for (const tier of ['primary', 'escalation']) {
     const request = await buildJudgeRequest({ posting: {}, snapshot: { text: '' }, sections: [], inputs, adapter: judges[tier], tier });

@@ -116,13 +116,16 @@ test('[L1] same title with a different requisition is a separate posting linked 
 });
 
 for (const status of ['lead', 'applied', 'rejected', 'withdrawn']) {
-  test(`[L1] a same-title new requisition after a ${status} application is reviewed as a new posting`, async () => {
+  test(`[L1] a same-title new requisition after a ${status} application is reviewed as a new posting unless that application was submitted`, async () => {
     const { bootstrapExisting } = await bootstrap();
     const db = freshDb();
     seedApplication(db, { company: 'Example Corp', role: 'Analytics Intern', status, jobUrl: 'https://job-boards.greenhouse.io/examplecorp/jobs/9300001', appliedAt: status === 'applied' || status === 'rejected' ? '2026-09-01T00:00:00Z' : null });
     bootstrapExisting(db, { provenance: { automatedSkipPrefixes: [], userDeclineMarkers: [] }, now: T0 });
     await batch(db, [record({ sourceId: '9300009', url: 'https://job-boards.greenhouse.io/examplecorp/jobs/9300009', title: 'Analytics Intern' })]);
-    assert.equal(reviewOf(db, postingFor(db, 'source:greenhouse:9300009')).state, 'due');
+    // Amended for dedupe D2 (2026-10-27): after a submitted application the same program is never reviewed again.
+    const review = reviewOf(db, postingFor(db, 'source:greenhouse:9300009'));
+    if (status === 'applied' || status === 'rejected') assert.equal(review.code, 'already_submitted');
+    else assert.equal(review.state, 'due');
   });
 }
 

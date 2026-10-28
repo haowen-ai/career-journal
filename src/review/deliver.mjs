@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { createApplication } from '../commands/application.mjs';
-import { bindApplication } from '../funnel/identity.mjs';
+import { bindApplication, submittedApplicationIndex, submittedDuplicate } from '../funnel/identity.mjs';
 import { SUBMITTED_STATUSES } from '../funnel/contract.mjs';
 import { recordEvent } from '../domain/events.mjs';
-import { atomic, assertFence } from './lease.mjs';
+import { atomic, assertFence, claimItem } from './lease.mjs';
+import { userDecided } from './ownership.mjs';
 import { redact } from '../runtime/redact.mjs';
 import { validTimezone } from './deadline.mjs';
 
@@ -64,6 +65,7 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
     let posting = db.prepare('SELECT * FROM postings WHERE id=?').get(postingId);
     const review = db.prepare('SELECT * FROM reviews WHERE posting_id=?').get(postingId);
     let app = posting.application_id ? db.prepare('SELECT * FROM applications WHERE id=?').get(posting.application_id) : null;
+    const duplicate = submittedDuplicate(db, posting, { companyAliases: policy.companyAliases });
     const oldEvidence = parseJson(review.evidence_json);
     const lastEvent = app && db.prepare('SELECT * FROM application_events WHERE application_id=? ORDER BY recorded_at DESC,rowid DESC LIMIT 1').get(app.id);
     const lastStatus = app && db.prepare('SELECT * FROM application_events WHERE application_id=? AND status_after IS NOT NULL ORDER BY recorded_at DESC,rowid DESC LIMIT 1').get(app.id);
@@ -75,10 +77,11 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
         && (['user','manual','event-command'].includes(source.kind) || /^(?:manual_|user_)/.test(event.event_type));
     };
     const userWithdrawal = app?.status === 'withdrawn' && isUserEvent(lastStatus);
-    const canRestore = !userWithdrawal && (lastStatus && parseJson(lastStatus.source_json).actor === 'review-worker' || automated || oldEvidence.systemReview === true);
+    const reviewOwned = !userWithdrawal && (lastStatus && parseJson(lastStatus.source_json).actor === 'review-worker' || automated || oldEvidence.systemReview === true);
+    const canRestore = !duplicate && review.code !== 'already_submitted' && reviewOwned;
     const stageStart = parseJson(review.dep_hashes_json).stageStartedAt ?? review.updated_at;
     const protectedApp = app && (app.applied_at || SUBMITTED_STATUSES.includes(app.status) || ['user','legacy'].includes(app.skip_owner)
-      || app.status === 'withdrawn' && !canRestore || isUserEvent(lastEvent) && lastEvent.recorded_at > stageStart);
+      || app.status === 'withdrawn' && !canRestore && !(duplicate && reviewOwned) || isUserEvent(lastEvent) && lastEvent.recorded_at > stageStart);
     let value = verdict.decision === 'eligible' ? companyVerdict(posting, verdict, policy) : verdict;
     // Exclusions are rechecked at delivery even if the inputs changed while judging.
     if ((policy.userExcludedCompanies ?? []).some((c) => key(c) === key(posting.company))) value = { ...value, decision: 'not_eligible', code: 'company_excluded' };
@@ -89,6 +92,9 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
         ? { ...value, flags: [...new Set([...(value.flags ?? []), 'found_by_sampling'])] }
         : { ...value, decision: 'not_eligible', code: review.lane, question: null, holdFactIds: [], nextAction: null };
     }
+    // This guard also wins over eligible verdicts, quotas and exploration lanes.
+    // It never merges postings or writes to the submitted application.
+    if (duplicate) value = { decision: 'not_eligible', code: 'already_submitted', evidence: [duplicate] };
     let action;
     let held = value.decision === 'unclear';
     if (protectedApp) { action = 'superseded_by_user'; held = false; }
@@ -114,7 +120,8 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
           appendEvent(db, app.id, 'review_held', now, { note: reason, source: { postingId } });
           action = 'hidden';
         } else {
-          if (app.status !== 'withdrawn') appendEvent(db, app.id, 'review_withdrawn', now, { statusAfter: 'withdrawn', note: value.code ?? '', source: { postingId, evidence: value.evidence ?? [] } });
+          if (app.status !== 'withdrawn') appendEvent(db, app.id, 'review_withdrawn', now, { statusAfter: 'withdrawn', note: value.code ?? '',
+            source: { postingId, evidence: value.evidence ?? [], ...(duplicate ? { automatedProvenance: true } : {}) } });
           db.prepare("UPDATE applications SET skip_reason=?,skip_owner='review' WHERE id=?").run(value.code ?? 'not_eligible', app.id);
           action = 'withdrawn';
         }
@@ -131,6 +138,7 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
     }
     const evidence = { ...oldEvidence, evidence: value.evidence ?? [], needs: value.needs ?? {}, fit: value.fit ?? null, deadline: value.deadline ?? { kind: 'none' },
       program: value.program ?? null, location: value.location ?? null, factsUsed: value.factsUsed ?? [], question: value.question ?? null, holdFactIds: value.holdFactIds ?? [] };
+    if (duplicate) evidence.provenance = 'automated';
     if (value.modelDecision) evidence.modelDecision = value.modelDecision;
     else delete evidence.modelDecision;
     if (value.jev) evidence.jev = value.jev;
@@ -145,6 +153,28 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
     const committed = db.prepare('SELECT state FROM reviews WHERE posting_id=?').get(postingId);
     if (committed.state !== (held ? 'held' : 'done')) throw new Error('Delivery readback mismatch');
     return { action, applicationId: app?.id ?? null };
+  });
+}
+
+// Reconcile legacy/delivered leads even when no fetch or cached judgment is due.
+// Claim only duplicates and settle them through the normal fenced event writer;
+// unchanged reviews are never requeued for a paid judgment.
+export function suppressSubmittedDuplicates(db, { now, policy = {}, owner = 'review-dedupe' }) {
+  return atomic(db, () => {
+    const index = submittedApplicationIndex(db, { companyAliases: policy.companyAliases });
+    let suppressed = 0;
+    for (const posting of db.prepare(`SELECT p.*,r.posting_id,r.state,r.code,a.status application_status
+      FROM postings p JOIN reviews r ON r.posting_id=p.id LEFT JOIN applications a ON a.id=p.application_id
+      WHERE p.merged_into IS NULL`).all()) {
+      if (userDecided(db, posting) || !submittedDuplicate(db, posting, { companyAliases: policy.companyAliases, index })) continue;
+      if (posting.state === 'done' && posting.code === 'already_submitted'
+        && (!posting.application_id || posting.application_status === 'withdrawn')) continue;
+      const fence = claimItem(db, posting.id, { owner, now });
+      if (!fence) continue;
+      deliver(db, { postingId: posting.id, fence, now, policy, verdict: { decision: 'not_eligible', code: 'already_submitted' } });
+      suppressed += 1;
+    }
+    return { suppressed };
   });
 }
 

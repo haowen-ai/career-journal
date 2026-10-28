@@ -14,7 +14,7 @@ import { dependencyHash, evalCurrent, screeningPolicyParts } from './inputs.mjs'
 import { segmentSections } from './clauses.mjs';
 import { decide } from './decide.mjs';
 import { validateSnapshot } from './fetch.mjs';
-import { deliver, logReview, parseJson } from './deliver.mjs';
+import { deliver, logReview, parseJson, suppressSubmittedDuplicates } from './deliver.mjs';
 import { scheduleRefresh, recheckHolds } from './freshness.mjs';
 import { redact } from '../runtime/redact.mjs';
 import { reviewOwnershipJoins, userDecisionSql } from './ownership.mjs';
@@ -242,6 +242,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     }
   });
   db.prepare("UPDATE reviews SET state='due',stage='fetch',hold_owner=NULL WHERE state='held' AND code='unavailable' AND next_due<=?").run(now);
+  suppressSubmittedDuplicates(db, { now, policy: current.screeningPolicy, owner });
   attemptDir ??= await mkdtemp(path.join(os.tmpdir(), 'cj-review-attempts-'));
   await mkdir(attemptDir, { recursive: true, mode: 0o700 });
   const seen = new Set();

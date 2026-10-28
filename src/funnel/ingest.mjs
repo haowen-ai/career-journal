@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { canonicalUrl, resolvePosting, postingCandidates } from './identity.mjs';
+import { canonicalUrl, resolvePosting, postingCandidates, submittedApplicationIndex, submittedDuplicate } from './identity.mjs';
 import { classifyRole } from './classify.mjs';
 import { SUBMITTED_STATUSES } from './contract.mjs';
 import { redact } from '../runtime/redact.mjs';
@@ -26,6 +26,7 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
     if (runOwner) assertScanOwner(db, runId, runOwner);
     // Read once per batch and keep newly created/merged identities in the map.
     const candidates = postingCandidates(db, { companyAliases: policy.companyAliases });
+    const submitted = submittedApplicationIndex(db, { companyAliases: policy.companyAliases });
     for (const raw of records) {
       counts.observed += 1;
       const record = { ...raw, source: raw?.source ?? source, partition };
@@ -49,7 +50,8 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
       db.prepare(`INSERT OR IGNORE INTO observation_sightings (run_id,posting_id,observation_id,source,partition,seen_at) VALUES (?,?,?,?,?,?)`)
         .run(runId, id, observation.id, record.source, partition, now);
       const result = classifyRole(record, { policy, profile, identity: {
-        submitted: application && (SUBMITTED_STATUSES.includes(application.status) || Boolean(application.applied_at)),
+        submitted: submittedDuplicate(db, record, { companyAliases: policy.companyAliases, index: submitted })
+          ?? (application && (SUBMITTED_STATUSES.includes(application.status) || Boolean(application.applied_at))),
         userDeclined: application?.status === 'withdrawn' && application.skip_owner === 'user',
       } });
       if (result.kind === 'reuse') counts.reused += 1;
@@ -64,14 +66,15 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
       // Keep unlisted observations in conservation, without creating work for a
       // posting that has never had a review. A later listing can open it normally.
       const canOpen = record.listed !== false || result.kind !== 'review';
-      if ((!old && canOpen) || (old && old.code !== 'identity_conflict' && (result.kind === 'reuse' || renew))) {
+      if ((!old && canOpen) || result.code === 'already_submitted' || (old && old.code !== 'identity_conflict' && (result.kind === 'reuse' || renew))) {
         const state = result.kind === 'review' ? 'due' : 'done';
         const decision = result.kind === 'review' ? null : result.kind === 'reuse' ? 'reused' : 'dropped';
-        db.prepare(`INSERT INTO reviews (posting_id,stage,state,decision,code,lane,flags_json,next_due,first_seen,updated_at)
-          VALUES (?,'fetch',?,?,?,?,?,?,?,?) ON CONFLICT(posting_id) DO UPDATE SET stage='fetch',state=excluded.state,
+        db.prepare(`INSERT INTO reviews (posting_id,stage,state,decision,code,lane,flags_json,evidence_json,next_due,first_seen,updated_at)
+          VALUES (?,'fetch',?,?,?,?,?,?,?,?,?) ON CONFLICT(posting_id) DO UPDATE SET stage='fetch',state=excluded.state,
           decision=excluded.decision,code=excluded.code,lane=excluded.lane,flags_json=excluded.flags_json,next_due=excluded.next_due,
+          evidence_json=CASE WHEN excluded.code='already_submitted' THEN excluded.evidence_json ELSE reviews.evidence_json END,
           lease_owner=NULL,lease_until=NULL,hold_owner=NULL,hold_since=NULL,updated_at=excluded.updated_at`)
-          .run(id, state, decision, result.code, result.lane, JSON.stringify(result.flags), state === 'due' ? now : null, posting.first_seen, now);
+          .run(id, state, decision, result.code, result.lane, JSON.stringify(result.flags), JSON.stringify(result.evidence), state === 'due' ? now : null, posting.first_seen, now);
       }
       db.prepare('UPDATE postings SET last_seen=?,listed=?,updated_at=? WHERE id=?').run(now, record.listed === false ? 0 : 1, now, id);
     }

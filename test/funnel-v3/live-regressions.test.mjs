@@ -385,7 +385,9 @@ test('[B] review redecide --held re-decides held reviews from stored judgments w
     db.prepare("UPDATE reviews SET decision = 'not_eligible', code = 'degree', updated_at = ? WHERE posting_id = 'p-done'").run(NOW);
     db.prepare("INSERT INTO review_log (posting_id, at, stage, kind, attempt_id, payload_json) VALUES ('p-user-resolved', ?, 'deliver', 'user', NULL, ?)")
       .run(NOW, JSON.stringify({ decision: 'not_eligible', reason: 'not interested', actor: 'user' }));
-    db.prepare('UPDATE applications SET applied_at = ? WHERE id = ?').run(NOW, applicationRow(db, 'p-submitted').id);
+    // Amended for dedupe D2 (2026-10-27): every fixture posting shares one title, so the submitted one gets its own
+    // title; otherwise the same-program guard rightly withdraws the other leads as already submitted.
+    db.prepare('UPDATE applications SET applied_at = ?, role = ? WHERE id = ?').run(NOW, 'Submitted Program Intern', applicationRow(db, 'p-submitted').id);
     const newer = page('https://job-boards.greenhouse.io/examplecorp/jobs/p-new-snapshot', `${SNAPSHOTS.eligible}\nThe team now also supports pricing analysis.\n`);
     db.prepare(`INSERT INTO snapshots (id, posting_id, content_hash, fetched_at, final_url, http_status, method, identity_ok, fields_json, sections_json, text)
       VALUES ('snap-newer', 'p-new-snapshot', 'sha256:newer-page', ?, ?, 200, 'ats_api', 1, '{}', '[]', ?)`).run('2026-10-21T00:00:00.000Z', newer.finalUrl, newer.text);

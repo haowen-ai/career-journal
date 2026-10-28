@@ -350,6 +350,57 @@ function applicationRecord(app) {
     sourceId: app.source_id ?? (prefix?.[1] !== 'posting' ? prefix?.[2] : null), externalId: prefix ? null : app.external_id };
 }
 
+// Submission dedupe is deliberately separate from posting identity: different
+// ATS postings (I2) keep their ids even when the user has submitted the program.
+const programTitle = (value) => String(value ?? '').normalize('NFKD').toLowerCase()
+  .replace(/\band\b/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+
+function submissionKeys(record, companyAliases) {
+  const company = companyKey(record.company, companyAliases);
+  if (!company) return [];
+  const aliases = aliasesFor(record, { companyAliases });
+  const keys = aliases.filter(({ kind }) => kind === 'company_req').map(({ alias }) => alias);
+  const url = parseUrl(record.url);
+  // Custom career sites put the job id either immediately after /job(s)/ or
+  // after the location/title slug. Only whole id segments count; zip codes in
+  // slugs and intermediate location ids cannot become requisition keys (D3).
+  if (url && !providerRequisition(record.url)) {
+    const parts = url.pathname.split('/').filter(Boolean);
+    const marker = parts.findIndex((part) => /^(?:jobs?|details)$/i.test(part));
+    const isId = (part) => /^\d{3,}(?:-\d{1,4})?$/.test(part ?? '');
+    const id = marker < 0 ? null : isId(parts.at(-1)) ? parts.at(-1) : isId(parts[marker + 1]) ? parts[marker + 1] : null;
+    if (id) {
+      const suffix = parts[marker].toLowerCase() === 'details' ? /-\d{1,4}$/ : /-\d{1,2}$/;
+      keys.push(`company_req:${company}:${id.replace(suffix, '')}`);
+    }
+  }
+  keys.push(...aliases.filter(({ kind }) => kind === 'url').map(({ alias }) => `${company}:${alias}`));
+  return keys;
+}
+
+export function submittedApplicationIndex(db, { companyAliases } = {}) {
+  const identities = new Map(); const programs = new Map();
+  const apps = db.prepare(`SELECT * FROM applications WHERE status IN (${SUBMITTED_STATUSES.map(() => '?').join(',')})
+    OR COALESCE(applied_at,'')<>'' ORDER BY created_at,id`).all(...SUBMITTED_STATUSES);
+  for (const app of apps) {
+    const record = applicationRecord(app);
+    for (const key of submissionKeys(record, companyAliases)) if (!identities.has(key)) identities.set(key, app.id);
+    const company = companyKey(app.company, companyAliases); const title = programTitle(app.role);
+    if (company && title && !programs.has(`${company}:${title}`)) programs.set(`${company}:${title}`, app.id);
+  }
+  return { identities, programs };
+}
+
+export function submittedDuplicate(db, record, { companyAliases, index } = {}) {
+  index ??= submittedApplicationIndex(db, { companyAliases });
+  if (!record.url && record.canonical_url) record = { ...record, url: /^https?:/.test(record.canonical_url) ? record.canonical_url : `https://${record.canonical_url}` };
+  const key = submissionKeys(record, companyAliases).find((item) => index.identities.has(item));
+  if (key) return { applicationId: index.identities.get(key), match: 'same_requisition' };
+  const company = companyKey(record.company, companyAliases); const title = programTitle(record.title);
+  const applicationId = company && title && index.programs.get(`${company}:${title}`);
+  return applicationId ? { applicationId, match: 'same_program' } : null;
+}
+
 export function bindApplication(db, applicationId, { now, companyAliases } = {}) {
   const app = db.prepare('SELECT * FROM applications WHERE id=?').get(applicationId);
   if (!app) throw new Error('Application not found');

@@ -41,7 +41,7 @@ export function classifyRole(record, { policy = {}, profile, identity: { submitt
   const flags = [];
   let lane = 'new';
   const outcome = (kind, code, evidence = []) => ({ kind, code, evidence, flags, lane });
-  if (submitted) return outcome('reuse', 'already_submitted');
+  if (submitted) return outcome('reuse', 'already_submitted', typeof submitted === 'object' ? [submitted] : []);
   if (userDeclined) return outcome('reuse', 'user_declined');
   if ((policy.userExcludedCompanies ?? []).some((name) => companyKey(name, policy.companyAliases) === companyKey(record.company, policy.companyAliases))) {
     return outcome('drop', 'company_excluded', [record.company]);
