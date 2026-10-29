@@ -86,16 +86,38 @@ function companyCapped(db, company, { now, policy, counts }) {
   return entry && entry.count >= cap.max ? { ...entry, max: cap.max, windowDays: cap.windowDays } : null;
 }
 
+// Holds that ask the user (or the forced model decision) a question about the posting.
+export const MODEL_HOLD_CODES = Object.freeze(['missing_fact', 'requirement_unclear', 'user_review', 'term_or_area']);
+const QUESTION_HOLD_CODES = Object.freeze([...MODEL_HOLD_CODES, 'browser_review']);
+
+// A question hold is released only by an answer: the user's resolve (explicit), or a fresh judge verdict with
+// decision eligible. A verdict replayed from stored judgments (redecide, decision-code replay, hold release) is
+// not an answer, and neither is an inferred term against the term_or_area question; a forced model decision is.
+export function heldReleaseBlock(review, verdict, { fresh = false, explicit = false } = {}) {
+  if (explicit || verdict?.decision !== 'eligible') return null;
+  if (review?.decision !== 'unclear' || !QUESTION_HOLD_CODES.includes(review.code)) return null;
+  if (!fresh) return 'replayed';
+  if (verdict.modelDecision) return null;
+  return review.code === 'term_or_area' && (verdict.flags ?? []).includes('term_inferred') ? 'inferred_term' : null;
+}
+export function keepHold(review, verdict, { escalate = false } = {}) {
+  const evidence = parseJson(review.evidence_json);
+  return { ...verdict, decision: 'unclear', code: review.code, escalate, nextAction: 'user_review',
+    question: evidence.question ?? verdict.question ?? null, holdFactIds: evidence.holdFactIds ?? [],
+    flags: [...new Set([...(verdict.flags ?? []), 'hold_kept'])] };
+}
+
 function appendEvent(db, appId, type, now, { statusAfter = null, note = '', source = {}, reviewRestore = false } = {}) {
   recordEvent(db, { id: randomUUID(), applicationId: appId, type, observedAt: now, recordedAt: now, title: type, note,
     source: { actor: 'review-worker', ...source }, statusAfter }, { withinTransaction: true, reviewRestore });
 }
 
-export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
+export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh = false, explicit = false }) {
   return atomic(db, () => {
     assertFence(db, postingId, fence);
     let posting = db.prepare('SELECT * FROM postings WHERE id=?').get(postingId);
     const review = db.prepare('SELECT * FROM reviews WHERE posting_id=?').get(postingId);
+    if (heldReleaseBlock(review, verdict, { fresh, explicit })) verdict = keepHold(review, verdict);
     let app = posting.application_id ? db.prepare('SELECT * FROM applications WHERE id=?').get(posting.application_id) : null;
     const duplicate = submittedDuplicate(db, posting, { companyAliases: policy.companyAliases });
     const oldEvidence = parseJson(review.evidence_json);
@@ -189,7 +211,7 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {} }) {
     if (value.jev) evidence.jev = value.jev;
     const userHold = held && !['unavailable','quota_full','quota_reconciliation'].includes(value.code);
     db.prepare('UPDATE reviews SET flags_json=? WHERE posting_id=?')
-      .run(JSON.stringify([...new Set([...parseJson(review.flags_json, []).filter((flag) => !['term_inferred', 'model_decided', 'disputed', 'jev_decided'].includes(flag)), ...(value.flags ?? [])])]), postingId);
+      .run(JSON.stringify([...new Set([...parseJson(review.flags_json, []).filter((flag) => !['term_inferred', 'model_decided', 'disputed', 'jev_decided', 'hold_kept'].includes(flag)), ...(value.flags ?? [])])]), postingId);
     db.prepare(`UPDATE reviews SET state=?,decision=?,code=?,evidence_json=?,deadline_json=?,hold_owner=?,hold_since=?,next_due=?,stage='deliver',
       lease_owner=NULL,lease_until=NULL,updated_at=? WHERE posting_id=? AND lease_owner=? AND lease_generation=?`)
       .run(held ? 'held' : 'done', value.decision, protectedApp ? 'superseded_by_user' : value.code ?? null, JSON.stringify(evidence), JSON.stringify(value.deadline ?? {}),

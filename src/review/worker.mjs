@@ -14,7 +14,7 @@ import { dependencyHash, evalCurrent, screeningPolicyParts } from './inputs.mjs'
 import { segmentSections } from './clauses.mjs';
 import { decide } from './decide.mjs';
 import { validateSnapshot } from './fetch.mjs';
-import { applyCompanyCap, deliver, deliveryPolicy, logReview, parseJson, suppressSubmittedDuplicates } from './deliver.mjs';
+import { applyCompanyCap, deliver, deliveryPolicy, heldReleaseBlock, keepHold, logReview, parseJson, suppressSubmittedDuplicates } from './deliver.mjs';
 import { scheduleRefresh, recheckHolds } from './freshness.mjs';
 import { redact } from '../runtime/redact.mjs';
 import { reviewOwnershipJoins, userDecisionSql } from './ownership.mjs';
@@ -278,10 +278,10 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     db.prepare("UPDATE reviews SET state='due',stage=COALESCE(?,stage),next_due=?,lease_owner=NULL,lease_until=NULL WHERE posting_id=?").run(stage ?? null, nextDue, id);
   });
   const refreshInputs = async () => { current = await inputs(); return current; };
-  async function commitVerdict(id, fence, verdict, dependencies) {
+  async function commitVerdict(id, fence, verdict, dependencies, { fresh = false } = {}) {
     atomic(db, () => {
       hooks.insideDeliver?.({ postingId: id });
-      deliver(db, { postingId: id, verdict, fence, now, policy: deliveryPolicy(current) });
+      deliver(db, { postingId: id, verdict, fence, now, policy: deliveryPolicy(current), fresh });
       if (dependencies) db.prepare('UPDATE reviews SET dep_hashes_json=? WHERE posting_id=?').run(JSON.stringify(dependencies), id);
     });
   }
@@ -427,11 +427,16 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     let final;
     let opinionAsked = false;
     let jevProbabilities;
+    // Whether the final verdict comes from judgments made under today's dependencies. A replay of an older
+    // judgment under new decision code cannot release a question hold (deliver keeps it held).
+    let fresh = false;
+    const prior = db.prepare('SELECT decision,code,evidence_json FROM reviews WHERE posting_id=?').get(id);
     if (usesJevSplit(stageInputs.policy) && !expired()) {
       receipt.jev ??= jevCounts();
       const result = await reviewJevSplit({ inputs: stageInputs, snapshotText: snapshot.text, firstSeen: posting.first_seen, posting,
         jev, counts: receipt.jev });
-      final = result.verdict; jevProbabilities = result.probabilities;
+      final = result.verdict; jevProbabilities = result.probabilities; fresh = true;
+      if (final && heldReleaseBlock(prior, final, { fresh }) === 'inferred_term') final = keepHold(prior, final);
     }
     for (const tier of ['primary','escalation']) {
       if (final) break;
@@ -441,6 +446,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       const depsHash = dependencyHash(request.deps.parts);
       if (tier === 'primary' && !evalCurrent(stageInputs.evalRecord, request.deps).current && !receipt.warnings.includes('eval_stale')) receipt.warnings.push('eval_stale');
       let parts = request.deps.parts;
+      let replayed = false;
       let output = cachedJudgment(db, id, { tier, depsHash, snapshotHash: snapshot.content_hash });
       const previous = stored.runtime?.[tier];
       const replayParts = (value) => comparison.parts(value, parts, { omit: settled.has(id) ? ['decide','model'] : ['decide'], policyAliases: stored.policyAliases });
@@ -448,7 +454,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         // A decision-code change can replay even an invalidated review. Look up
         // the original hash, never relabel an old judgment with today's hash.
         output = cachedJudgment(db, id, { tier, depsHash: dependencyHash(previous), snapshotHash: snapshot.content_hash });
-        if (output) parts = previous;
+        if (output) { parts = previous; replayed = true; }
       }
       if (output) {
         if (tier === 'escalation' && opinionAsked) receipt.counts.secondOpinion.escalated += 1;
@@ -463,6 +469,10 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       decisionRuntime[tier] = request.deps.parts;
       final = decide({ snapshotText: snapshot.text, judgment: output, facts: stageInputs.facts, policy: stageInputs.policy, tier,
         firstSeen: posting.first_seen, jobType: stageInputs.profile?.search?.jobType });
+      fresh = !replayed;
+      // An inferred term is an assumption, not an answer to the term_or_area question this review is held on:
+      // keep the question so the escalation tier's forced decision settles it.
+      if (heldReleaseBlock(prior, final, { fresh }) === 'inferred_term') final = keepHold(prior, final, { escalate: tier === 'primary' });
       if (tier === 'primary') {
         if (stageInputs.policy.judge?.secondOpinion) receipt.counts.secondOpinion ??= { asked: 0, agreed: 0, escalated: 0, errors: 0 };
         const result = await reviewPrimaryVerdict({ verdict: final, inputs: stageInputs, snapshotText: snapshot.text,
@@ -478,6 +488,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         forced ??= await dispatchJudge(tier, forcedRequest, { forced: true, question });
         final = forced ? await verifyForcedVerdict({ verdict: final, output: forced, inputs: stageInputs, snapshotText: snapshot.text,
           firstSeen: posting.first_seen, secondOpinion, counts: receipt.counts.secondOpinion }) : null;
+        if (forced) fresh = true;
       }
       break;
     }
@@ -496,7 +507,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       // does not requeue a settled review on every subsequent run.
       const committedDependencies = { ...dependencies, decisionRuntime };
       delete committedDependencies.releasedHold;
-      await commitVerdict(id, fence, final, committedDependencies);
+      await commitVerdict(id, fence, final, committedDependencies, { fresh });
       const committed = db.prepare('SELECT state,decision,code,flags_json,evidence_json FROM reviews WHERE posting_id=?').get(id);
       if (committed.state === 'done' && committed.code !== 'superseded_by_user' && final.modelDecision) {
         receipt.model_decided.push({ postingId: id, decision: committed.decision, assumption: final.modelDecision.assumption,

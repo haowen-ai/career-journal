@@ -34,7 +34,11 @@ const ELIGIBLE = { decision: 'eligible', code: null, fit: { level: 'medium', not
 const urlOf = (id) => `https://job-boards.greenhouse.io/heldexample/jobs/${id}`;
 const applicationOf = (db, postingId) => db.prepare('SELECT a.* FROM postings p JOIN applications a ON a.id = p.application_id WHERE p.id = ?').get(postingId);
 const queued = (db) => listQueue(db).map((row) => row.id);
-const releaseEvents = (db, appId) => eventsOf(db, appId).filter((event) => ['review_restored', 'review_delivered'].includes(event.type));
+// Release events written after the application's first hold.
+const releaseEvents = (db, appId) => {
+  const events = eventsOf(db, appId);
+  return events.slice(events.findIndex((event) => event.type === 'review_held') + 1).filter((event) => ['review_restored', 'review_delivered'].includes(event.type));
+};
 
 async function deliverAs(db, postingId, verdict, now, options = {}) {
   const { deliver, claimItem } = await delivery();
@@ -48,7 +52,9 @@ async function deliverAs(db, postingId, verdict, now, options = {}) {
 async function heldPosting(db, id, { code = 'missing_fact', question = FACT_QUESTION, withdrawnFirst = false, text = SNAPSHOTS.eligible, requeue = 'judge' } = {}) {
   insertPosting(db, { id, url: urlOf(id), company: 'Held Example Co', title: snapshotTitle(text), firstSeen: T0 });
   insertReview(db, { postingId: id, stage: 'fetch', firstSeen: T0, nextDue: T0 });
-  if (withdrawnFirst) {
+  if (withdrawnFirst) { // a lead the review later withdrew, as the old checker's automated skip did
+    await deliverAs(db, id, ELIGIBLE, at(0.005), { fresh: true });
+    db.prepare("UPDATE reviews SET state = 'due' WHERE posting_id = ?").run(id);
     await deliverAs(db, id, { decision: 'not_eligible', code: 'degree' }, at(0.01));
     db.prepare("UPDATE reviews SET state = 'due' WHERE posting_id = ?").run(id);
   }
@@ -67,7 +73,7 @@ function assertStillHeld(db, id, app, { code, question, status = 'lead' }) {
   assert.equal(after.status, status, `${id}: application status unchanged`);
   if (status === 'lead') assert.match(after.skip_reason ?? '', /^待核: /, `${id}: the application stays hidden behind its question`);
   assert.ok(!queued(db).includes(app.id), `${id}: not a visible queued lead`);
-  assert.deepEqual(releaseEvents(db, app.id), [], `${id}: no review_restored / review_delivered event`);
+  assert.deepEqual(releaseEvents(db, app.id), [], `${id}: no review_restored / review_delivered event after the hold`);
 }
 
 // ------------------------------------------------------------------ HR1, HR2 (delivery boundary)

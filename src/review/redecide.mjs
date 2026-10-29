@@ -3,7 +3,7 @@ import { buildJudgeRequest } from './prompt.mjs';
 import { inputState } from './worker.mjs';
 import { cachedJudgment, judgmentEnvelope } from './judgment-cache.mjs';
 import { decide } from './decide.mjs';
-import { applyCompanyCap, deliver, deliveryPolicy, parseJson, suppressSubmittedDuplicates } from './deliver.mjs';
+import { applyCompanyCap, deliver, deliveryPolicy, heldReleaseBlock, parseJson, suppressSubmittedDuplicates } from './deliver.mjs';
 import { atomic, claimItem } from './lease.mjs';
 import { reviewOwnershipJoins, userDecisionSql, userDecided } from './ownership.mjs';
 
@@ -21,7 +21,7 @@ export async function redecideReviews(db, { inputs, judges, held, done = false, 
   }
   const currentInputs = without(inputState(inputs), 'code');
   const states = [...(held ? ['held'] : []), ...(done ? ['done'] : [])];
-  const report = { redecided: 0, changed: 0, by_decision: {} };
+  const report = { redecided: 0, changed: 0, kept: 0, by_decision: {} };
   const candidates = db.prepare(`SELECT r.posting_id FROM reviews r JOIN postings p ON p.id=r.posting_id
     ${reviewOwnershipJoins} WHERE p.merged_into IS NULL AND NOT ${userDecisionSql}
     AND r.state IN (${states.map(() => '?').join(',')}) ORDER BY r.first_seen,r.posting_id`).all(...states);
@@ -47,6 +47,8 @@ export async function redecideReviews(db, { inputs, judges, held, done = false, 
         if (!verdict.escalate) break;
       }
       if (!verdict || verdict.escalate) return;
+      // A replayed judgment never answers a question hold; leave it held untouched.
+      if (heldReleaseBlock(row, verdict)) { report.kept += 1; return; }
       const fence = claimItem(db, id, { owner: `redecide-${process.pid}`, now });
       if (!fence) return;
       deliver(db, { postingId: id, fence, verdict, now, policy: deliveryPolicy(inputs) });

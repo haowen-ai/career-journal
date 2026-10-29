@@ -403,15 +403,18 @@ test('[B] review redecide --held re-decides held reviews from stored judgments w
     assert.deepEqual([guarded.calls, fetcher.calls], [[], []], 'no judge and no fetcher is called');
     const report = parse(result.stdout, null);
     assert.ok(report, `--json prints one JSON report: ${result.stdout}`);
-    assert.equal(report.redecided, 2, `the stale hold and the genuine hold are re-decided: ${result.stdout}`);
-    assert.equal(report.changed, 1, `only the stale hold changes: ${result.stdout}`);
-    assert.equal(report.by_decision?.eligible, 1, `the new verdicts are counted by decision: ${result.stdout}`);
+    // Amended for held-release HR1 (2026-10-29): a replayed judgment never answers a question hold. The stale
+    // hold's eligible replay is counted as kept and the hold stays as it was; only the genuine hold is re-decided.
+    assert.equal(report.redecided, 1, `the genuine hold is re-decided: ${result.stdout}`);
+    assert.equal(report.kept, 1, `the stale hold's eligible replay is kept held: ${result.stdout}`);
+    assert.equal(report.changed, 0, `nothing changes: ${result.stdout}`);
+    assert.equal(report.by_decision?.eligible, undefined, `no replay is delivered as eligible: ${result.stdout}`);
 
     const stale = reviewRow(db, 'p-stale-hold');
-    assert.deepEqual([stale.state, stale.decision, stale.code, stale.hold_owner], ['done', 'eligible', null, null], 'the stale hold is delivered as eligible');
-    assert.equal(deliveries(db, 'p-stale-hold'), staleDeliveries + 1, 'through the normal delivery path (one delivery log entry)');
+    assert.deepEqual([stale.state, stale.decision, stale.code, stale.hold_owner], ['held', 'unclear', 'missing_fact', 'user'], 'the stale hold stays held');
+    assert.equal(deliveries(db, 'p-stale-hold'), staleDeliveries, 'nothing is delivered for it');
     const app = applicationRow(db, 'p-stale-hold');
-    assert.deepEqual([app.skip_reason, app.skip_owner], [null, null], 'the application is no longer hidden');
+    assert.match(app.skip_reason ?? '', /^待核: missing_fact/, 'the application stays hidden behind its question');
     const real = reviewRow(db, 'p-real-hold');
     assert.deepEqual([real.state, real.decision, real.code], ['held', 'unclear', 'missing_fact'], 'the genuine hold stays held');
     for (const id of untouched) {
@@ -488,12 +491,14 @@ test('[B] a decision-code-only change re-decides from cached judgments with zero
     assert.deepEqual(called.filter((id) => decisionOnly.includes(id)), [],
       `a decision-code-only change never re-judges (no paid calls); it re-decides from the cached judgment: called ${JSON.stringify(called)}`);
     for (const id of ['p-prompt', 'p-schema']) assert.ok(called.includes(id), `${id}: a model-input change still re-judges: called ${JSON.stringify(called)}`);
-    for (const [id, outcome] of Object.entries(expected)) {
+    const afterDeploy = { ...expected, 'p-decide-stale-hold': ['held', 'unclear', 'missing_fact'] }; // held-release HR1
+    for (const [id, outcome] of Object.entries(afterDeploy)) {
       const row = reviewRow(db, id);
       assert.deepEqual([row.state, row.decision, row.code], outcome, `${id} after the run following the deploy`);
     }
+    // Amended for held-release HR1 (2026-10-29): the replayed eligible verdict does not release the stale hold.
     const app = applicationRow(db, 'p-decide-stale-hold');
-    assert.deepEqual([app.skip_reason, app.skip_owner], [null, null], 'the stale hold is re-decided and delivered (application no longer hidden)');
+    assert.match(app.skip_reason ?? '', /^待核: missing_fact/, 'the stale hold is re-decided without a judge call but stays hidden behind its question');
 
     // Settled: a further run judges nothing.
     const idle = judgesWith();

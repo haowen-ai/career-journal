@@ -163,7 +163,7 @@ export async function reviewCommand(parsed, io, runtime = {}) {
         const inputs = await loadReviewInputs(context.root);
         atomic(context.db, () => {
           const fence = claimItem(context.db, postingId, { owner: 'user-resolve', now }); if (!fence) throw new Error('Review is leased');
-          deliver(context.db, { postingId, fence, now, policy: inputs.screeningPolicy, verdict: { ...parseJson(row.evidence_json), decision, code: decision === 'not_eligible' ? 'user_declined' : null } });
+          deliver(context.db, { postingId, fence, now, policy: inputs.screeningPolicy, explicit: true, verdict: { ...parseJson(row.evidence_json), decision, code: decision === 'not_eligible' ? 'user_declined' : null } });
           logReview(context.db, postingId, { now, kind: 'user', payload: { decision, reason, actor: 'user' } });
         }); emit({ postingId, decision }); return 0;
       }

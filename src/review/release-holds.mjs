@@ -1,10 +1,10 @@
 import { atomic } from './lease.mjs';
-import { parseJson, logReview } from './deliver.mjs';
+import { parseJson, logReview, MODEL_HOLD_CODES } from './deliver.mjs';
 import { applicationOwnership, reviewOwnershipJoins, explicitUserDecisionSql } from './ownership.mjs';
 import { cachedJudgment } from './judgment-cache.mjs';
 import { dependencyHash, screeningPolicyParts } from './inputs.mjs';
 
-export const MODEL_HOLD_CODES = Object.freeze(['missing_fact', 'requirement_unclear', 'user_review', 'term_or_area']);
+export { MODEL_HOLD_CODES };
 const RELEASE_CODES = [...MODEL_HOLD_CODES, 'provenance_unknown'];
 export const releasedInputsHash = (inputs) => dependencyHash({ facts: inputs.facts, rules: inputs.rules,
   policy: screeningPolicyParts(inputs.policy), screeningPolicy: inputs.screeningPolicy, provenance: inputs.provenance,
