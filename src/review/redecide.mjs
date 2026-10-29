@@ -9,6 +9,7 @@ import { reviewOwnershipJoins, userDecisionSql, userDecided } from './ownership.
 import { jevDecision, jevVerdict, usesJevSplit } from './jev-split.mjs';
 import { exemptVerdict, jevPlaceOnly, locationExempt } from './overrides.mjs';
 import { applyRoleDirection } from './direction-pass.mjs';
+import { applyCompanyExclusion } from './exclusion-pass.mjs';
 
 const without = (parts, key) => Object.fromEntries(Object.entries(parts ?? {}).filter(([name]) => name !== key));
 
@@ -18,6 +19,7 @@ const without = (parts, key) => Object.fromEntries(Object.entries(parts ?? {}).f
 // limits the replay to those postings.
 export async function redecideReviews(db, { inputs, judges, held, done = false, now, postingIds = null }) {
   suppressSubmittedDuplicates(db, { now, policy: inputs.screeningPolicy });
+  applyCompanyExclusion(db, { now, policy: deliveryPolicy(inputs) });
   applyCompanyCap(db, { now, policy: deliveryPolicy(inputs) });
   const only = postingIds ? new Set([postingIds].flat()) : null;
   applyRoleDirection(db, { now, policy: deliveryPolicy(inputs) });

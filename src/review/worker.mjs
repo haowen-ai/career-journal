@@ -27,6 +27,7 @@ import { dependencyComparison } from './dependency-compat.mjs';
 import { usesJevSplit, createJevSplit, reviewJevSplit, jevCounts, jevDependencies } from './jev-split.mjs';
 import { exemptVerdict, jevPlaceOnly, locationExempt } from './overrides.mjs';
 import { applyRoleDirection } from './direction-pass.mjs';
+import { applyCompanyExclusion } from './exclusion-pass.mjs';
 export { scheduleRefresh } from './freshness.mjs';
 
 const DAY = 86400000;
@@ -245,6 +246,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   });
   db.prepare("UPDATE reviews SET state='due',stage='fetch',hold_owner=NULL WHERE state='held' AND code='unavailable' AND next_due<=?").run(now);
   suppressSubmittedDuplicates(db, { now, policy: current.screeningPolicy, owner });
+  applyCompanyExclusion(db, { now, policy: deliveryPolicy(current), owner });
   applyCompanyCap(db, { now, policy: deliveryPolicy(current), owner });
   applyRoleDirection(db, { now, policy: deliveryPolicy(current), owner });
   attemptDir ??= await mkdtemp(path.join(os.tmpdir(), 'cj-review-attempts-'));

@@ -77,11 +77,11 @@ async function overrides(raw = RAW) {
 }
 
 // A lead the worker delivered as eligible before the exclusion existed: visible, review done eligible.
-function deliveredLead(db, id, { company, now = at(-1) }) {
+function deliveredLead(db, id, { company, title = 'Data Science Intern', now = at(-1) }) {
   const appId = `lead-${id}`;
-  db.prepare(`INSERT INTO applications (id, company, role, job_url, status, created_at, updated_at) VALUES (?, ?, 'Data Science Intern', ?, 'lead', ?, ?)`)
-    .run(appId, company, urlOf(id), now, now);
-  insertPosting(db, { id, url: urlOf(id), company, applicationId: appId, firstSeen: now });
+  db.prepare(`INSERT INTO applications (id, company, role, job_url, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'lead', ?, ?)`)
+    .run(appId, company, title, urlOf(id), now, now);
+  insertPosting(db, { id, url: urlOf(id), company, title, applicationId: appId, firstSeen: now });
   insertReview(db, { postingId: id, stage: 'deliver', state: 'done', decision: 'eligible', firstSeen: now, nextDue: null });
   db.prepare('UPDATE reviews SET evidence_json = ? WHERE posting_id = ?').run(JSON.stringify({ fit: ELIGIBLE.fit, location: ELIGIBLE.location, deadline: { kind: 'none' }, evidence: [] }), id);
   db.prepare(`INSERT INTO application_events (id, application_id, event_type, observed_at, recorded_at, title, note, source_json, status_after, content_hash)
@@ -205,14 +205,14 @@ test('[B] the startup pass withdraws visible leads and settles due and held revi
   const privateLead = deliveredLead(db, 'p-lead-private', { company: PRIVATE });
   dueReview(db, 'p-due-disliked', { company: ALIASED });
   dueReview(db, 'p-held-agency', { company: AGENCY, state: 'held', holdOwner: 'user' });
-  // User decisions at excluded companies.
-  const applied = deliveredLead(db, 'p-applied', { company: DISLIKED });
+  // User decisions at excluded companies (other roles, so the submitted one is no duplicate of the leads above).
+  const applied = deliveredLead(db, 'p-applied', { company: DISLIKED, title: 'Applied Statistics Intern' });
   db.prepare("UPDATE applications SET status = 'applied', applied_at = ? WHERE id = ?").run(at(-1), applied);
-  const prepared = deliveredLead(db, 'p-prepared', { company: DISLIKED });
+  const prepared = deliveredLead(db, 'p-prepared', { company: DISLIKED, title: 'Prepared Statistics Intern' });
   db.prepare("UPDATE applications SET status = 'prepared' WHERE id = ?").run(prepared);
-  const skipped = deliveredLead(db, 'p-skipped', { company: AGENCY });
+  const skipped = deliveredLead(db, 'p-skipped', { company: AGENCY, title: 'Skipped Statistics Intern' });
   db.prepare("UPDATE applications SET status = 'withdrawn', skip_reason = 'not interested', skip_owner = 'user' WHERE id = ?").run(skipped);
-  const logged = deliveredLead(db, 'p-user-logged', { company: AGENCY });
+  const logged = deliveredLead(db, 'p-user-logged', { company: AGENCY, title: 'Logged Statistics Intern' });
   db.prepare("INSERT INTO review_log (posting_id, at, stage, kind, attempt_id, payload_json) VALUES ('p-user-logged', ?, 'deliver', 'user', NULL, '{}')").run(at(-1));
   const userRows = () => JSON.stringify([applied, prepared, skipped, logged].map((id) => ({ row: db.prepare('SELECT * FROM applications WHERE id = ?').get(id), events: eventsOf(db, id),
     review: reviewOf(db, id.replace(/^lead-/, '')) })));
@@ -232,7 +232,7 @@ test('[B] the startup pass withdraws visible leads and settles due and held revi
   }
   for (const id of ['p-due-disliked', 'p-held-agency']) if (outcome(db, id).join() !== 'done,not_eligible,company_excluded') problems.push(`${id}: ${outcome(db, id)}`);
   assert.deepEqual(problems, [], `CE5: excluded leads and reviews are settled:\n${problems.join('\n')}`);
-  assert.deepEqual(queued(db).sort(), [kept, privateLead].sort(), 'only the leads at companies not excluded stay visible');
+  assert.deepEqual(queued(db).sort(), [kept, logged, privateLead].sort(), 'only the leads at companies not excluded, and the user-logged lead, stay visible');
   assert.equal(userRows(), users, 'applied, prepared, user-skipped and user-logged applications are untouched');
 
   // A second run with the same overrides changes nothing; a refresh that re-queues a settled review is settled again.

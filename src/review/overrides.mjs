@@ -3,6 +3,9 @@ import path from 'node:path';
 import { companyKey } from '../scan/dedupe.mjs';
 import { countryOf } from '../funnel/classify.mjs';
 import { decide } from './decide.mjs';
+import { companyExcluded } from './excluded.mjs';
+
+export { companyExcluded };
 
 // User overrides kept outside the judge dependencies. The screening policy, review
 // policy and rule files are hashed into every judgment; editing them re-queues
@@ -12,14 +15,19 @@ import { decide } from './decide.mjs';
 //     For a listed brand any US location is acceptable. windows (policy window ids)
 //     defaults to the windows that already accept every in-person area; a window
 //     limited to some areas (a home-only school-term co-op) stays as it is.
-//   profile/company-overrides.json { rule, reallowedCompanies[], activeCaps[{ company, max }], liftedSkipReasons[] }
+//   profile/company-overrides.json { rule, reallowedCompanies[], activeCaps[{ company, max }], liftedSkipReasons[],
+//                                    excludedCompanies[], excludedCompanyPatterns[] }
+//     excludedCompanies (names, matched like userExcludedCompanies) and excludedCompanyPatterns
+//     (case-insensitive regular expressions tested against the company name) join the
+//     effective user exclusion at scan and delivery, and the startup pass settles leads
+//     and reviews there (reason "company_excluded (user)") without a model call.
 //     reallowedCompanies lifts a userExcludedCompanies entry; activeCaps limits the
 //     applications in progress per company; liftedSkipReasons are skip-reason
 //     prefixes of a company rule the user has lifted, so a re-allowed company's
 //     lead withdrawn by that rule may be restored by an eligible review.
 export const EXEMPT_FILE = 'location-exempt-brands.json';
 export const COMPANY_FILE = 'company-overrides.json';
-export const emptyOverrides = () => ({ locationExempt: { brands: [], windows: null }, reallowedCompanies: [], activeCaps: [], liftedSkipReasons: [] });
+export const emptyOverrides = () => ({ locationExempt: { brands: [], windows: null }, reallowedCompanies: [], activeCaps: [], liftedSkipReasons: [], excludedCompanies: [], excludedCompanyPatterns: [] });
 
 const US_CODES = new Set('AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC AS GU MP PR VI UM'.split(' '));
 const EXEMPT_AREA = 'exempt_us';
@@ -51,6 +59,11 @@ export async function loadUserOverrides(profileDir) {
     if (typeof company !== 'object' || Array.isArray(company)) throw new Error(`Cannot load ${COMPANY_FILE}: expected an object`);
     result.reallowedCompanies = names(company.reallowedCompanies, 'reallowedCompanies', COMPANY_FILE);
     result.liftedSkipReasons = names(company.liftedSkipReasons, 'liftedSkipReasons', COMPANY_FILE);
+    result.excludedCompanies = names(company.excludedCompanies, 'excludedCompanies', COMPANY_FILE);
+    result.excludedCompanyPatterns = names(company.excludedCompanyPatterns, 'excludedCompanyPatterns', COMPANY_FILE);
+    for (const pattern of result.excludedCompanyPatterns) {
+      try { new RegExp(pattern, 'i'); } catch (error) { throw new Error(`Cannot load ${COMPANY_FILE}: excludedCompanyPatterns ${JSON.stringify(pattern)}: ${error.message}`, { cause: error }); }
+    }
     const caps = company.activeCaps ?? [];
     if (!Array.isArray(caps) || !caps.every((cap) => typeof cap?.company === 'string' && cap.company.trim() && Number.isInteger(cap.max) && cap.max > 0)) {
       throw new Error(`Cannot load ${COMPANY_FILE}: activeCaps must be a list of { company, max } with a positive integer max`);
@@ -67,8 +80,10 @@ export const reallowed = (company, policy = {}) => sameCompany(policy.reallowedC
 export function withOverrides(screeningPolicy = {}, overrides) {
   const o = overrides ?? emptyOverrides();
   const aliases = screeningPolicy.companyAliases;
+  const kept = (list) => (list ?? []).filter((company) => !sameCompany(o.reallowedCompanies, company, aliases));
   return { ...screeningPolicy,
-    userExcludedCompanies: (screeningPolicy.userExcludedCompanies ?? []).filter((company) => !sameCompany(o.reallowedCompanies, company, aliases)),
+    userExcludedCompanies: [...kept(screeningPolicy.userExcludedCompanies), ...kept(o.excludedCompanies)],
+    overrideExcludedCompanies: kept(o.excludedCompanies), overrideExcludedPatterns: o.excludedCompanyPatterns ?? [],
     reallowedCompanies: o.reallowedCompanies ?? [], activeCaps: o.activeCaps ?? [], liftedSkipReasons: o.liftedSkipReasons ?? [] };
 }
 

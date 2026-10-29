@@ -1,5 +1,5 @@
 import countries from './data/countries.json' with { type: 'json' };
-import { companyKey } from '../scan/dedupe.mjs';
+import { companyExcluded } from '../review/excluded.mjs';
 import { aliasesFor, canonicalUrl } from './identity.mjs';
 
 const STUDENT = /\b(?:intern(?:s|ship|ships)?|co[- ]?ops?|apprentice(?:s|ship|ships)?|placements?|working students?|students?|fellow(?:s|ship|ships)?|residen(?:t|ts|cy)|graduate program(?:me)?|early career|university program(?:me)?|campus program(?:me)?|summer (?:analysts?|associates?|20\d\d program(?:me)?)|currently enrolled|class of 20\d\d)\b/i;
@@ -43,7 +43,7 @@ export function classifyRole(record, { policy = {}, profile, identity: { submitt
   const outcome = (kind, code, evidence = []) => ({ kind, code, evidence, flags, lane });
   if (submitted) return outcome('reuse', 'already_submitted', typeof submitted === 'object' ? [submitted] : []);
   if (userDeclined) return outcome('reuse', 'user_declined');
-  if ((policy.userExcludedCompanies ?? []).some((name) => companyKey(name, policy.companyAliases) === companyKey(record.company, policy.companyAliases))) {
+  if (companyExcluded(record.company, policy)) {
     return outcome('drop', 'company_excluded', [record.company]);
   }
   const aliases = new Set(aliasesFor(record, { companyAliases: policy.companyAliases }).map((item) => item.alias));

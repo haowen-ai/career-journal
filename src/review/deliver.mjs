@@ -9,6 +9,7 @@ import { redact } from '../runtime/redact.mjs';
 import { validTimezone } from './deadline.mjs';
 import { companyKey } from '../scan/dedupe.mjs';
 import { reallowed, withOverrides } from './overrides.mjs';
+import { companyExcluded, USER_EXCLUDED_REASON } from './excluded.mjs';
 import { DIRECTION_CODE, directionNote, roleDirection } from './direction.mjs';
 
 const key = (value) => String(value ?? '').normalize('NFKD').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -38,8 +39,19 @@ export function deadlineValue(deadline) {
   return `${local}${offset}`;
 }
 
+// A company excluded by the user: the screening policy's list (a judge dependency) or
+// profile/company-overrides.json (not a dependency). An override exclusion keeps the
+// verdict's fields and whether it was judged eligible, so removing it can restore the lead.
+function excludedVerdict(posting, verdict, policy) {
+  const excluded = companyExcluded(posting.company, policy);
+  if (!excluded) return null;
+  return { ...verdict, decision: 'not_eligible', code: 'company_excluded',
+    ...(excluded.source === 'user' ? { skipReason: USER_EXCLUDED_REASON, excluded: { ...excluded, judged: verdict.decision === 'eligible' || verdict.excluded?.judged === true } } : {}) };
+}
+
 function companyVerdict(posting, verdict, policy) {
-  if ((policy.userExcludedCompanies ?? []).some((company) => key(company) === key(posting.company))) return { ...verdict, decision: 'not_eligible', code: 'company_excluded' };
+  const excluded = excludedVerdict(posting, verdict, policy);
+  if (excluded) return excluded;
   let note = '';
   for (const rule of policy.rules ?? []) {
     if (key(rule.company) !== key(posting.company)) continue;
@@ -164,7 +176,7 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
       || app.status === 'withdrawn' && !canRestore && !(duplicate && reviewOwned) || isUserEvent(lastEvent) && lastEvent.recorded_at > stageStart);
     let value = verdict.decision === 'eligible' ? companyVerdict(posting, verdict, policy) : verdict;
     // Exclusions are rechecked at delivery even if the inputs changed while judging.
-    if ((policy.userExcludedCompanies ?? []).some((c) => key(c) === key(posting.company))) value = { ...value, decision: 'not_eligible', code: 'company_excluded' };
+    value = excludedVerdict(posting, value, policy) ?? value;
     // Exploration never creates a user question, including delivery-time holds
     // such as company quotas. Keep the sampled lane as the negative reason.
     // A cap settlement keeps its own code so the startup pass can restore it.
@@ -183,7 +195,8 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     const capped = !duplicate && (value.decision === 'eligible' || value.code === 'company_cap') && companyCapped(db, posting.company, { now, policy });
     // The cap keeps the eligible verdict's fields so the startup pass can restore it without a model call.
     if (capped) value = { ...value, decision: 'not_eligible', code: 'company_cap', judged: value.decision === 'eligible' };
-    const capOwned = duplicate || value.code === 'company_cap' || value.code === DIRECTION_CODE;
+    const userExcluded = !duplicate && value.code === 'company_excluded' && Boolean(value.excluded);
+    const capOwned = duplicate || value.code === 'company_cap' || value.code === DIRECTION_CODE || userExcluded;
     let action;
     let held = value.decision === 'unclear';
     if (protectedApp) { action = 'superseded_by_user'; held = false; }
@@ -210,9 +223,9 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
           appendEvent(db, app.id, 'review_held', now, { note: reason, source: { postingId } });
           action = 'hidden';
         } else {
-          if (app.status !== 'withdrawn') appendEvent(db, app.id, 'review_withdrawn', now, { statusAfter: 'withdrawn', note: value.code ?? '',
+          if (app.status !== 'withdrawn') appendEvent(db, app.id, 'review_withdrawn', now, { statusAfter: 'withdrawn', note: value.skipReason ?? value.code ?? '',
             source: { postingId, evidence: value.evidence ?? [], ...(capOwned ? { automatedProvenance: true } : {}) } });
-          db.prepare("UPDATE applications SET skip_reason=?,skip_owner='review' WHERE id=?").run(value.code ?? 'not_eligible', app.id);
+          db.prepare("UPDATE applications SET skip_reason=?,skip_owner='review' WHERE id=?").run(value.skipReason ?? value.code ?? 'not_eligible', app.id);
           action = 'withdrawn';
         }
         const deadline = value.deadline ?? { kind: 'none' };
@@ -244,6 +257,17 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
         if (oldEvidence.roleDirection.provenance) evidence.provenance = oldEvidence.roleDirection.provenance; else delete evidence.provenance;
       }
       delete evidence.roleDirection;
+    }
+    // An override exclusion is automated and restorable once the user lifts it (startup pass).
+    if (userExcluded) {
+      evidence.companyExcluded = { source: 'user', match: value.excluded.match, judged: value.excluded.judged === true,
+        provenance: oldEvidence.companyExcluded ? oldEvidence.companyExcluded.provenance ?? null : evidence.provenance ?? null };
+      evidence.provenance = 'automated';
+    } else if (oldEvidence.companyExcluded) {
+      if (!['company_cap', DIRECTION_CODE].includes(value.code) && !duplicate) {
+        if (oldEvidence.companyExcluded.provenance) evidence.provenance = oldEvidence.companyExcluded.provenance; else delete evidence.provenance;
+      }
+      delete evidence.companyExcluded;
     }
     // The judge's function label, kept so the startup pass can re-check the direction without a model call.
     if (value.functionValue !== undefined) evidence.function = value.functionValue ?? null;
