@@ -6,7 +6,7 @@
 // The screening policy, review policy and judge rules feed the dependency hashes; editing them re-queues every settled
 // review for a paid re-judgment. So the overrides live in separate profile files, read at decision time:
 //   profile/location-exempt-brands.json  { rule, brands[], windows? }
-//   profile/company-overrides.json        { rule, reallowedCompanies[], activeCaps[{ company, max }], liftedSkipReasons[] }
+//   profile/company-overrides.json        { rule, reallowedCompanies[], activeCaps[{ company, max }], liftedSkipReasons[], excludedCompanies[], excludedCompanyPatterns[] }
 // Rulings:
 //   O1  A decision with code outside_area for an exempt brand is replayed by the same deterministic decision code with
 //       the brand's US offices counted as in area; the replay stands only if it is eligible (or, at the primary tier,
@@ -281,7 +281,7 @@ test('[B] the override files are read with the review inputs but are not judge d
     assert.deepEqual(withFiles.overrides.locationExempt.brands, OVERRIDES.locationExempt.brands, 'the brand list is loaded');
     assert.deepEqual(withFiles.overrides.reallowedCompanies, [REALLOWED]);
     assert.deepEqual(withFiles.overrides.activeCaps, OVERRIDES.activeCaps);
-    assert.deepEqual(without.overrides, { locationExempt: { brands: [], windows: null }, reallowedCompanies: [], activeCaps: [], liftedSkipReasons: [] }, 'missing files mean no overrides');
+    assert.deepEqual(without.overrides, { locationExempt: { brands: [], windows: null }, reallowedCompanies: [], activeCaps: [], liftedSkipReasons: [], excludedCompanies: [], excludedCompanyPatterns: [] }, 'missing files mean no overrides');
     const adapter = { runner: 'fake', model: 'fake-primary', tier: 'primary', effort: null, cliVersion: 'fake-1' };
     const deps = (inputs) => judgeDependencies({ inputs, adapter, skeletonVersion: 'v', schemaHash: 's', decideVersion: 'd' }).hash;
     assert.equal(deps(withFiles), deps(without), 'the dependency hash is unchanged');
