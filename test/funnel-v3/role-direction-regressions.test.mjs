@@ -265,6 +265,23 @@ test('[B] the startup pass withdraws visible out-of-direction leads without a mo
   assert.equal(userRows(), users, 'a user skip is never restored');
 });
 
+test('[B] a refresh that re-queues a role_direction review is settled again without fetching or judging while it stays out of direction (role direction RD4)', async () => {
+  const direction = await rules();
+  const db = freshDb();
+  const q = queue();
+  q.add(db, 'p-buyer-refresh', { title: 'Associate Buyer Intern' });
+  await review(db, { pages: q.pages, answers: q.answers, direction });
+  assert.deepEqual(directionProblems(db, 'p-buyer-refresh'), []);
+  const attempts = attemptsCount(db);
+  // A freshness refresh puts the settled review back in the fetch queue.
+  db.prepare("UPDATE reviews SET state = 'due', stage = 'fetch', next_due = ? WHERE posting_id = 'p-buyer-refresh'").run(at(1));
+  const again = await review(db, { budget: 20, now: at(1), pages: q.pages, answers: q.answers, direction });
+  assert.deepEqual(judgedIds(again.judges), [], 'no judge call');
+  assert.deepEqual(again.fetcher.calls, [], 'no fetch');
+  assert.equal(attemptsCount(db), attempts, 'no paid attempt');
+  assert.deepEqual(directionProblems(db, 'p-buyer-refresh'), []);
+});
+
 // ===================================================================== RD5 — not a dependency
 
 test('[B] the direction rules are not a judge dependency: adding or changing them re-judges and re-queues nothing (role direction RD5)', async () => {

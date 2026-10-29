@@ -9,6 +9,7 @@ import { redact } from '../runtime/redact.mjs';
 import { validTimezone } from './deadline.mjs';
 import { companyKey } from '../scan/dedupe.mjs';
 import { reallowed, withOverrides } from './overrides.mjs';
+import { DIRECTION_CODE, directionNote, roleDirection } from './direction.mjs';
 
 const key = (value) => String(value ?? '').normalize('NFKD').toLowerCase().replace(/[^a-z0-9]/g, '');
 const words = (value) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
@@ -62,7 +63,7 @@ function companyVerdict(posting, verdict, policy) {
 const CAP_STATUSES = ['applied', 'assessment', 'interview', 'rejected', 'offer'];
 const capOf = (value) => (Number.isInteger(value?.max) && value.max > 0 && Number(value?.windowDays) > 0 ? value : null);
 // User overrides (re-allowed companies, active caps, lifted rules) apply here, outside the judge dependencies.
-export const deliveryPolicy = (inputs) => withOverrides({ ...inputs.screeningPolicy, companyCap: inputs.policy?.companyCap ?? null }, inputs.overrides);
+export const deliveryPolicy = (inputs) => withOverrides({ ...inputs.screeningPolicy, companyCap: inputs.policy?.companyCap ?? null, direction: inputs.direction ?? null }, inputs.overrides);
 
 // User rule (2026-10-29): some companies allow at most `max` applications in progress at a time;
 // ended applications (rejected, withdrawn, accepted, declined) do not count.
@@ -172,13 +173,17 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
         ? { ...value, flags: [...new Set([...(value.flags ?? []), 'found_by_sampling'])] }
         : { ...value, decision: 'not_eligible', code: review.lane, question: null, holdFactIds: [], nextAction: null };
     }
+    // User rule (2026-10-29): an eligible verdict outside the role direction (profile/role-direction.json) is
+    // settled automatically, never shown or held. It keeps the verdict's fields so a rules change can restore it.
+    const direction = value.decision === 'eligible' ? roleDirection(posting.title, policy.direction, { functionValue: value.functionValue }) : null;
+    if (direction && !direction.ok) value = { ...value, decision: 'not_eligible', code: DIRECTION_CODE, direction: directionNote(direction) };
     // This guard also wins over eligible verdicts, quotas and exploration lanes.
     // It never merges postings or writes to the submitted application.
     if (duplicate) value = { decision: 'not_eligible', code: 'already_submitted', evidence: [duplicate] };
     const capped = !duplicate && (value.decision === 'eligible' || value.code === 'company_cap') && companyCapped(db, posting.company, { now, policy });
     // The cap keeps the eligible verdict's fields so the startup pass can restore it without a model call.
     if (capped) value = { ...value, decision: 'not_eligible', code: 'company_cap', judged: value.decision === 'eligible' };
-    const capOwned = duplicate || value.code === 'company_cap';
+    const capOwned = duplicate || value.code === 'company_cap' || value.code === DIRECTION_CODE;
     let action;
     let held = value.decision === 'unclear';
     if (protectedApp) { action = 'superseded_by_user'; held = false; }
@@ -231,6 +236,17 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
       if (oldEvidence.companyCap.provenance) evidence.provenance = oldEvidence.companyCap.provenance; else delete evidence.provenance;
       delete evidence.companyCap;
     }
+    if (value.code === DIRECTION_CODE) {
+      evidence.roleDirection = { note: value.direction ?? null, provenance: oldEvidence.roleDirection?.provenance ?? oldEvidence.provenance ?? null };
+      evidence.provenance = 'automated';
+    } else if (oldEvidence.roleDirection) {
+      if (value.code !== 'company_cap') {
+        if (oldEvidence.roleDirection.provenance) evidence.provenance = oldEvidence.roleDirection.provenance; else delete evidence.provenance;
+      }
+      delete evidence.roleDirection;
+    }
+    // The judge's function label, kept so the startup pass can re-check the direction without a model call.
+    if (value.functionValue !== undefined) evidence.function = value.functionValue ?? null;
     if (duplicate) evidence.provenance = 'automated';
     if (value.modelDecision) evidence.modelDecision = value.modelDecision;
     else delete evidence.modelDecision;
@@ -274,7 +290,7 @@ export function suppressSubmittedDuplicates(db, { now, policy = {}, owner = 'rev
 // The cap's startup pass: settle due reviews and visible eligible leads of a
 // capped company without fetching or judging, and restore what it capped once
 // the company is under the cap again. User decisions are never touched.
-const restoredVerdict = (review, evidence) => ({ decision: 'eligible', code: null, evidence: evidence.evidence ?? [], needs: evidence.needs ?? {},
+export const restoredVerdict = (review, evidence) => ({ decision: 'eligible', code: null, evidence: evidence.evidence ?? [], needs: evidence.needs ?? {},
   fit: evidence.fit ?? null, deadline: evidence.deadline ?? { kind: 'none' }, program: evidence.program ?? null, location: evidence.location ?? null,
   factsUsed: evidence.factsUsed ?? [], flags: parseJson(review.flags_json, []), ...(evidence.modelDecision ? { modelDecision: evidence.modelDecision } : {}),
   ...(evidence.jev ? { jev: evidence.jev } : {}) });

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { needsFromVerdict, tabTitle } from '../apply/tab-title.mjs';
 import { recordEvent } from '../domain/events.mjs';
 import { normalizeDueAt } from '../domain/tasks.mjs';
@@ -8,6 +9,7 @@ import { companyKey } from '../scan/dedupe.mjs';
 import { rankLocation } from '../scan/filter.mjs';
 import { scoreFit } from '../scan/fit.mjs';
 import { loadScanProfile } from '../scan/profile-input.mjs';
+import { DIRECTION_CODE, directionNote, loadDirectionRules, roleDirection } from '../review/direction.mjs';
 import { configuredDecisionAdapters } from './email.mjs';
 import { profileOption } from './scan.mjs';
 
@@ -70,7 +72,9 @@ export function compareQueueItems(left, right) {
   return compareInTimezone(left, right);
 }
 
-export function listQueue(db, profile = null) {
+// With role-direction rules, a lead whose title is out of direction (block list) is flagged and listed after every
+// in-direction lead: leads added by hand never pass the delivery filter. Borderline titles are not demoted here.
+export function listQueue(db, profile = null, { direction = null } = {}) {
   const statuses = ['prepared', ...SUBMITTED_STATUSES];
   const companyLoads = new Map();
   for (const { company, count } of db.prepare(`SELECT company, COUNT(*) count FROM applications
@@ -83,14 +87,18 @@ export function listQueue(db, profile = null) {
   return db.prepare(`${queueSelect} WHERE status = 'lead' AND skip_reason IS NULL`).all()
     .map((row) => {
       const evidence = JSON.parse(reviewEvidence.get(row.id)?.evidence_json ?? '{}');
-      return {
+      const item = {
         ...row,
         locRank: locationRank(row.location, profile),
         companyLoad: companyLoads.get(companyKey(row.company)) ?? 0,
         tabHint: tabTitle({ company: row.company, needs: needsFromVerdict(evidence?.needs) }),
       };
+      if (!direction) return item;
+      const result = roleDirection(row.role, direction);
+      const out = !result.ok && result.reason === 'block';
+      return { ...item, directionOk: !out, directionReason: out ? `${DIRECTION_CODE}: ${directionNote(result)}` : null };
     })
-    .sort((left, right) => compareInTimezone(left, right, profile?.timezone));
+    .sort((left, right) => (left.directionOk === false) - (right.directionOk === false) || compareInTimezone(left, right, profile?.timezone));
 }
 
 function required(value, name) {
@@ -233,7 +241,8 @@ export async function queueCommand(parsed, io, runtime = {}) {
       return 0;
     }
     if (parsed.subcommand === 'list') {
-      const items = listQueue(context.db, { ...profile, timezone: context.config.timezone });
+      const direction = await loadDirectionRules(path.join(path.resolve(home), '.career-journal', 'profile'));
+      const items = listQueue(context.db, { ...profile, timezone: context.config.timezone }, { direction });
       if (parsed.options.json) io.out(JSON.stringify(items, null, 2));
       else for (const item of items) {
         io.out([item.fit ?? '-', item.deadlineAt ?? '-', item.location ?? '-', item.company, item.role, item.id].join('\t'));

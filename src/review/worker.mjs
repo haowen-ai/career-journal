@@ -26,6 +26,7 @@ import { releaseHolds, MODEL_HOLD_CODES, releasedInputsHash } from './release-ho
 import { dependencyComparison } from './dependency-compat.mjs';
 import { usesJevSplit, createJevSplit, reviewJevSplit, jevCounts, jevDependencies } from './jev-split.mjs';
 import { exemptVerdict, jevPlaceOnly, locationExempt } from './overrides.mjs';
+import { applyRoleDirection } from './direction-pass.mjs';
 export { scheduleRefresh } from './freshness.mjs';
 
 const DAY = 86400000;
@@ -245,6 +246,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   db.prepare("UPDATE reviews SET state='due',stage='fetch',hold_owner=NULL WHERE state='held' AND code='unavailable' AND next_due<=?").run(now);
   suppressSubmittedDuplicates(db, { now, policy: current.screeningPolicy, owner });
   applyCompanyCap(db, { now, policy: deliveryPolicy(current), owner });
+  applyRoleDirection(db, { now, policy: deliveryPolicy(current), owner });
   attemptDir ??= await mkdtemp(path.join(os.tmpdir(), 'cj-review-attempts-'));
   await mkdir(attemptDir, { recursive: true, mode: 0o700 });
   const seen = new Set();
@@ -426,6 +428,8 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       }
     }
     let final;
+    // The judge's function label for the role-direction filter at delivery (not part of the decision).
+    let functionLabel;
     let opinionAsked = false;
     let jevProbabilities;
     // Whether the final verdict comes from judgments made under today's dependencies. A replay of an older
@@ -470,6 +474,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       }
       if (!output) output = await dispatchJudge(tier, request);
       if (!output) break;
+      if (typeof output.function?.value === 'string') functionLabel = output.function.value;
       decisionRuntime[tier] = request.deps.parts;
       const decisionArgs = { snapshotText: snapshot.text, judgment: output, facts: stageInputs.facts, policy: stageInputs.policy, tier,
         firstSeen: posting.first_seen, jobType: stageInputs.profile?.search?.jobType };
@@ -509,6 +514,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     }
     if (final) {
       if (jevProbabilities) final = { ...final, jev: jevProbabilities };
+      if (functionLabel !== undefined && final.functionValue === undefined) final = { ...final, functionValue: functionLabel };
       // Track the applied decision separately so retained judgment provenance
       // does not requeue a settled review on every subsequent run.
       const committedDependencies = { ...dependencies, decisionRuntime };

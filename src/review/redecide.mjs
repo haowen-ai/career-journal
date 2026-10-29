@@ -8,6 +8,7 @@ import { atomic, claimItem } from './lease.mjs';
 import { reviewOwnershipJoins, userDecisionSql, userDecided } from './ownership.mjs';
 import { jevDecision, jevVerdict, usesJevSplit } from './jev-split.mjs';
 import { exemptVerdict, jevPlaceOnly, locationExempt } from './overrides.mjs';
+import { applyRoleDirection } from './direction-pass.mjs';
 
 const without = (parts, key) => Object.fromEntries(Object.entries(parts ?? {}).filter(([name]) => name !== key));
 
@@ -19,6 +20,7 @@ export async function redecideReviews(db, { inputs, judges, held, done = false, 
   suppressSubmittedDuplicates(db, { now, policy: inputs.screeningPolicy });
   applyCompanyCap(db, { now, policy: deliveryPolicy(inputs) });
   const only = postingIds ? new Set([postingIds].flat()) : null;
+  applyRoleDirection(db, { now, policy: deliveryPolicy(inputs) });
   const runtime = {};
   for (const tier of ['primary', 'escalation']) {
     const request = await buildJudgeRequest({ posting: {}, snapshot: { text: '' }, sections: [], inputs, adapter: judges[tier], tier });
@@ -44,6 +46,7 @@ export async function redecideReviews(db, { inputs, judges, held, done = false, 
       const aliases = inputs.screeningPolicy?.companyAliases;
       const stage = parseJson(row.evidence_json);
       let verdict;
+      let functionLabel;
       if (parseJson(row.flags_json, []).includes('jev_decided') && stage.jev && usesJevSplit(inputs.policy)) {
         const thresholds = inputs.policy.judge.primary.thresholds;
         const decided = jevDecision(stage.jev, thresholds);
@@ -56,6 +59,7 @@ export async function redecideReviews(db, { inputs, judges, held, done = false, 
         const context = { tier, depsHash: dependencyHash(parts), snapshotHash: snapshot.content_hash, remember: false };
         const output = cachedJudgment(db, id, context);
         if (!judgmentEnvelope(output, context)) return;
+        if (typeof output.function?.value === 'string') functionLabel = output.function.value;
         const args = { snapshotText: snapshot.text, judgment: output, facts: inputs.facts, policy: inputs.policy,
           tier, firstSeen: posting.first_seen, jobType: inputs.profile?.search?.jobType };
         verdict = exemptVerdict({ ...args, verdict: decide(args), company: posting.company, overrides: inputs.overrides, aliases });
@@ -66,7 +70,7 @@ export async function redecideReviews(db, { inputs, judges, held, done = false, 
       if (heldReleaseBlock(row, verdict)) { report.kept += 1; return; }
       const fence = claimItem(db, id, { owner: `redecide-${process.pid}`, now });
       if (!fence) return;
-      deliver(db, { postingId: id, fence, verdict, now, policy: deliveryPolicy(inputs) });
+      deliver(db, { postingId: id, fence, verdict: functionLabel === undefined ? verdict : { ...verdict, functionValue: functionLabel }, now, policy: deliveryPolicy(inputs) });
       const delivered = db.prepare('SELECT decision,code FROM reviews WHERE posting_id=?').get(id);
       report.redecided += 1;
       if (delivered.decision !== row.decision || delivered.code !== row.code) report.changed += 1;

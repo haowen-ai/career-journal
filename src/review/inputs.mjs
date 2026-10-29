@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { loadUserOverrides } from './overrides.mjs';
+import { loadDirectionRules } from './direction.mjs';
 
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical);
@@ -41,7 +42,9 @@ export async function loadReviewInputs(home) {
     // User overrides are applied at decision and delivery time; they are not judge dependencies.
     loadUserOverrides(profile),
   ]);
-  return { facts, policy, screeningPolicy, provenance, profile: searchProfile, rules: { screening, fit }, resume: text === null ? null : { text, hash: dependencyHash(text) }, evalRecord, overrides };
+  // Role-direction rules apply after the verdict; they never enter a dependency hash.
+  const direction = await loadDirectionRules(profile);
+  return { facts, policy, screeningPolicy, provenance, profile: searchProfile, rules: { screening, fit }, resume: text === null ? null : { text, hash: dependencyHash(text) }, evalRecord, overrides, direction };
 }
 
 export const screeningPolicyParts = (policy) => Object.fromEntries(
