@@ -9,8 +9,9 @@
 //   profile/company-overrides.json        { rule, reallowedCompanies[], activeCaps[{ company, max }], liftedSkipReasons[] }
 // Rulings:
 //   O1  A decision with code outside_area for an exempt brand is replayed by the same deterministic decision code with
-//       the brand's US offices counted as in area; the replay result stands only if it no longer is outside_area, so
-//       a non-US office, an office in a home-only work window, or any other failed dimension keeps the posting out.
+//       the brand's US offices counted as in area; the replay stands only if it is eligible (or, at the primary tier,
+//       escalates), so a non-US office, a home-only work window, or any other failed rule or open question keeps the
+//       original outside_area rejection and never raises a user question.
 //       Brand names match case-insensitively after removing punctuation and legal suffixes (Inc, Company).
 //   O2  With the Jev split primary, a place-only rejection (no other dimension below its reject threshold) of an exempt
 //       brand goes on to the model tiers, which quote the offices; any other rejection is final as before.
@@ -160,11 +161,15 @@ test('[L2] an exempt brand\'s US office outside the policy areas is accepted whe
     assert.deepEqual([after.decision, after.code], [before.decision, before.code], `${name}: unchanged: ${why(after)}`);
     assert.equal(after.code, 'outside_area', `${name}: still outside_area`);
   }
+  // Another open rule keeps the original rejection at the final tier: the exemption never raises a user question.
   const sales = run({ text: SALES_TEXT, output: SALES });
-  assert.deepEqual([sales.after.decision, sales.after.code], ['unclear', 'user_review'], `the function rule still applies: ${why(sales.after)}`);
+  assert.deepEqual([sales.after.decision, sales.after.code], ['not_eligible', 'outside_area'], `the function rule still applies: ${why(sales.after)}`);
   const missing = run({ text: MISSING_TEXT, output: MISSING });
   assert.equal(missing.before.code, 'outside_area', 'fixture: the area check comes first');
-  assert.notEqual(missing.after.decision, 'eligible', `a requirement still applies: ${why(missing.after)}`);
+  assert.deepEqual([missing.after.decision, missing.after.code], ['not_eligible', 'outside_area'], `a requirement still applies: ${why(missing.after)}`);
+  // At the primary tier an open question escalates, as it would for an in-area posting.
+  const salesPrimary = run({ text: SALES_TEXT, output: SALES, tier: 'primary' });
+  assert.deepEqual([salesPrimary.after.decision, salesPrimary.after.code, salesPrimary.after.escalate], ['unclear', 'user_review', true], why(salesPrimary.after));
   const inArea = run({ text: SNAPSHOTS.eligible, output: judgment() });
   assert.equal(inArea.after, inArea.before, 'a verdict that is not outside_area is returned as is');
 });

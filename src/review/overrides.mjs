@@ -101,8 +101,10 @@ export function jevPlaceOnly(probabilities, thresholds) {
 }
 
 // Replays the deterministic decision with an exempt brand's US offices counted as
-// in area. The replay stands only when it is no longer outside_area: a non-US
-// office, a window outside the exemption or any other failed rule keeps it out.
+// in area. The replay stands only when it is eligible, or at the primary tier when
+// it escalates to the escalation tier. Anything else (a non-US office, a window
+// outside the exemption, any other failed rule or open question) keeps the
+// original outside_area rejection, so the exemption never raises a user question.
 export function exemptVerdict({ verdict, company, overrides, aliases, snapshotText, judgment, facts, policy, tier, firstSeen, jobType }) {
   if (verdict?.code !== 'outside_area' || !(verdict.decision === 'not_eligible' || verdict.primaryRejection)) return verdict;
   if (!locationExempt(company, overrides, aliases) || !judgment || typeof judgment !== 'object') return verdict;
@@ -120,6 +122,6 @@ export function exemptVerdict({ verdict, company, overrides, aliases, snapshotTe
   };
   const exemptJudgment = { ...judgment, alternatives: (judgment.alternatives ?? []).map((alternative) => ({ ...alternative, offices: (alternative.offices ?? []).map(relabel) })) };
   const replay = decide({ snapshotText, judgment: exemptJudgment, facts, policy: exemptPolicy, tier, firstSeen, jobType });
-  if (replay.code === 'outside_area') return verdict;
+  if (replay.decision !== 'eligible' && !(tier === 'primary' && replay.escalate)) return verdict;
   return { ...replay, flags: [...new Set([...(replay.flags ?? []), 'location_exempt'])] };
 }
