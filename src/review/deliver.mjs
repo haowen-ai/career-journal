@@ -8,6 +8,7 @@ import { userDecided } from './ownership.mjs';
 import { redact } from '../runtime/redact.mjs';
 import { validTimezone } from './deadline.mjs';
 import { companyKey } from '../scan/dedupe.mjs';
+import { reallowed, withOverrides } from './overrides.mjs';
 
 const key = (value) => String(value ?? '').normalize('NFKD').toLowerCase().replace(/[^a-z0-9]/g, '');
 const words = (value) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
@@ -60,7 +61,22 @@ function companyVerdict(posting, verdict, policy) {
 // applied at delivery and by the startup pass, never by re-judging.
 const CAP_STATUSES = ['applied', 'assessment', 'interview', 'rejected', 'offer'];
 const capOf = (value) => (Number.isInteger(value?.max) && value.max > 0 && Number(value?.windowDays) > 0 ? value : null);
-export const deliveryPolicy = (inputs) => ({ ...inputs.screeningPolicy, companyCap: inputs.policy?.companyCap ?? null });
+// User overrides (re-allowed companies, active caps, lifted rules) apply here, outside the judge dependencies.
+export const deliveryPolicy = (inputs) => withOverrides({ ...inputs.screeningPolicy, companyCap: inputs.policy?.companyCap ?? null }, inputs.overrides);
+
+// User rule (2026-10-29): some companies allow at most `max` applications in progress at a time;
+// ended applications (rejected, withdrawn, accepted, declined) do not count.
+const ACTIVE_STATUSES = ['applied', 'assessment', 'interview', 'offer'];
+export function activeApplications(db, { companyAliases }) {
+  const counts = new Map();
+  for (const app of db.prepare(`SELECT id,company FROM applications WHERE status IN (${ACTIVE_STATUSES.map(() => '?').join(',')})`).all(...ACTIVE_STATUSES)) {
+    const company = companyKey(app.company, companyAliases);
+    const entry = counts.get(company) ?? { count: 0, applicationIds: [] };
+    entry.count += 1; entry.applicationIds.push(app.id);
+    counts.set(company, entry);
+  }
+  return counts;
+}
 
 // Submission date: applied_at, else the latest 'submitted' event, else updated_at.
 export function companySubmissions(db, { now, cap, companyAliases }) {
@@ -78,7 +94,13 @@ export function companySubmissions(db, { now, cap, companyAliases }) {
   }
   return counts;
 }
-function companyCapped(db, company, { now, policy, counts }) {
+function companyCapped(db, company, { now, policy, counts, active }) {
+  const activeCap = (policy.activeCaps ?? []).find((item) => companyKey(item.company, policy.companyAliases) === companyKey(company, policy.companyAliases));
+  if (activeCap) {
+    active ??= activeApplications(db, { companyAliases: policy.companyAliases });
+    const entry = active.get(companyKey(company, policy.companyAliases));
+    if (entry && entry.count >= activeCap.max) return { ...entry, max: activeCap.max, windowDays: null, active: true };
+  }
   const cap = capOf(policy.companyCap);
   if (!cap) return null;
   counts ??= companySubmissions(db, { now, cap, companyAliases: policy.companyAliases });
@@ -107,9 +129,9 @@ export function keepHold(review, verdict, { escalate = false } = {}) {
     flags: [...new Set([...(verdict.flags ?? []), 'hold_kept'])] };
 }
 
-function appendEvent(db, appId, type, now, { statusAfter = null, note = '', source = {}, reviewRestore = false } = {}) {
+function appendEvent(db, appId, type, now, { statusAfter = null, note = '', source = {}, reviewRestore = false, liftedRule = false } = {}) {
   recordEvent(db, { id: randomUUID(), applicationId: appId, type, observedAt: now, recordedAt: now, title: type, note,
-    source: { actor: 'review-worker', ...source }, statusAfter }, { withinTransaction: true, reviewRestore });
+    source: { actor: 'review-worker', ...source }, statusAfter }, { withinTransaction: true, reviewRestore, liftedRule });
 }
 
 export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh = false, explicit = false }) {
@@ -131,7 +153,10 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
         && (['user','manual','event-command'].includes(source.kind) || /^(?:manual_|user_)/.test(event.event_type));
     };
     const userWithdrawal = app?.status === 'withdrawn' && isUserEvent(lastStatus);
-    const reviewOwned = !userWithdrawal && (lastStatus && parseJson(lastStatus.source_json).actor === 'review-worker' || automated || oldEvidence.systemReview === true);
+    // A withdrawal by a company rule the user has since lifted (the company is re-allowed) is the review's to restore.
+    const liftedRule = app?.status === 'withdrawn' && !userWithdrawal && reallowed(posting.company, policy)
+      ? (policy.liftedSkipReasons ?? []).find((prefix) => String(app.skip_reason ?? '').startsWith(prefix)) ?? null : null;
+    const reviewOwned = !userWithdrawal && (lastStatus && parseJson(lastStatus.source_json).actor === 'review-worker' || automated || oldEvidence.systemReview === true || Boolean(liftedRule));
     const canRestore = !duplicate && review.code !== 'already_submitted' && reviewOwned;
     const stageStart = parseJson(review.dep_hashes_json).stageStartedAt ?? review.updated_at;
     const protectedApp = app && (app.applied_at || SUBMITTED_STATUSES.includes(app.status) || ['user','legacy'].includes(app.skip_owner)
@@ -169,8 +194,9 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
       if (app) {
         if (value.decision === 'eligible') {
           const restored = app.status === 'withdrawn';
-          appendEvent(db, app.id, restored ? 'review_restored' : 'review_delivered', now, { statusAfter: restored ? 'lead' : null, reviewRestore: restored,
-            source: { postingId, automatedProvenance: automated, ...(oldEvidence.systemReview ? { systemReview: true, provenance: oldEvidence.provenance } : {}) } });
+          appendEvent(db, app.id, restored ? 'review_restored' : 'review_delivered', now, { statusAfter: restored ? 'lead' : null, reviewRestore: restored, liftedRule: restored && Boolean(liftedRule),
+            source: { postingId, automatedProvenance: automated, ...(oldEvidence.systemReview ? { systemReview: true, provenance: oldEvidence.provenance } : {}),
+              ...(restored && liftedRule ? { liftedRule } : {}) } });
           db.prepare('UPDATE applications SET skip_reason=NULL,skip_owner=NULL WHERE id=?').run(app.id);
           action = restored ? 'restored' : action ?? (app.skip_reason ? 'unhidden' : 'updated');
         } else if (held) {
@@ -199,7 +225,7 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
       program: value.program ?? null, location: value.location ?? null, factsUsed: value.factsUsed ?? [], question: value.question ?? null, holdFactIds: value.holdFactIds ?? [] };
     if (value.code === 'company_cap') {
       evidence.companyCap = { provenance: oldEvidence.companyCap?.provenance ?? oldEvidence.provenance ?? null, judged: value.judged === true,
-        ...(capped ? { count: capped.count, max: capped.max, windowDays: capped.windowDays, applicationIds: capped.applicationIds } : {}) };
+        ...(capped ? { count: capped.count, max: capped.max, windowDays: capped.windowDays, applicationIds: capped.applicationIds, ...(capped.active ? { active: true } : {}) } : {}) };
       evidence.provenance = 'automated';
     } else if (oldEvidence.companyCap) {
       if (oldEvidence.companyCap.provenance) evidence.provenance = oldEvidence.companyCap.provenance; else delete evidence.provenance;
@@ -257,12 +283,13 @@ export function applyCompanyCap(db, { now, policy = {}, owner = 'review-company-
   return atomic(db, () => {
     const cap = capOf(policy.companyCap);
     const counts = companySubmissions(db, { now, cap, companyAliases: policy.companyAliases });
+    const active = (policy.activeCaps ?? []).length ? activeApplications(db, { companyAliases: policy.companyAliases }) : new Map();
     let capped = 0; let restored = 0;
     for (const row of db.prepare(`SELECT p.*,r.posting_id,r.state,r.decision,r.code,r.flags_json,r.evidence_json,r.dep_hashes_json,a.status application_status,a.skip_reason application_skip
       FROM postings p JOIN reviews r ON r.posting_id=p.id LEFT JOIN applications a ON a.id=p.application_id
       WHERE p.merged_into IS NULL AND (r.state='due' OR r.state='done' AND (r.code='company_cap' OR r.decision='eligible'))`).all()) {
       if (userDecided(db, row)) continue;
-      const over = companyCapped(db, row.company, { now, policy, counts });
+      const over = companyCapped(db, row.company, { now, policy, counts, active });
       const evidence = parseJson(row.evidence_json);
       if (row.code === 'company_cap') {
         // A freshness refresh or replan re-queues capped reviews; while the cap

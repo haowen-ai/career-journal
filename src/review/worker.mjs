@@ -25,6 +25,7 @@ import { awaitingUserSummary } from './awaiting-user.mjs';
 import { releaseHolds, MODEL_HOLD_CODES, releasedInputsHash } from './release-holds.mjs';
 import { dependencyComparison } from './dependency-compat.mjs';
 import { usesJevSplit, createJevSplit, reviewJevSplit, jevCounts, jevDependencies } from './jev-split.mjs';
+import { exemptVerdict, jevPlaceOnly, locationExempt } from './overrides.mjs';
 export { scheduleRefresh } from './freshness.mjs';
 
 const DAY = 86400000;
@@ -436,6 +437,9 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       const result = await reviewJevSplit({ inputs: stageInputs, snapshotText: snapshot.text, firstSeen: posting.first_seen, posting,
         jev, counts: receipt.jev });
       final = result.verdict; jevProbabilities = result.probabilities; fresh = true;
+      // A location-exempt brand rejected on place alone needs the quoted offices: the model tiers decide it.
+      if (final?.code === 'outside_area' && jevPlaceOnly(jevProbabilities, stageInputs.policy.judge.primary.thresholds)
+        && locationExempt(posting.company, stageInputs.overrides, stageInputs.screeningPolicy?.companyAliases)) final = null;
       if (final && heldReleaseBlock(prior, final, { fresh }) === 'inferred_term') final = keepHold(prior, final);
     }
     for (const tier of ['primary','escalation']) {
@@ -467,8 +471,10 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       if (!output) output = await dispatchJudge(tier, request);
       if (!output) break;
       decisionRuntime[tier] = request.deps.parts;
-      final = decide({ snapshotText: snapshot.text, judgment: output, facts: stageInputs.facts, policy: stageInputs.policy, tier,
-        firstSeen: posting.first_seen, jobType: stageInputs.profile?.search?.jobType });
+      const decisionArgs = { snapshotText: snapshot.text, judgment: output, facts: stageInputs.facts, policy: stageInputs.policy, tier,
+        firstSeen: posting.first_seen, jobType: stageInputs.profile?.search?.jobType };
+      final = exemptVerdict({ ...decisionArgs, verdict: decide(decisionArgs), company: posting.company, overrides: stageInputs.overrides,
+        aliases: stageInputs.screeningPolicy?.companyAliases });
       fresh = !replayed;
       // An inferred term is an assumption, not an answer to the term_or_area question this review is held on:
       // keep the question so the escalation tier's forced decision settles it.

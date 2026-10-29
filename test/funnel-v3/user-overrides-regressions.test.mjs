@@ -331,23 +331,30 @@ function application(db, { company, status, id = `app-${company}-${status}-${Mat
   return id;
 }
 
-test('[B] at most N active applications per company: at the cap an eligible verdict is settled company_cap and restored once one ends; ended ones do not count (overrides O6)', async () => {
+test('[B] at most N active applications per company: at the cap an eligible lead is settled company_cap and restored once one ends; ended ones do not count (overrides O6)', async () => {
   const db = freshDb();
   application(db, { company: REALLOWED, status: 'rejected' });
   application(db, { company: REALLOWED, status: 'withdrawn' });
   application(db, { company: REALLOWED, status: 'applied' });
-  const second = application(db, { company: 'excluded example company', status: 'assessment' });
   application(db, { company: 'Sister Example Co', status: 'interview' });
   const q = queue();
   q.add(db, 'p-cap-active', { company: REALLOWED, text: SNAPSHOTS.eligible, output: judgment() });
   q.add(db, 'p-cap-sister', { company: 'Sister Example Co', text: SNAPSHOTS.eligible, output: judgment() });
   await review(db, { pages: q.pages, answers: q.answers, overrides: OVERRIDES });
+  assert.deepEqual(outcome(db, 'p-cap-active'), ['done', 'eligible', null], 'one active application (ended ones do not count) leaves a free slot');
+  assert.deepEqual(outcome(db, 'p-cap-sister'), ['done', 'eligible', null]);
+
+  // A second active application (under another spelling of the company) fills the cap.
+  const second = application(db, { company: 'excluded example company', status: 'assessment' });
+  const capped = await review(db, { budget: 0, now: at(1), overrides: OVERRIDES });
+  assert.deepEqual(judgedIds(capped.judges), [], 'capping makes no judge call');
   assert.deepEqual(outcome(db, 'p-cap-active'), ['done', 'not_eligible', 'company_cap'], 'two active applications fill the cap');
   assert.equal(parse(reviewOf(db, 'p-cap-active').evidence_json, {}).provenance, 'automated');
-  assert.deepEqual(outcome(db, 'p-cap-sister'), ['done', 'eligible', null], 'the other company has its own cap with one active');
+  assert.ok(!queued(db).includes(applicationOf(db, 'p-cap-active')?.id), 'the capped lead is not visible');
+  assert.deepEqual(outcome(db, 'p-cap-sister'), ['done', 'eligible', null], 'the other company has its own cap');
 
   db.prepare("UPDATE applications SET status = 'rejected' WHERE id = ?").run(second);
-  const { judges: j } = await review(db, { budget: 0, now: at(1), overrides: OVERRIDES });
+  const { judges: j } = await review(db, { budget: 0, now: at(2), overrides: OVERRIDES });
   assert.deepEqual(judgedIds(j), [], 'restoring makes no judge call');
   assert.deepEqual(outcome(db, 'p-cap-active'), ['done', 'eligible', null], 'restored once an application ended');
   assert.ok(queued(db).includes(applicationOf(db, 'p-cap-active')?.id));

@@ -34,7 +34,7 @@ function normalizedEvent(input) {
   };
 }
 
-export function recordEvent(db, input, { withinTransaction = false, reviewRestore = false } = {}) {
+export function recordEvent(db, input, { withinTransaction = false, reviewRestore = false, liftedRule = false } = {}) {
   const event = normalizedEvent(input);
   const contentHash = createHash('sha256').update(JSON.stringify(event)).digest('hex');
   const existing = db.prepare('SELECT content_hash FROM application_events WHERE id = ?').get(event.id);
@@ -50,7 +50,7 @@ export function recordEvent(db, input, { withinTransaction = false, reviewRestor
       const evidence = db.prepare("SELECT r.evidence_json FROM reviews r JOIN postings p ON p.id=r.posting_id WHERE p.application_id=?").all(event.applicationId)
         .map((row) => JSON.parse(row.evidence_json));
       assertReviewRestore(application.status, event.statusAfter, { actor: event.source.actor, lastActor: last && JSON.parse(last.source_json).actor,
-        automated: evidence.some((value) => value?.provenance === 'automated'), systemReview: evidence.some((value) => value?.systemReview === true) });
+        automated: evidence.some((value) => value?.provenance === 'automated'), systemReview: evidence.some((value) => value?.systemReview === true), liftedRule });
     } else assertStatusTransition(application.status, event.statusAfter);
   }
   if (!withinTransaction) db.exec('BEGIN IMMEDIATE');

@@ -48,6 +48,15 @@ function stateFor(dimension, inputs, snapshotText, firstSeen, posting, override)
   return state;
 }
 
+// The deterministic decision from the six probabilities: null means in between (escalate).
+export function jevDecision(probabilities, { reject, accept }) {
+  const failing = DIMENSIONS.find((dimension) => probabilities[dimension] < reject[dimension]);
+  const decision = failing ? 'not_eligible' : DIMENSIONS.every((dimension) => probabilities[dimension] >= accept[dimension]) ? 'eligible' : null;
+  return decision ? { decision, code: failing ? CODES[failing] : null } : null;
+}
+export const jevVerdict = ({ decision, code }, probabilities, facts) => ({ decision, code, escalate: false,
+  flags: ['jev_decided'], jev: probabilities, factsUsed: facts.map((fact) => fact.id) });
+
 // Shared by the worker and evaluation gate. Never decide on partial answers:
 // even an early rejection waits for every dimension to return a valid number.
 export async function reviewJevSplit({ inputs, snapshotText, firstSeen, posting = {}, jev, counts }) {
@@ -74,12 +83,10 @@ export async function reviewJevSplit({ inputs, snapshotText, firstSeen, posting 
       if (!Number.isFinite(probability) || probability < 0 || probability > 1) throw new Error('Invalid Jev probability');
       probabilities[dimension] = probability;
     });
-    const failing = DIMENSIONS.find((dimension) => probabilities[dimension] < reject[dimension]);
-    const decision = failing ? 'not_eligible' : DIMENSIONS.every((dimension) => probabilities[dimension] >= accept[dimension]) ? 'eligible' : null;
-    if (decision) {
-      counts[`decided_${decision}`] += 1;
-      return { probabilities, verdict: { decision, code: failing ? CODES[failing] : null, escalate: false,
-        flags: ['jev_decided'], jev: probabilities, factsUsed: inputs.facts.map((fact) => fact.id) } };
+    const decided = jevDecision(probabilities, { reject, accept });
+    if (decided) {
+      counts[`decided_${decided.decision}`] += 1;
+      return { probabilities, verdict: jevVerdict(decided, probabilities, inputs.facts) };
     }
   } catch {
     // Adapter errors can contain private transport details; do not persist them.

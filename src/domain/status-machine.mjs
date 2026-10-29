@@ -16,8 +16,9 @@ export function assertStatusTransition(from, to) {
   return true;
 }
 
-export function assertReviewRestore(from, to, { actor, lastActor, automated = false, systemReview = false }) {
-  if (from !== 'withdrawn' || to !== 'lead' || actor !== 'review-worker' || !(lastActor === 'review-worker' || automated || systemReview && lastActor !== 'user')) throw new Error('Invalid review restore');
+// liftedRule: the withdrawal applied a company rule the user has since lifted (never a user's own withdrawal).
+export function assertReviewRestore(from, to, { actor, lastActor, automated = false, systemReview = false, liftedRule = false }) {
+  if (from !== 'withdrawn' || to !== 'lead' || actor !== 'review-worker' || !(lastActor === 'review-worker' || automated || (systemReview || liftedRule) && lastActor !== 'user')) throw new Error('Invalid review restore');
   return true;
 }
 

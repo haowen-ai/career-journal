@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { loadUserOverrides } from './overrides.mjs';
 
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical);
@@ -34,11 +35,13 @@ export async function loadReviewInputs(home) {
     readInput(path.join(profile, 'fit-rules.md')),
     readInput(path.join(profile, 'profile.json'), { json: true, optional: true }),
   ]);
-  const [text, evalRecord] = await Promise.all([
+  const [text, evalRecord, overrides] = await Promise.all([
     readInput(path.resolve(root, policy.resumeTextPath ?? 'profile/resume.txt'), { optional: true }),
     readInput(path.join(root, 'runs', 'eval-latest.json'), { json: true, optional: true }),
+    // User overrides are applied at decision and delivery time; they are not judge dependencies.
+    loadUserOverrides(profile),
   ]);
-  return { facts, policy, screeningPolicy, provenance, profile: searchProfile, rules: { screening, fit }, resume: text === null ? null : { text, hash: dependencyHash(text) }, evalRecord };
+  return { facts, policy, screeningPolicy, provenance, profile: searchProfile, rules: { screening, fit }, resume: text === null ? null : { text, hash: dependencyHash(text) }, evalRecord, overrides };
 }
 
 export const screeningPolicyParts = (policy) => Object.fromEntries(

@@ -7,6 +7,7 @@ import { redact } from '../runtime/redact.mjs';
 import { migrate, openDatabase, openReadOnlyDatabase, pendingMigrationError, assertSchemaNotNewer } from '../storage/database.mjs';
 import { loadScanProfile } from '../scan/profile-input.mjs';
 import { runScan } from '../scan/run.mjs';
+import { loadUserOverrides, withOverrides } from '../review/overrides.mjs';
 
 const usage = 'Usage: career-journal scan run [--dry-run] [--json] [--profile <path>]';
 
@@ -49,8 +50,11 @@ export async function scanWithContext(context, profile, runtime = {}, { dryRun =
   }
   const fetchImpl = runtime.fetch ?? globalThis.fetch;
   let policy = {};
-  try { policy = JSON.parse(await readFile(path.join(context.root, path.dirname(context.config.data.database), 'profile', 'screening-policy.json'), 'utf8')); }
+  const profileDir = path.join(context.root, path.dirname(context.config.data.database), 'profile');
+  try { policy = JSON.parse(await readFile(path.join(profileDir, 'screening-policy.json'), 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
+  // Re-allowed companies (profile/company-overrides.json) are not dropped at scan.
+  policy = withOverrides(policy, await loadUserOverrides(profileDir));
   return runScan({
     db: context.db,
     profile,

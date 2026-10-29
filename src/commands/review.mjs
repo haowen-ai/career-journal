@@ -16,7 +16,7 @@ import { reviewExitCode, writeReceipt, readRunReceipt, readCurrentReceipt, final
 import { reviewReport } from '../review/report.mjs';
 import { postingLedger } from '../review/ledger.mjs';
 import { matchMailHits } from '../review/mail.mjs';
-import { annotateMail, unhide, deliver, logReview, parseJson } from '../review/deliver.mjs';
+import { annotateMail, unhide, deliver, deliveryPolicy, logReview, parseJson } from '../review/deliver.mjs';
 import { claimItem, atomic } from '../review/lease.mjs';
 import { redecideReviews } from '../review/redecide.mjs';
 import { releaseHolds } from '../review/release-holds.mjs';
@@ -72,13 +72,15 @@ export async function reviewCommand(parsed, io, runtime = {}) {
         emit(releaseHolds(context.db, { now, provenance: inputs.provenance, inputs })); return 0;
       }
       case 'redecide': {
-        if (options.held !== true || options.done !== undefined && options.done !== true) throw new Error('Usage: career-journal review redecide --held [--done] [--json]');
+        if (options.held !== true || options.done !== undefined && options.done !== true) throw new Error('Usage: career-journal review redecide --held [--done] [--posting <id>]... [--json]');
+        const postingIds = options.posting === undefined ? null : [options.posting].flat();
+        if (postingIds && !postingIds.every((id) => typeof id === 'string' && id.trim())) throw new Error('--posting requires a posting id');
         if (isBusy(context.db, now)) throw new Error('A review run is active');
         const inputs = await loadReviewInputs(context.root);
         const judges = runtime.review?.judges ?? createJudgeAdapters(inputs.policy);
         await Promise.all(Object.values(judges).map((adapter) => adapter.ready));
         if (isBusy(context.db, now)) throw new Error('A review run is active');
-        emit(await redecideReviews(context.db, { inputs, judges, held: true, done: options.done === true, now }));
+        emit(await redecideReviews(context.db, { inputs, judges, held: true, done: options.done === true, now, postingIds }));
         return 0;
       }
       case 'bootstrap': { const inputs = await loadReviewInputs(context.root); emit(bootstrapExisting(context.db, { provenance: inputs.provenance, policy: inputs.screeningPolicy, now })); return 0; }
@@ -163,7 +165,7 @@ export async function reviewCommand(parsed, io, runtime = {}) {
         const inputs = await loadReviewInputs(context.root);
         atomic(context.db, () => {
           const fence = claimItem(context.db, postingId, { owner: 'user-resolve', now }); if (!fence) throw new Error('Review is leased');
-          deliver(context.db, { postingId, fence, now, policy: inputs.screeningPolicy, explicit: true, verdict: { ...parseJson(row.evidence_json), decision, code: decision === 'not_eligible' ? 'user_declined' : null } });
+          deliver(context.db, { postingId, fence, now, policy: deliveryPolicy(inputs), explicit: true, verdict: { ...parseJson(row.evidence_json), decision, code: decision === 'not_eligible' ? 'user_declined' : null } });
           logReview(context.db, postingId, { now, kind: 'user', payload: { decision, reason, actor: 'user' } });
         }); emit({ postingId, decision }); return 0;
       }

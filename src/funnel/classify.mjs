@@ -16,7 +16,7 @@ for (const country of countries.countries) {
 for (const [name, code] of Object.entries({ 'united states of america': 'US', 'u s': 'US', 'u s a': 'US', 'uk': 'GB', 'u k': 'GB', 'south korea': 'KR', 'north korea': 'KP', 'russia': 'RU', 'vietnam': 'VN', 'taiwan': 'TW' })) names.set(name, code);
 const stateNames = new Set(Object.values(countries.usStates).map(normalized));
 
-function countryOf(location) {
+export function countryOf(location) {
   // Explicit structured country context takes precedence over ambiguous place names.
   const explicit = typeof location === 'object' && (location?.countryCode ?? location?.country);
   if (typeof explicit === 'string' && names.has(normalized(explicit))) return names.get(normalized(explicit));
