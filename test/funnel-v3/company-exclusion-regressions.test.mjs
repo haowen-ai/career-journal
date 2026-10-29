@@ -205,6 +205,13 @@ test('[B] the startup pass withdraws visible leads and settles due and held revi
   const privateLead = deliveredLead(db, 'p-lead-private', { company: PRIVATE });
   dueReview(db, 'p-due-disliked', { company: ALIASED });
   dueReview(db, 'p-held-agency', { company: AGENCY, state: 'held', holdOwner: 'user' });
+  // A refreshed review whose lead an earlier check already withdrew with its own reason: the review is settled, the
+  // application keeps its reason.
+  const earlier = deliveredLead(db, 'p-due-withdrawn', { company: AGENCY, title: 'Earlier Statistics Intern' });
+  db.prepare("UPDATE applications SET status = 'withdrawn', skip_reason = 'earlier check: onsite only', skip_owner = 'review' WHERE id = ?").run(earlier);
+  db.prepare("UPDATE reviews SET state = 'due', stage = 'fetch', decision = 'unclear', code = 'provenance_unknown', next_due = ? WHERE posting_id = 'p-due-withdrawn'").run(T0);
+  const earlierRow = () => JSON.stringify({ row: db.prepare('SELECT * FROM applications WHERE id = ?').get(earlier), events: eventsOf(db, earlier) });
+  const earlierBefore = earlierRow();
   // User decisions at excluded companies (other roles, so the submitted one is no duplicate of the leads above).
   const applied = deliveredLead(db, 'p-applied', { company: DISLIKED, title: 'Applied Statistics Intern' });
   db.prepare("UPDATE applications SET status = 'applied', applied_at = ? WHERE id = ?").run(at(-1), applied);
@@ -230,8 +237,9 @@ test('[B] the startup pass withdraws visible leads and settles due and held revi
     const withdrawal = [...eventsOf(db, appId)].reverse().find((event) => event.statusAfter);
     if (withdrawal?.statusAfter !== 'withdrawn' || withdrawal.source?.actor !== 'review-worker') problems.push(`${id}: last status event ${withdrawal?.type} by ${withdrawal?.source?.actor}`);
   }
-  for (const id of ['p-due-disliked', 'p-held-agency']) if (outcome(db, id).join() !== 'done,not_eligible,company_excluded') problems.push(`${id}: ${outcome(db, id)}`);
+  for (const id of ['p-due-disliked', 'p-held-agency', 'p-due-withdrawn']) if (outcome(db, id).join() !== 'done,not_eligible,company_excluded') problems.push(`${id}: ${outcome(db, id)}`);
   assert.deepEqual(problems, [], `CE5: excluded leads and reviews are settled:\n${problems.join('\n')}`);
+  assert.equal(earlierRow(), earlierBefore, 'an already withdrawn application keeps its own reason and events');
   assert.deepEqual(queued(db).sort(), [kept, logged, privateLead].sort(), 'only the leads at companies not excluded, and the user-logged lead, stay visible');
   assert.equal(userRows(), users, 'applied, prepared, user-skipped and user-logged applications are untouched');
 
@@ -255,7 +263,8 @@ test('[B] the startup pass withdraws visible leads and settles due and held revi
   }
   assert.deepEqual(outcome(db, 'p-lead-disliked'), ['done', 'eligible', null]);
   assert.equal(evidenceOf(db, 'p-lead-disliked').provenance, undefined, 'the automated provenance of the exclusion is dropped on restore');
-  for (const id of ['p-due-disliked', 'p-held-agency']) assert.deepEqual([reviewOf(db, id).state, reviewOf(db, id).stage], ['due', 'fetch'], `${id} goes back to the fetch queue`);
+  for (const id of ['p-due-disliked', 'p-held-agency', 'p-due-withdrawn']) assert.deepEqual([reviewOf(db, id).state, reviewOf(db, id).stage], ['due', 'fetch'], `${id} goes back to the fetch queue`);
+  assert.equal(earlierRow(), earlierBefore, 'restoring does not touch the withdrawn application either');
   assert.equal(userRows(), users, 'user decisions are still untouched');
 });
 

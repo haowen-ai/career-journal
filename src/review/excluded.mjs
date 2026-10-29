@@ -1,5 +1,11 @@
 import { companyKey } from '../scan/dedupe.mjs';
 
+const patterns = new Map();
+const compiled = (value) => {
+  if (!patterns.has(value)) patterns.set(value, new RegExp(value, 'i'));
+  return patterns.get(value);
+};
+
 // The effective company exclusion as scan, classification and delivery apply it.
 // policy.userExcludedCompanies is the screening policy's list (a judge dependency);
 // policy.overrideExcludedCompanies and policy.overrideExcludedPatterns come from
@@ -14,7 +20,7 @@ export function companyExcluded(company, policy = {}) {
   const listed = (list) => (list ?? []).find((name) => companyKey(name, aliases) === companyKey(company, aliases));
   const user = listed(policy.overrideExcludedCompanies);
   if (user) return { source: 'user', match: user };
-  const pattern = (policy.overrideExcludedPatterns ?? []).find((value) => new RegExp(value, 'i').test(String(company).trim()));
+  const pattern = (policy.overrideExcludedPatterns ?? []).find((value) => compiled(value).test(String(company).trim()));
   if (pattern) return { source: 'user', match: pattern };
   const screening = listed(policy.userExcludedCompanies);
   return screening ? { source: 'screening', match: screening } : null;
