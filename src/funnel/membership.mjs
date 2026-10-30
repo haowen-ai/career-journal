@@ -11,3 +11,58 @@ export function postingPartitions(db, postingId) {
     SELECT source,partition,MAX(last_seen) lastSeen FROM posting_partitions
     WHERE posting_id IN (SELECT id FROM members) GROUP BY source,partition`).all(postingId);
 }
+
+const sightingKey = (source, partition) => `${source}\0${partition}`;
+
+// The latest sighting of each source and partition, per raw posting id. Observations are
+// deduplicated by content, so only sightings say what a source shows now. The table has no
+// posting index: one unordered pass serves a whole batch.
+export function latestSightings(db) {
+  const latest = new Map();
+  let maxRowid = 0;
+  for (const row of db.prepare('SELECT rowid,posting_id,source,partition,observation_id,seen_at FROM observation_sightings').iterate()) {
+    if (row.rowid > maxRowid) maxRowid = row.rowid;
+    let keys = latest.get(row.posting_id);
+    if (!keys) latest.set(row.posting_id, keys = new Map());
+    const key = sightingKey(row.source, row.partition);
+    const seen = keys.get(key);
+    if (!seen || row.seen_at > seen.seenAt || (row.seen_at === seen.seenAt && row.rowid > seen.rowid)) {
+      keys.set(key, { observationId: row.observation_id, seenAt: row.seen_at, rowid: row.rowid });
+    }
+  }
+  return { latest, maxRowid };
+}
+
+// A posting's current source records, merge members included at any depth: each source and
+// partition's latest sighting. A partition whose sightings retention removed falls back to every
+// kept observation of that source, which can only keep the posting in review.
+export function currentRecordReader(db) {
+  const membersOf = db.prepare(`WITH RECURSIVE members(id) AS (SELECT ? UNION SELECT p.id FROM postings p JOIN members m ON p.merged_into=m.id)
+    SELECT id FROM members ORDER BY id`);
+  const partitionsOf = db.prepare('SELECT source,partition FROM posting_partitions WHERE posting_id=?');
+  const observation = db.prepare('SELECT id,fields_json,completeness_json,listed FROM observations WHERE id=?');
+  const bySource = db.prepare('SELECT id,fields_json,completeness_json,listed FROM observations WHERE posting_id=? AND source=?');
+  return {
+    members: (postingId) => membersOf.all(postingId).map((row) => row.id),
+    // skip: the [postingId, source, partition] being ingested now, which is read from the record itself.
+    records(members, latest, { skip } = {}) {
+      const records = [];
+      for (const member of members) {
+        const own = skip && member === skip[0] ? sightingKey(skip[1], skip[2]) : null;
+        const keys = latest.get(member) ?? new Map();
+        for (const [key, sighting] of keys) {
+          if (key === own) continue;
+          const row = observation.get(sighting.observationId);
+          if (row) records.push(row);
+        }
+        for (const { source, partition } of partitionsOf.all(member)) {
+          const key = sightingKey(source, partition);
+          if (key !== own && !keys.has(key)) records.push(...bySource.all(member, source));
+        }
+      }
+      return records;
+    },
+    hasOther: (members, [postingId, source, partition]) => members.some((member) => partitionsOf.all(member)
+      .some((row) => member !== postingId || row.source !== source || row.partition !== partition)),
+  };
+}

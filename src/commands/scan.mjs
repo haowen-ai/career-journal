@@ -8,6 +8,7 @@ import { migrate, openDatabase, openReadOnlyDatabase, pendingMigrationError, ass
 import { loadScanProfile } from '../scan/profile-input.mjs';
 import { runScan } from '../scan/run.mjs';
 import { loadUserOverrides, withOverrides } from '../review/overrides.mjs';
+import { loadDirectionRules } from '../review/direction.mjs';
 
 const usage = 'Usage: career-journal scan run [--dry-run] [--json] [--profile <path>]';
 
@@ -49,8 +50,9 @@ export async function scanPolicy(context) {
   const profileDir = path.join(context.root, path.dirname(context.config.data.database), 'profile');
   try { policy = JSON.parse(await readFile(path.join(profileDir, 'screening-policy.json'), 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
-  // Re-allowed companies (profile/company-overrides.json) are not dropped at scan.
-  return withOverrides(policy, await loadUserOverrides(profileDir));
+  // Re-allowed companies (profile/company-overrides.json) are not dropped at scan. The role-direction
+  // allow patterns (profile/role-direction.json) keep an AI/ML/data title out of the hardware-only drop.
+  return { ...withOverrides(policy, await loadUserOverrides(profileDir)), direction: await loadDirectionRules(profileDir) };
 }
 
 export async function scanWithContext(context, profile, runtime = {}, { dryRun = false, runId, parentRunId, deadlineAt } = {}) {

@@ -1,5 +1,6 @@
 import { classifyRole } from '../funnel/classify.mjs';
 import { SIGNAL_DROP_CODES } from '../funnel/contract.mjs';
+import { currentRecordReader, latestSightings } from '../funnel/membership.mjs';
 import { logReview, parseJson } from './deliver.mjs';
 import { atomic } from './lease.mjs';
 import { reviewOwnershipJoins, userDecisionSql } from './ownership.mjs';
@@ -9,21 +10,7 @@ const completeness = (observation) => {
   const parts = parseJson(observation.completeness_json);
   return (DESCRIPTION_RANK[parts.description] ?? 0) + (parts.locations === 'complete') + (parts.arrangement === 'known') + (parts.employment_type === 'explicit');
 };
-
-// Observations are deduplicated by content, so observed_at can be older than what a source
-// shows today. The latest sighting of each source and partition is its current record.
-// observation_sightings has no posting index: read it once, ordered, instead of scanning it
-// per posting. A merged posting's sightings count for the posting it became.
-function latestSightings(db) {
-  const mergedInto = new Map(db.prepare('SELECT id,merged_into FROM postings WHERE merged_into IS NOT NULL').all().map((row) => [row.id, row.merged_into]));
-  const latest = new Map();
-  for (const row of db.prepare('SELECT posting_id,source,partition,observation_id FROM observation_sightings ORDER BY seen_at,rowid').iterate()) {
-    const postingId = mergedInto.get(row.posting_id) ?? row.posting_id;
-    if (!latest.has(postingId)) latest.set(postingId, new Map());
-    latest.get(postingId).set(`${row.source}\0${row.partition}`, row.observation_id);
-  }
-  return latest;
-}
+const ACTIVE_AFTER_MS = 600_000;
 
 // The most complete source decides. A signal drop needs every source to agree, because one
 // source's bare listing cannot rule out the student signal another source shows.
@@ -37,21 +24,28 @@ function classifyPosting(observations, options) {
 const skipReason = (row) => row.user_decided ? 'user_decided' : row.hold_owner === 'user' ? 'user_held' : row.lease_owner ? 'leased'
   : row.application_id ? 'application' : row.merged_into ? 'merged' : parseJson(row.flags_json, []).includes('manual') ? 'manual' : null;
 
-// One-off settlement of reviews queued before classifyRole dropped them at scan. Reads happen
-// outside the write lock; each batch re-checks ownership in one short transaction, so a run can
-// be interrupted and repeated. Rows that still classify for review stay due.
+const activeRunError = (run) => Object.assign(new Error(`A ${run.kind} run is active (${run.run_id}); rerun reclassify after it finishes`), { code: 75 });
+
+// One-off settlement of reviews queued before classifyRole dropped them at scan. A scan or review
+// run must not overlap it: it refuses to start during one, and a batch that finds one rolls back.
+// Reads happen outside the write lock; each batch re-checks ownership, merge membership and new
+// sightings in one short transaction, so a run can be interrupted and repeated.
 export function reclassifyReviews(db, { policy, profile, now, dryRun = false, batch = 500 }) {
+  const activeRun = db.prepare(`SELECT run_id,kind FROM runs WHERE kind IN ('scan','review') AND status='running' AND heartbeat_at>=? ORDER BY started_at LIMIT 1`);
+  const active = () => activeRun.get(new Date(Date.parse(now) - ACTIVE_AFTER_MS).toISOString());
+  if (!dryRun && active()) throw activeRunError(active());
   const report = { dryRun, scanned: 0, dropped: {}, kept: {}, skipped: {}, batches: 0 };
   const bump = (counts, key) => { counts[key] = (counts[key] ?? 0) + 1; };
   const rows = db.prepare(`SELECT r.posting_id,r.lane,r.flags_json,r.hold_owner,r.lease_owner,r.updated_at,p.application_id,p.listed,p.merged_into,
       ${userDecisionSql} user_decided
     FROM reviews r JOIN postings p ON p.id=r.posting_id ${reviewOwnershipJoins}
     WHERE r.state='due' AND r.stage IN ('fetch','scan') ORDER BY r.first_seen,r.posting_id`).all();
-  const sightings = latestSightings(db);
-  const observation = db.prepare('SELECT fields_json,completeness_json,listed FROM observations WHERE id=?');
+  const { latest, maxRowid } = latestSightings(db);
+  const reader = currentRecordReader(db);
   const stillOpen = db.prepare(`SELECT r.posting_id,r.updated_at FROM reviews r JOIN postings p ON p.id=r.posting_id ${reviewOwnershipJoins}
     WHERE r.posting_id IN (SELECT value FROM json_each(?)) AND r.state='due' AND r.stage IN ('fetch','scan') AND r.lease_owner IS NULL
-      AND COALESCE(r.hold_owner,'')<>'user' AND p.application_id IS NULL AND NOT ${userDecisionSql}`);
+      AND COALESCE(r.hold_owner,'')<>'user' AND p.application_id IS NULL AND p.merged_into IS NULL AND NOT ${userDecisionSql}`);
+  const sightedSince = db.prepare('SELECT DISTINCT posting_id FROM observation_sightings WHERE rowid>?');
   const settle = db.prepare(`UPDATE reviews SET state='done',decision='dropped',code=?,next_due=NULL,updated_at=? WHERE posting_id=? AND state='due'`);
   for (let start = 0; start < rows.length; start += batch) {
     const drops = new Map();
@@ -59,20 +53,28 @@ export function reclassifyReviews(db, { policy, profile, now, dryRun = false, ba
       report.scanned += 1;
       const skip = skipReason(row);
       if (skip) { bump(report.skipped, skip); continue; }
-      const observations = [...(sightings.get(row.posting_id)?.values() ?? [])].map((id) => observation.get(id)).filter(Boolean);
+      const members = reader.members(row.posting_id);
+      const observations = reader.records(members, latest);
       if (!observations.length) { bump(report.skipped, 'no_observation'); continue; }
       // postings.listed follows whichever source was ingested last. Closed means closed everywhere.
       const delisted = !row.listed && observations.every((item) => !item.listed);
       const result = delisted ? { kind: 'drop', code: 'delisted', evidence: [] } : classifyPosting(observations, { policy, profile });
-      if (result.kind === 'drop') drops.set(row.posting_id, { ...result, updatedAt: row.updated_at });
+      if (result.kind === 'drop') drops.set(row.posting_id, { ...result, updatedAt: row.updated_at, members: members.join('\n') });
       else bump(report.kept, row.lane);
     }
     report.batches += 1;
     if (dryRun) { for (const { code } of drops.values()) bump(report.dropped, code); continue; }
     atomic(db, () => {
+      const run = active();
+      if (run) throw activeRunError(run);
       const open = new Map(stillOpen.all(JSON.stringify([...drops.keys()])).map((row) => [row.posting_id, row.updated_at]));
-      for (const [id, { code, evidence, updatedAt }] of drops) {
-        if (open.get(id) !== updatedAt) { bump(report.skipped, 'changed'); continue; }
+      // A sighting written after the read can change the latest record a decision used.
+      const sighted = new Set(sightedSince.all(maxRowid).map((row) => row.posting_id));
+      for (const [id, { code, evidence, updatedAt, members }] of drops) {
+        const current = reader.members(id);
+        if (open.get(id) !== updatedAt || current.join('\n') !== members || current.some((member) => sighted.has(member))) {
+          bump(report.skipped, 'changed'); continue;
+        }
         settle.run(code, now, id);
         logReview(db, id, { now, stage: 'scan', payload: { action: 'reclassified', code, evidence } });
         bump(report.dropped, code);

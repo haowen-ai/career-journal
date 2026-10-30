@@ -443,6 +443,131 @@ test('[B] reclassify is resumable: an interrupted run keeps whole batches and a 
   assert.deepEqual(reclassify(reclassifyReviews, db).dropped, {}, 'a further run finds nothing');
 });
 
+// ===================================================================== review of bdf5754 (R1-R5)
+
+// Runs onBegin(target, n) before the n-th transaction the code under test opens (1-based).
+const onTransaction = (db, onBegin) => {
+  let n = 0;
+  return new Proxy(db, { get(target, name) {
+    if (name === 'exec') return (sql) => { if (/^BEGIN/.test(sql)) onBegin(target, n += 1); return target.exec(sql); };
+    const value = target[name];
+    return typeof value === 'function' ? value.bind(target) : value;
+  } });
+};
+const DIRECTION_RULES = () => load('DNS', './src/review/direction.mjs', ['directionRules']).then(({ directionRules }) => directionRules({ allow: ['computer vision', 'deep learning', 'MLOps', '\\bdata\\b'] }));
+
+test('[A] R1 explicit program or employment-type phrases in the description are a student signal, plural forms included', async () => {
+  const { classifyRole } = await classify();
+  const options = { policy: SCREENING_POLICY, profile: PROFILE };
+  for (const description of ['Employment type: internships', 'Employment type: Internship', 'This is a paid student placement.',
+    'We offer industrial placements for undergraduates.', 'Co-ops welcome for the spring term.', 'Open to placement students.']) {
+    assert.equal(classifyRole(record({ title: 'Analyst', description }), options).kind, 'review', description);
+  }
+  for (const description of ['We work with a job placement agency.', 'Product placement for retail partners.', 'Prior experience through internships is a plus.']) {
+    assert.equal(classifyRole(record({ title: 'Analyst', description }), options).code, 'no_student_signal', description);
+  }
+});
+
+test('[A] R2 a Simplify hardware-only title matching a role-direction allow pattern stays in review; pure software still drops', async () => {
+  const { classifyRole } = await classify();
+  const direction = await DIRECTION_RULES();
+  const hardware = (title) => record({ source: 'simplify', title, categories: ['Hardware'], description: '', terms: ['Summer 2027'] });
+  const options = { policy: { ...SCREENING_POLICY, direction }, profile: PROFILE };
+  for (const title of ['Computer Vision Intern', 'Deep Learning Intern', 'MLOps Intern']) {
+    assert.equal(classifyRole(hardware(title), options).kind, 'review', title);
+    assert.equal(classifyRole(hardware(title), { policy: SCREENING_POLICY, profile: PROFILE }).code, 'out_of_direction', `${title}: without the rules`);
+  }
+  for (const title of ['Software Engineer Intern', 'Firmware Validation Intern']) assert.equal(classifyRole(hardware(title), options).code, 'out_of_direction', title);
+
+  const { ingestBatch } = await ingest();
+  const { reclassifyReviews } = await reclassifyModule();
+  const db = freshDb();
+  const scan = scanner(ingestBatch, db);
+  queued(scan, [roleRecord(1, { source: 'simplify', title: 'Computer Vision Intern', categories: ['Hardware'] }),
+    roleRecord(2, { source: 'simplify', title: 'Software Engineer Intern', categories: ['Hardware'] })], { source: 'simplify', partition: 'simplify:1' });
+  const report = reclassify(reclassifyReviews, db, { policy: { ...SCREENING_POLICY, direction } });
+  assert.deepEqual(report.dropped, { out_of_direction: 1 });
+  assert.deepEqual(outcome(db, postingOf(db, 1)), ['due', null, null]);
+});
+
+test('[A] R3 an older student-signal observation does not reopen a drop when every source now shows no signal', async () => {
+  const { ingestBatch } = await ingest();
+  const db = freshDb();
+  const scan = scanner(ingestBatch, db);
+  scan([roleRecord(1, { title: 'Data Analyst Intern', description: '' })]);
+  const id = postingOf(db, 1);
+  scan([roleRecord(1, { title: 'Data Analyst', description: '' })], { now: at(1) });
+  assert.deepEqual(outcome(db, id), DROPPED, 'fixture: the greenhouse listing lost its signal');
+  const bare = (description) => roleRecord(1, { source: 'careerops', sourceId: 'co-1', title: 'Data Analyst', description, completeness: { locations: 'partial', arrangement: 'unknown', description: 'none', employment_type: 'absent' } });
+  scan([bare('')], { source: 'careerops', partition: 'all', now: at(2) });
+  scan([bare('Changed.')], { source: 'careerops', partition: 'all', now: at(3) });
+  assert.deepEqual(outcome(db, id), DROPPED, 'the stored Intern observation is not what greenhouse shows now');
+  scan([roleRecord(1, { title: 'Data Analyst Intern', description: '' })], { now: at(4) });
+  assert.deepEqual(outcome(db, id), ['due', null, null], 'control: a current signal reopens it');
+});
+
+test('[A] R4 ingest and reclassify follow a merge chain A to B to C and keep the internship a member shows', async () => {
+  const { ingestBatch } = await ingest();
+  const { reclassifyReviews } = await reclassifyModule();
+  const build = () => {
+    const db = freshDb();
+    const scan = scanner(ingestBatch, db);
+    queued(scan, [roleRecord(1, { title: 'Data Analyst Intern', description: '' }), roleRecord(2, NO_SIGNAL), roleRecord(3, NO_SIGNAL)]);
+    const [a, b, c] = [1, 2, 3].map((n) => postingOf(db, n));
+    db.prepare('UPDATE postings SET merged_into = ? WHERE id = ?').run(b, a);
+    db.prepare('UPDATE postings SET merged_into = ? WHERE id = ?').run(c, b);
+    db.prepare(`UPDATE reviews SET state = 'done', decision = 'reused', code = 'bound', next_due = NULL WHERE posting_id IN (?, ?)`).run(a, b);
+    return { db, scan, c };
+  };
+  {
+    const { db, scan, c } = build();
+    scan([roleRecord(3, { ...NO_SIGNAL, description: 'Changed.' })], { now: at(1) });
+    assert.deepEqual(outcome(db, c), ['due', null, null], 'ingest: member A two merges away is a student role');
+  }
+  {
+    const { db, c } = build();
+    const report = reclassify(reclassifyReviews, db);
+    assert.deepEqual(report.dropped, {}, JSON.stringify(report));
+    assert.deepEqual(outcome(db, c), ['due', null, null], 'reclassify: member A two merges away is a student role');
+  }
+});
+
+test('[B] R5 reclassify refuses to start during a scan or review run, and a batch that finds one rolls back', async () => {
+  const { ingestBatch } = await ingest();
+  const { reclassifyReviews } = await reclassifyModule();
+  const db = freshDb();
+  const scan = scanner(ingestBatch, db);
+  queued(scan, [roleRecord(1, NO_SIGNAL), roleRecord(2, NO_SIGNAL)]);
+  const running = (target, runId, kind, heartbeat) => target.prepare(`INSERT INTO runs (run_id, kind, owner, started_at, heartbeat_at, status) VALUES (?, ?, 'other', ?, ?, 'running')`).run(runId, kind, heartbeat, heartbeat);
+  running(db, 'scan-live', 'scan', at(1));
+  assert.throws(() => reclassify(reclassifyReviews, db), /scan run is active/);
+  assert.equal(reclassify(reclassifyReviews, db, { dryRun: true }).dropped.no_student_signal, 2, 'a dry run writes nothing and may run');
+  db.prepare(`UPDATE runs SET heartbeat_at = ? WHERE run_id = 'scan-live'`).run(at(-1));
+  assert.deepEqual(outcome(db, postingOf(db, 1)), ['due', null, null]);
+  // A stale running row (a crashed scan) does not block; a review starting before the second batch aborts it.
+  const racing = onTransaction(db, (target, n) => { if (n === 2) running(target, 'review-live', 'review', at(1)); });
+  assert.throws(() => reclassify(reclassifyReviews, racing, { batch: 1 }), /review run is active/);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM reviews WHERE state = 'done'").get().n, 1, 'the first batch stays, the second rolled back');
+});
+
+test('[B] R5 a sighting written between the read and the commit keeps the row due', async () => {
+  const { ingestBatch } = await ingest();
+  const { reclassifyReviews } = await reclassifyModule();
+  const db = freshDb();
+  const scan = scanner(ingestBatch, db);
+  queued(scan, [roleRecord(1, NO_SIGNAL), roleRecord(2, NO_SIGNAL)]);
+  const [late, open] = [postingOf(db, 1), postingOf(db, 2)];
+  const racing = onTransaction(db, (target, n) => {
+    if (n !== 1) return;
+    const { id } = target.prepare('SELECT id FROM observations WHERE posting_id = ?').get(late);
+    target.prepare(`INSERT INTO observation_sightings (run_id, posting_id, observation_id, source, partition, seen_at) VALUES ('scan-late', ?, ?, 'careerops', 'all', ?)`).run(late, id, at(1));
+  });
+  const report = reclassify(reclassifyReviews, racing);
+  assert.deepEqual(report.skipped, { changed: 1 });
+  assert.equal(reviewOf(db, late).state, 'due', 'its updated_at did not change, its latest sighting did');
+  assert.deepEqual(outcome(db, open), DROPPED);
+});
+
 test('[A] review reclassify runs from the CLI with the scan policy and profile', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'cj-reclassify-'));
   const { setup } = await import('../../src/commands/setup.mjs');
@@ -461,15 +586,17 @@ test('[A] review reclassify runs from the CLI with the scan policy and profile',
     const context = await openHomeDatabase(home);
     const scan = scanner(ingestBatch, context.db);
     queued(scan, [roleRecord(1, NO_SIGNAL), roleRecord(2), roleRecord(3, { company: 'Excluded Example Co' })]);
+    queued(scan, [roleRecord(4, { source: 'simplify', title: 'Computer Vision Intern', categories: ['Hardware'] })], { source: 'simplify', partition: 'simplify:1' });
     context.db.close();
+    await writeFile(path.join(home, '.career-journal', 'profile', 'role-direction.json'), JSON.stringify({ rule: 'synthetic', allow: ['computer vision'] }));
     const preview = await cli('--dry-run', '--json');
     assert.equal(preview.code, 0);
     assert.deepEqual(preview.report.dropped, { no_student_signal: 1 });
     assert.equal(preview.report.dryRun, true);
     const real = await cli('--batch', '1', '--json');
     assert.deepEqual(real.report.dropped, { no_student_signal: 1 });
-    assert.equal(real.report.batches, 2);
-    assert.deepEqual(real.report.remainingDue, { new: 1 });
+    assert.equal(real.report.batches, 3);
+    assert.deepEqual(real.report.remainingDue, { new: 2 }, 'the scan policy carries the role-direction allow patterns');
     const invalid = memoryIO();
     assert.notEqual(await runCli(['review', 'reclassify', '--home', home, '--batch', '0'], invalid, createRuntime({ root: process.cwd() })), 0);
     assert.match(invalid.stderr, /--batch requires a positive integer/);

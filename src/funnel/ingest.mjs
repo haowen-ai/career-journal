@@ -4,6 +4,7 @@ import { classifyRole } from './classify.mjs';
 import { SIGNAL_DROP_CODES, SUBMITTED_STATUSES } from './contract.mjs';
 import { redact } from '../runtime/redact.mjs';
 import { assertScanOwner } from './scan-lease.mjs';
+import { currentRecordReader, latestSightings } from './membership.mjs';
 import { userDecided, userLoggedPostings } from '../review/ownership.mjs';
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');
@@ -20,9 +21,14 @@ function quarantine(db, record, reason, now) {
   }
 }
 
-// The first review-worthy record of the same posting from another source, if any.
-function reviewElsewhere(db, postingId, record, options) {
-  for (const row of db.prepare('SELECT fields_json FROM observations WHERE posting_id=? AND source<>?').all(postingId, record.source)) {
+// The first review-worthy current record of the same posting (merge members included) from another
+// source or partition, if any. Older observations do not count: the source has since changed them.
+function reviewElsewhere(db, postingId, record, options, reader, cache) {
+  const members = reader.members(postingId);
+  const self = [postingId, record.source, record.partition];
+  if (!reader.hasOther(members, self)) return null;
+  cache.latest ??= latestSightings(db).latest;
+  for (const row of reader.records(members, cache.latest, { skip: self })) {
     const other = classifyRole(JSON.parse(row.fields_json), options);
     if (other.kind === 'review') return other;
   }
@@ -38,6 +44,9 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
     const candidates = postingCandidates(db, { companyAliases: policy.companyAliases });
     const submitted = submittedApplicationIndex(db, { companyAliases: policy.companyAliases });
     const userLogged = userLoggedPostings(db);
+    // Other partitions do not change during this batch, so their latest sightings are read once.
+    const reader = currentRecordReader(db);
+    const cache = {};
     for (const raw of records) {
       counts.observed += 1;
       const record = { ...raw, source: raw?.source ?? source, partition };
@@ -69,7 +78,7 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
       // A signal drop judges one record. It never closes a posting another source calls a
       // student role, one the user added by hand, or one with a linked application.
       if (SIGNAL_DROP_CODES.includes(result.code)) {
-        const other = reviewElsewhere(db, id, record, { policy, profile });
+        const other = reviewElsewhere(db, id, record, { policy, profile }, reader, cache);
         if (other || posting.application_id || JSON.parse(old?.flags_json ?? '[]').includes('manual')) {
           result = { ...result, kind: 'review', code: null, lane: other?.lane ?? result.lane };
         }

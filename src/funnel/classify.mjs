@@ -4,8 +4,9 @@ import { aliasesFor, canonicalUrl } from './identity.mjs';
 
 const STUDENT = /\b(?:intern(?:s|ship|ships)?|winternships?|co[- ]?ops?|apprentice(?:s|ship|ships)?|placements?|working students?|students?|fellow(?:s|ship|ships)?|residen(?:t|ts|cy)|graduate program(?:me)?|early career|university program(?:me)?|campus program(?:me)?|summer (?:analysts?|associates?|20\d\d program(?:me)?)|currently enrolled|class of 20\d\d)\b/i;
 // Descriptions often mention students in company-wide boilerplate. Only explicit
-// program phrases count there; titles and departments retain the broader signal.
-const PROGRAM = /\b(?:interns?|internship|co[- ]?ops?|apprentice(?:s|ship|ships)?|summer\s+20\d\d\s+(?:interns?|analysts?|associates?|program(?:me)?)|(?:graduate|early career|university|campus)\s+program(?:me)?)\b/i;
+// program phrases count there; titles and departments retain the broader signal. A bare
+// plural ("experience through internships") is a requirement, not an offer.
+const PROGRAM = /\b(?:interns?|internship|co[- ]?ops?|(?:employment|job|position|contract|work)\s+type\s*:?\s*(?:interns?|internships?|co[- ]?ops?|placements?)|(?:student|industrial|work|summer|year[- ]long)\s+placements?|placement\s+(?:students?|years?)|apprentice(?:s|ship|ships)?|summer\s+20\d\d\s+(?:interns?|analysts?|associates?|program(?:me)?)|(?:graduate|early career|university|campus)\s+program(?:me)?)\b/i;
 // A season and year on a listing is an internship term, for example Simplify's "Summer 2027".
 const TERM = /\b(?:spring|summer|fall|autumn|winter)\s+20\d\d\b/i;
 const DIRECTION = /\b(?:data|analytics|analyst|AI|ML|machine\s+learning|product|program|project|business|insights|intelligence|solutions|strategy|BI|quant)\b/i;
@@ -72,7 +73,7 @@ export function classifyRole(record, { policy = {}, profile, identity: { submitt
     flags.push('no_student_signal'); lane = 'no_student_signal'; drop = 'no_student_signal';
   } else if (studentSearch && record.source === 'simplify' && record.categories?.length
       && record.categories.every((category) => /^hardware(?: engineering)?$/i.test(String(category).trim()))
-      && !DIRECTION.test(record.title ?? '')) {
+      && !DIRECTION.test(record.title ?? '') && !(policy.direction?.allow ?? []).some((pattern) => pattern.test(record.title ?? ''))) {
     lane = 'out_of_direction'; drop = 'out_of_direction';
   }
   if (record.terms?.length) flags.push('term_tag_conflict');
