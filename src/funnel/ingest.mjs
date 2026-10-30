@@ -23,12 +23,12 @@ function quarantine(db, record, reason, now) {
 
 // The first review-worthy current record of the same posting (merge members included) from another
 // source or partition, if any. Older observations do not count: the source has since changed them.
-function reviewElsewhere(db, postingId, record, options, reader, cache) {
+function reviewElsewhere(db, postingId, record, options, reader, cache, { fallback }) {
   const members = reader.members(postingId);
   const self = [postingId, record.source, record.partition];
   if (!reader.hasOther(members, self)) return null;
   cache.latest ??= latestSightings(db).latest;
-  for (const row of reader.records(members, cache.latest, { skip: self })) {
+  for (const row of reader.records(members, cache.latest, { skip: self, fallback })) {
     const other = classifyRole(JSON.parse(row.fields_json), options);
     if (other.kind === 'review') return other;
   }
@@ -78,7 +78,7 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
       // A signal drop judges one record. It never closes a posting another source calls a
       // student role, one the user added by hand, or one with a linked application.
       if (SIGNAL_DROP_CODES.includes(result.code)) {
-        const other = reviewElsewhere(db, id, record, { policy, profile }, reader, cache);
+        const other = reviewElsewhere(db, id, record, { policy, profile }, reader, cache, { fallback: old?.state === 'due' });
         if (other || posting.application_id || JSON.parse(old?.flags_json ?? '[]').includes('manual')) {
           result = { ...result, kind: 'review', code: null, lane: other?.lane ?? result.lane };
         }

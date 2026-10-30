@@ -34,8 +34,9 @@ export function latestSightings(db) {
 }
 
 // A posting's current source records, merge members included at any depth: each source and
-// partition's latest sighting. A partition whose sightings retention removed falls back to every
-// kept observation of that source, which can only keep the posting in review.
+// partition's latest sighting. A partition whose sightings retention removed has no current record;
+// with fallback, every kept observation of that source stands in for it. Those are history, so a
+// caller uses them only to keep a row that is already due, never to reopen one.
 export function currentRecordReader(db) {
   const membersOf = db.prepare(`WITH RECURSIVE members(id) AS (SELECT ? UNION SELECT p.id FROM postings p JOIN members m ON p.merged_into=m.id)
     SELECT id FROM members ORDER BY id`);
@@ -45,7 +46,7 @@ export function currentRecordReader(db) {
   return {
     members: (postingId) => membersOf.all(postingId).map((row) => row.id),
     // skip: the [postingId, source, partition] being ingested now, which is read from the record itself.
-    records(members, latest, { skip } = {}) {
+    records(members, latest, { skip, fallback = false } = {}) {
       const records = [];
       for (const member of members) {
         const own = skip && member === skip[0] ? sightingKey(skip[1], skip[2]) : null;
@@ -57,7 +58,7 @@ export function currentRecordReader(db) {
         }
         for (const { source, partition } of partitionsOf.all(member)) {
           const key = sightingKey(source, partition);
-          if (key !== own && !keys.has(key)) records.push(...bySource.all(member, source));
+          if (fallback && key !== own && !keys.has(key)) records.push(...bySource.all(member, source));
         }
       }
       return records;

@@ -54,7 +54,8 @@ export function reclassifyReviews(db, { policy, profile, now, dryRun = false, ba
       const skip = skipReason(row);
       if (skip) { bump(report.skipped, skip); continue; }
       const members = reader.members(row.posting_id);
-      const observations = reader.records(members, latest);
+      // Only due rows are read here, so pruned partitions may keep one in review.
+      const observations = reader.records(members, latest, { fallback: true });
       if (!observations.length) { bump(report.skipped, 'no_observation'); continue; }
       // postings.listed follows whichever source was ingested last. Closed means closed everywhere.
       const delisted = !row.listed && observations.every((item) => !item.listed);

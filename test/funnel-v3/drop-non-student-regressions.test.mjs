@@ -568,6 +568,49 @@ test('[B] R5 a sighting written between the read and the commit keeps the row du
   assert.deepEqual(outcome(db, open), DROPPED);
 });
 
+// ===================================================================== review of f023e47 (R6-R7)
+
+test('[A] R6 plural internships or co-ops that the posting offers are a student signal; past experience with them is not', async () => {
+  const { classifyRole } = await classify();
+  const options = { policy: SCREENING_POLICY, profile: PROFILE };
+  for (const description of ['We offer summer internships to undergraduates.', 'Our engineering internships run twelve weeks.',
+    'Join our co-ops this spring.', 'Paid internships are available in Chicago.', 'We are hiring analytics co-ops for the fall.']) {
+    assert.equal(classifyRole(record({ title: 'Analyst', description }), options).kind, 'review', description);
+  }
+  for (const description of ['Relevant experience through internships or research.', 'Previous internships in analytics are a plus.',
+    'Experience from summer internships is welcome.', 'Prior experience through internships or research projects is a plus.']) {
+    assert.equal(classifyRole(record({ title: 'Analyst', description }), options).code, 'no_student_signal', description);
+  }
+});
+
+test('[A] R7 history from a partition whose sightings were pruned keeps a due row in review but never reopens a drop', async () => {
+  const { ingestBatch } = await ingest();
+  const db = freshDb();
+  const scan = scanner(ingestBatch, db);
+  const bare = (description) => roleRecord(1, { source: 'careerops', sourceId: 'co-1', title: 'Data Analyst', description, completeness: { locations: 'partial', arrangement: 'unknown', description: 'none', employment_type: 'absent' } });
+  scan([roleRecord(1, { title: 'Data Analyst Intern', description: '' })]);
+  const id = postingOf(db, 1);
+  scan([bare('')], { source: 'careerops', partition: 'all', now: at(1) });
+  scan([roleRecord(1, { title: 'Data Analyst', description: '' })], { now: at(2) });
+  assert.deepEqual(outcome(db, id), DROPPED, 'fixture: no current record has a signal');
+  db.prepare("DELETE FROM observation_sightings WHERE source = 'greenhouse'").run(); // sighting retention
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM observations WHERE source = 'greenhouse' AND posting_id = ?").get(id).n, 2, 'fixture: the Intern observation is kept');
+  scan([bare('Changed.')], { source: 'careerops', partition: 'all', now: at(3) });
+  assert.deepEqual(outcome(db, id), DROPPED, 'an old Intern observation does not reopen it');
+  db.prepare(`UPDATE reviews SET state = 'due', decision = NULL, code = NULL, next_due = ? WHERE posting_id = ?`).run(at(3), id);
+  scan([bare('Changed again.')], { source: 'careerops', partition: 'all', now: at(4) });
+  assert.deepEqual(outcome(db, id), ['due', null, null], 'control: a row already due stays in review');
+});
+
+test('[A] migration 009 creates the per-posting review_log and sighting indexes', async () => {
+  const db = freshDb();
+  const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('review_log', 'observation_sightings')").all().map((row) => row.name);
+  for (const name of ['review_log_posting_kind_idx', 'review_log_kind_idx', 'observation_sightings_posting_idx']) assert.ok(indexes.includes(name), name);
+  const { migrate } = await import('../../src/storage/database.mjs');
+  db.exec('DELETE FROM schema_migrations WHERE version = 9');
+  assert.deepEqual(migrate(db).applied, [9], 'a data home that already has the indexes migrates as a no-op');
+});
+
 test('[A] review reclassify runs from the CLI with the scan policy and profile', async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'cj-reclassify-'));
   const { setup } = await import('../../src/commands/setup.mjs');
