@@ -44,17 +44,21 @@ export function scanSourcesConfigured(profile) {
     || (profile.sources.simplify.enabled && Boolean(profile.sources.simplify.url || profile.sources.simplify.urls?.length));
 }
 
-export async function scanWithContext(context, profile, runtime = {}, { dryRun = false, runId, parentRunId, deadlineAt } = {}) {
-  if (!scanSourcesConfigured(profile)) {
-    throw new Error('The profile has no scan sources. Add sources.atsBoards entries, or enable sources.careerOps or sources.simplify.');
-  }
-  const fetchImpl = runtime.fetch ?? globalThis.fetch;
+export async function scanPolicy(context) {
   let policy = {};
   const profileDir = path.join(context.root, path.dirname(context.config.data.database), 'profile');
   try { policy = JSON.parse(await readFile(path.join(profileDir, 'screening-policy.json'), 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   // Re-allowed companies (profile/company-overrides.json) are not dropped at scan.
-  policy = withOverrides(policy, await loadUserOverrides(profileDir));
+  return withOverrides(policy, await loadUserOverrides(profileDir));
+}
+
+export async function scanWithContext(context, profile, runtime = {}, { dryRun = false, runId, parentRunId, deadlineAt } = {}) {
+  if (!scanSourcesConfigured(profile)) {
+    throw new Error('The profile has no scan sources. Add sources.atsBoards entries, or enable sources.careerOps or sources.simplify.');
+  }
+  const fetchImpl = runtime.fetch ?? globalThis.fetch;
+  const policy = await scanPolicy(context);
   return runScan({
     db: context.db,
     profile,

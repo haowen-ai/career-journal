@@ -155,7 +155,8 @@ export function replan(db, { inputs, now, runtimeDeps, comparison }) {
       // use the current strategy without weakening screening dependencies.
       const strategyChanged = !['done', 'held'].includes(row.state) && old.jev !== state.jev;
       const relevantOther = strategyChanged || otherChanged && (row.decision !== 'eligible' || windowsChanged);
-      if (relevantFacts || relevantOther) {
+      // A drop was never judged, so no judgment dependency can reopen it.
+      if (row.decision !== 'dropped' && (relevantFacts || relevantOther)) {
         db.prepare("UPDATE reviews SET state='due',stage='judge',next_due=?,hold_owner=NULL,hold_since=NULL,lease_owner=NULL,lease_until=NULL,dep_hashes_json=?,updated_at=? WHERE posting_id=?")
           .run(now, JSON.stringify({ ...stored, inputs: state, invalidated: true }), now, row.posting_id);
         if (row.decision === 'eligible' && row.application_id) db.prepare("UPDATE applications SET fit_note=COALESCE(fit_note,'') || ' rechecking' WHERE id=?").run(row.application_id);

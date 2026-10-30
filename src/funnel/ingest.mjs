@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { canonicalUrl, resolvePosting, postingCandidates, submittedApplicationIndex, submittedDuplicate } from './identity.mjs';
 import { classifyRole } from './classify.mjs';
-import { SUBMITTED_STATUSES } from './contract.mjs';
+import { SIGNAL_DROP_CODES, SUBMITTED_STATUSES } from './contract.mjs';
 import { redact } from '../runtime/redact.mjs';
 import { assertScanOwner } from './scan-lease.mjs';
+import { userDecided, userLoggedPostings } from '../review/ownership.mjs';
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const stable = (value) => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object'
@@ -19,6 +20,15 @@ function quarantine(db, record, reason, now) {
   }
 }
 
+// The first review-worthy record of the same posting from another source, if any.
+function reviewElsewhere(db, postingId, record, options) {
+  for (const row of db.prepare('SELECT fields_json FROM observations WHERE posting_id=? AND source<>?').all(postingId, record.source)) {
+    const other = classifyRole(JSON.parse(row.fields_json), options);
+    if (other.kind === 'review') return other;
+  }
+  return null;
+}
+
 export function ingestBatch(db, { runId, source, partition, records, now, policy = {}, profile, runOwner }) {
   const counts = { observed: 0, newPostings: 0, reused: 0, dropped: {}, review: 0, quarantined: 0 };
   db.exec('BEGIN IMMEDIATE');
@@ -27,6 +37,7 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
     // Read once per batch and keep newly created/merged identities in the map.
     const candidates = postingCandidates(db, { companyAliases: policy.companyAliases });
     const submitted = submittedApplicationIndex(db, { companyAliases: policy.companyAliases });
+    const userLogged = userLoggedPostings(db);
     for (const raw of records) {
       counts.observed += 1;
       const record = { ...raw, source: raw?.source ?? source, partition };
@@ -49,20 +60,34 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
       const observation = db.prepare('SELECT id FROM observations WHERE posting_id=? AND source=? AND content_hash=?').get(id, record.source, contentHash);
       db.prepare(`INSERT OR IGNORE INTO observation_sightings (run_id,posting_id,observation_id,source,partition,seen_at) VALUES (?,?,?,?,?,?)`)
         .run(runId, id, observation.id, record.source, partition, now);
-      const result = classifyRole(record, { policy, profile, identity: {
+      const old = db.prepare('SELECT * FROM reviews WHERE posting_id=?').get(id);
+      let result = classifyRole(record, { policy, profile, identity: {
         submitted: submittedDuplicate(db, record, { companyAliases: policy.companyAliases, index: submitted })
           ?? (application && (SUBMITTED_STATUSES.includes(application.status) || Boolean(application.applied_at))),
         userDeclined: application?.status === 'withdrawn' && application.skip_owner === 'user',
       } });
+      // A signal drop judges one record. It never closes a posting another source calls a
+      // student role, one the user added by hand, or one with a linked application.
+      if (SIGNAL_DROP_CODES.includes(result.code)) {
+        const other = reviewElsewhere(db, id, record, { policy, profile });
+        if (other || posting.application_id || JSON.parse(old?.flags_json ?? '[]').includes('manual')) {
+          result = { ...result, kind: 'review', code: null, lane: other?.lane ?? result.lane };
+        }
+      }
       if (result.kind === 'reuse') counts.reused += 1;
       else if (result.kind === 'drop') counts.dropped[result.code] = (counts.dropped[result.code] ?? 0) + 1;
       else counts.review += 1;
       for (const linked of resolved.links) result.flags.push(`maybe_same:${linked.postingId}`);
-      const old = db.prepare('SELECT * FROM reviews WHERE posting_id=?').get(id);
       const reappeared = Date.parse(now) - Date.parse(posting.last_seen) >= (policy.freshness?.reappearAfterDays ?? 14) * 86_400_000;
-      const protectedApp = application && (application.status === 'prepared' || application.skip_owner === 'user');
-      const renew = old && old.state !== 'leased' && old.hold_owner !== 'user' && !protectedApp
-        && (changed || (!posting.listed && record.listed !== false) || reappeared);
+      // Every sighting reclassifies for free, so a drop reopens as soon as its record classifies
+      // for review (a re-allowed company, a new source's signal). A partial location list cannot
+      // overrule outside_countries: it may just omit the offices that decided it.
+      const reopened = old?.state === 'done' && old.decision === 'dropped' && result.kind === 'review' && record.listed !== false
+        && (old.code !== 'outside_countries' || record.completeness?.locations === 'complete');
+      const stillDelisted = old?.code === 'delisted' && record.listed === false;
+      const renew = old && old.state !== 'leased' && old.hold_owner !== 'user' && !stillDelisted
+        && (changed || (!posting.listed && record.listed !== false) || reappeared || reopened)
+        && !userDecided(db, { ...old, application_id: posting.application_id }, { userLogged });
       // Keep unlisted observations in conservation, without creating work for a
       // posting that has never had a review. A later listing can open it normally.
       const canOpen = record.listed !== false || result.kind !== 'review';

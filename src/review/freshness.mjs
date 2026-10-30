@@ -1,3 +1,4 @@
+import { SIGNAL_DROP_CODES } from '../funnel/contract.mjs';
 import { parseJson } from './deliver.mjs';
 import { reviewOwnershipJoins, userDecisionSql } from './ownership.mjs';
 export function recheckHolds(db, { now, screeningPolicy }) {
@@ -14,7 +15,9 @@ export function scheduleRefresh(db, { now, policy }) {
   let requeued = 0;
   const days = 86400000;
   for (const row of db.prepare(`SELECT r.* FROM reviews r JOIN postings p ON p.id=r.posting_id
-    ${reviewOwnershipJoins} WHERE r.state='done' AND NOT ${userDecisionSql}`).all()) {
+    ${reviewOwnershipJoins} WHERE r.state='done' AND COALESCE(r.decision,'')<>'dropped' AND NOT ${userDecisionSql}`).all()) {
+    // A drop reopens only through ingest, where its record classifies for free.
+    if (row.decision !== 'eligible' && SIGNAL_DROP_CODES.includes(row.lane)) continue;
     const age = (Date.parse(now) - Date.parse(row.updated_at)) / days;
     const deadline = parseJson(row.deadline_json);
     const near = deadline.kind === 'cutoff' && Date.parse(deadline.date) - Date.parse(now) <= 3 * days;

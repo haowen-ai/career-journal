@@ -10,13 +10,15 @@ export const explicitUserDecisionSql = `(COALESCE(a.applied_at,'')<>''
   OR COALESCE(a.skip_owner,'')='user' OR COALESCE(r.code,'')='user_declined' OR u.posting_id IS NOT NULL)`;
 export const userDecisionSql = `(${explicitUserDecisionSql} OR COALESCE(a.skip_owner,'')='legacy')`;
 
-// A user decision fences recovery, replanning and dispatch alike.
-export function userDecided(db, row) {
+// A user decision fences recovery, replanning and dispatch alike. review_log has no posting
+// index, so a caller checking many rows can pass the set of user-logged posting ids instead.
+export const userLoggedPostings = (db) => new Set(db.prepare("SELECT DISTINCT posting_id FROM review_log WHERE kind='user'").all().map((row) => row.posting_id));
+export function userDecided(db, row, { userLogged } = {}) {
   const applicationId = row.application_id ?? db.prepare('SELECT application_id FROM postings WHERE id=?').get(row.posting_id)?.application_id;
   const app = applicationId && db.prepare('SELECT * FROM applications WHERE id=?').get(applicationId);
   return Boolean(app && (app.applied_at || SUBMITTED_STATUSES.includes(app.status) || app.status === 'prepared'
     || ['user', 'legacy'].includes(app.skip_owner)) || row.code === 'user_declined'
-    || db.prepare("SELECT 1 FROM review_log WHERE posting_id=? AND kind='user'").get(row.posting_id));
+    || (userLogged ? userLogged.has(row.posting_id) : db.prepare("SELECT 1 FROM review_log WHERE posting_id=? AND kind='user'").get(row.posting_id)));
 }
 
 const startsWithAny = (note, prefixes) => prefixes.some((prefix) => String(note ?? '').startsWith(prefix));

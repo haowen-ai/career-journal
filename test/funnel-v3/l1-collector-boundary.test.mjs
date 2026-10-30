@@ -58,7 +58,6 @@ for (const [name, overrides] of [
   ['Simplify foreign-only list (partial completeness)', { source: 'simplify', locations: ['London, United Kingdom'], completeness: { locations: 'partial', arrangement: 'unknown', description: 'tags', employment_type: 'absent' } }],
   ['Greenhouse primary London plus office Seattle', { locations: ['London, United Kingdom', 'Seattle, WA'] }],
   ['Lever Full-time commitment with summer intern in the description', { employmentType: 'Full-time', title: 'Analyst', description: LONG('Our summer intern program runs June to August 2027.'), completeness: { locations: 'complete', arrangement: 'known', description: 'full', employment_type: 'explicit' } }],
-  ['Full-time category with an incomplete description', { employmentType: 'Full-time', title: 'Data Analyst', description: 'Degrees: Master\'s', completeness: { locations: 'partial', arrangement: 'unknown', description: 'tags', employment_type: 'explicit' } }],
   ['Workday timeType Full time intern', { title: 'Data Science Intern', employmentType: null, categories: ['Full time'] }],
   ['PhD tag', { degrees: ['PhD'] }],
   ['term tag conflict', { terms: ['Summer 2026'] }],
@@ -69,7 +68,6 @@ for (const [name, overrides] of [
   ['fellowship / residency / placement titles', { title: 'AI Residency Program' }],
   ['first-seen inactive record', { listed: false }],
   ['state-only remote location', { locations: ['USA - IL - Remote'] }],
-  ['explicit Full-time with a complete description and no student signal', { title: 'Senior Data Engineer', employmentType: 'Full-time', description: LONG('Build pipelines for our analytics platform with Spark.'), completeness: { locations: 'complete', arrangement: 'known', description: 'full', employment_type: 'explicit' } }],
 ]) {
   test(`[L1] stays review, never dropped: ${name}`, async () => {
     const { classifyRole } = await classify();
@@ -78,11 +76,23 @@ for (const [name, overrides] of [
   });
 }
 
-test('[L1] a complete JD with no student signal and no employment category goes to the no_student_signal lane (U1 default never drops)', async () => {
+// User decision 2026-10-30: 691 judged no-signal roles gave 0 eligible, so a student search drops them at scan.
+for (const [name, overrides] of [
+  ['Full-time category with an incomplete description', { employmentType: 'Full-time', title: 'Data Analyst', description: 'Degrees: Master\'s', completeness: { locations: 'partial', arrangement: 'unknown', description: 'tags', employment_type: 'explicit' } }],
+  ['explicit Full-time with a complete description and no student signal', { title: 'Senior Data Engineer', employmentType: 'Full-time', description: LONG('Build pipelines for our analytics platform with Spark.'), completeness: { locations: 'complete', arrangement: 'known', description: 'full', employment_type: 'explicit' } }],
+]) {
+  test(`[L1] dropped as no_student_signal: ${name}`, async () => {
+    const { classifyRole } = await classify();
+    const result = classifyRole(record(overrides), { policy: SCREENING_POLICY, profile: PROFILE });
+    assert.deepEqual([result.kind, result.code, result.lane], ['drop', 'no_student_signal', 'no_student_signal'], JSON.stringify(result));
+  });
+}
+
+test('[L1] a complete JD with no student signal and no employment category is dropped under a student search only', async () => {
   const { classifyRole } = await classify();
   const plain = record({ title: 'Data Analyst', description: LONG('Analyse revenue data for our finance team.') });
   const result = classifyRole(plain, { policy: SCREENING_POLICY, profile: PROFILE });
-  assert.equal(result.kind, 'review');
+  assert.deepEqual([result.kind, result.code], ['drop', 'no_student_signal']);
   assert.ok(result.flags.includes('no_student_signal'));
   assert.equal(result.lane, 'no_student_signal');
   const fullTime = classifyRole(plain, { policy: SCREENING_POLICY, profile: { search: { jobType: 'full-time', countries: ['US'] } } });

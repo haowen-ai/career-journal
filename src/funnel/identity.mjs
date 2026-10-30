@@ -246,7 +246,10 @@ export function reconcileAliases(db, postingId, aliases, { now, fence, classific
     if (code) markReview(db, target.id, { now, state: 'done', decision: 'reused', code });
     else if (fromReview) {
       const targetReview = db.prepare('SELECT * FROM reviews WHERE posting_id=?').get(target.id);
-      if (!targetReview || targetReview.updated_at <= fromReview.updated_at) {
+      if (fromReview.decision === 'dropped') {
+        // A drop carries nothing to review: it never overwrites the target or reopens it.
+        if (!targetReview) markReview(db, target.id, { now, state: 'done', decision: 'dropped', code: fromReview.code });
+      } else if (!targetReview || targetReview.updated_at <= fromReview.updated_at) {
         markReview(db, target.id, { now, state: 'due' });
         db.prepare('UPDATE reviews SET stage=?,lane=?,flags_json=?,evidence_json=?,dep_hashes_json=? WHERE posting_id=?')
           .run(fromReview.stage, fromReview.lane, fromReview.flags_json, fromReview.evidence_json, fromReview.dep_hashes_json, target.id);

@@ -25,11 +25,11 @@ const SENIOR_TITLES = ['Senior System Security Software Engineer', 'Network Engi
 
 // ===================================================================== V1
 
-test('[A] a senior title whose full description mentions students only in boilerplate goes to the no_student_signal lane (volume V1)', async () => {
+test('[A] a senior title whose full description mentions students only in boilerplate is dropped as no_student_signal (volume V1, user decision 2026-10-30)', async () => {
   const { classifyRole } = await classify();
   for (const title of SENIOR_TITLES) {
     const result = laneOf(classifyRole, { title, description: LONG(BOILERPLATE) });
-    assert.equal(result.kind, 'review', `${title}: never dropped`);
+    assert.deepEqual([result.kind, result.code], ['drop', 'no_student_signal'], title);
     assert.equal(result.lane, 'no_student_signal', `${title}: generic "students"/"graduates" in the description is not a student signal`);
     assert.ok(result.flags.includes('no_student_signal'), title);
   }
@@ -64,7 +64,7 @@ test('[A] generic student words in the description are not a student signal; eac
   }
 });
 
-test('[A] a record with no student signal goes to no_student_signal whatever its description completeness; student titles stay new (volume V1)', async () => {
+test('[A] a record with no student signal is dropped whatever its description completeness; student titles stay new (volume V1, user decision 2026-10-30)', async () => {
   const { classifyRole } = await classify();
   const cases = [
     ['absent description (raw CareerOps)', { source: 'careerops', description: '', completeness: { locations: 'partial', arrangement: 'unknown', description: 'none', employment_type: 'absent' } }],
@@ -76,7 +76,7 @@ test('[A] a record with no student signal goes to no_student_signal whatever its
   for (const title of SENIOR_TITLES) {
     for (const [name, overrides] of cases) {
       const result = laneOf(classifyRole, { title, ...overrides });
-      assert.equal(result.kind, 'review', `${title} / ${name}: never dropped`);
+      assert.deepEqual([result.kind, result.code], ['drop', 'no_student_signal'], `${title} / ${name}`);
       assert.equal(result.lane, 'no_student_signal', `${title} / ${name}`);
       assert.ok(result.flags.includes('no_student_signal'), `${title} / ${name}`);
     }
@@ -124,7 +124,7 @@ test('[A] explicit program phrases in the description are a student signal (volu
   }
 });
 
-test('[A] a raw CareerOps company-board batch puts senior roles in no_student_signal and student titles in new (volume V1)', async () => {
+test('[A] a raw CareerOps company-board batch drops senior roles as no_student_signal and keeps student titles in new (volume V1, user decision 2026-10-30)', async () => {
   const { ingestBatch } = await ingest();
   const db = freshDb();
   const titles = [...SENIOR_TITLES, 'Software Engineering Intern', 'Data Science Co-op'];
@@ -132,11 +132,14 @@ test('[A] a raw CareerOps company-board batch puts senior roles in no_student_si
     id: `https://boards.greenhouse.io/syntheticco/jobs/${7100 + index}`, company: 'Synthetic Co', title,
     url: `https://boards.greenhouse.io/syntheticco/jobs/${7100 + index}`, locations: ['Chicago, IL'], description: '' })) });
   const counts = ingestBatch(db, { runId: 'scan-v1', source: 'careerops', partition: 'all', records, now: T0, policy: SCREENING_POLICY, profile: PROFILE });
-  assert.equal(counts.review, titles.length, 'every record is reviewed, none dropped');
-  const lanes = Object.fromEntries(db.prepare('SELECT p.title, r.lane FROM reviews r JOIN postings p ON p.id = r.posting_id').all().map((row) => [row.title, row.lane]));
-  for (const title of SENIOR_TITLES) assert.equal(lanes[title], 'no_student_signal', title);
-  assert.equal(lanes['Software Engineering Intern'], 'new');
-  assert.equal(lanes['Data Science Co-op'], 'new');
+  assert.equal(counts.review, 2, 'only the student titles are reviewed');
+  assert.equal(counts.dropped.no_student_signal, SENIOR_TITLES.length);
+  const reviews = Object.fromEntries(db.prepare('SELECT p.title, r.* FROM reviews r JOIN postings p ON p.id = r.posting_id').all().map((row) => [row.title, row]));
+  for (const title of SENIOR_TITLES) {
+    assert.deepEqual([reviews[title].state, reviews[title].decision, reviews[title].code, reviews[title].lane, reviews[title].next_due], ['done', 'dropped', 'no_student_signal', 'no_student_signal', null], title);
+  }
+  assert.deepEqual([reviews['Software Engineering Intern'].state, reviews['Software Engineering Intern'].lane], ['due', 'new']);
+  assert.deepEqual([reviews['Data Science Co-op'].state, reviews['Data Science Co-op'].lane], ['due', 'new']);
 });
 
 // ===================================================================== V2
@@ -438,7 +441,7 @@ const OUT_OF_DIRECTION_TITLES = ['Hardware Engineer Intern', 'Hardware Test Engi
   'Software Engineer Intern', 'Firmware Validation Intern', 'Hardware Maintenance Technician Intern', 'Hardware Reliability Engineering Intern',
   'Mobility Systems Hardware Intern', 'Electrical Engineering Co-op - Power Electronics'];
 
-test('[A] an internship or co-op Simplify record categorised only Hardware with no positive title token goes to lane out_of_direction; positive titles stay new (volume U2)', async () => {
+test('[A] an internship or co-op Simplify record categorised only Hardware with no positive title token is dropped as out_of_direction; positive titles stay new (volume U2, user decision 2026-10-30)', async () => {
   const { classifyRole } = await classify();
   const simplify = (title, category, active = true) => parseSimplify([simplifyListing('hw-1', { title, category, active })])[0];
   const laneFor = (title, category, profile = PROFILE) => classifyRole(simplify(title, category), { policy: SCREENING_POLICY, profile });
@@ -446,7 +449,7 @@ test('[A] an internship or co-op Simplify record categorised only Hardware with 
     for (const category of ['Hardware', 'Hardware Engineering']) {
       for (const title of OUT_OF_DIRECTION_TITLES) {
         const result = laneFor(title, category, profile);
-        assert.equal(result.kind, 'review', `${title} [${category}]: never dropped`);
+        assert.deepEqual([result.kind, result.code], ['drop', 'out_of_direction'], `${title} [${category}]`);
         assert.equal(result.lane, 'out_of_direction', `${profile.search.jobType} / ${title} [${category}]: Hardware-only category, no positive direction token`);
       }
       for (const title of POSITIVE_HARDWARE_TITLES) {
@@ -463,7 +466,7 @@ test('[A] an internship or co-op Simplify record categorised only Hardware with 
   assert.equal(greenhouse.lane, 'new', 'the rule reads the Simplify category, not other sources\' departments');
   assert.notEqual(laneFor('Hardware Engineer Intern', 'Hardware', FULL_TIME).lane, 'out_of_direction', 'full-time searches have no out_of_direction lane');
 
-  // Ingest keeps every record and stores the lane on a due review that the worker samples.
+  // Ingest keeps every record: the dropped one stays for identity and dedupe.
   const { ingestBatch } = await ingest();
   const db = freshDb();
   const listings = [
@@ -473,9 +476,10 @@ test('[A] an internship or co-op Simplify record categorised only Hardware with 
   ];
   const counts = census(ingestBatch, db, { runId: 'scan-u2', listings });
   assert.equal(counts.observed, 3);
-  assert.equal(counts.review, 3, 'out_of_direction records are reviewed, never dropped');
+  assert.equal(counts.review, 2);
+  assert.equal(counts.dropped.out_of_direction, 1);
   const lane = (id) => reviewOf(db, postingFor(db, `source:simplify:${id}`));
-  assert.deepEqual([lane('hw-out')?.state, lane('hw-out')?.lane], ['due', 'out_of_direction']);
+  assert.deepEqual([lane('hw-out')?.state, lane('hw-out')?.decision, lane('hw-out')?.code, lane('hw-out')?.lane], ['done', 'dropped', 'out_of_direction', 'out_of_direction']);
   assert.deepEqual([lane('hw-in')?.state, lane('hw-in')?.lane], ['due', 'new']);
   assert.deepEqual([lane('sw-in')?.state, lane('sw-in')?.lane], ['due', 'new']);
 });

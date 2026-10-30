@@ -32,7 +32,7 @@ export async function redecideReviews(db, { inputs, judges, held, done = false, 
   const states = [...(held ? ['held'] : []), ...(done ? ['done'] : [])];
   const report = { redecided: 0, changed: 0, kept: 0, by_decision: {} };
   const candidates = db.prepare(`SELECT r.posting_id FROM reviews r JOIN postings p ON p.id=r.posting_id
-    ${reviewOwnershipJoins} WHERE p.merged_into IS NULL AND NOT ${userDecisionSql}
+    ${reviewOwnershipJoins} WHERE p.merged_into IS NULL AND COALESCE(r.decision,'')<>'dropped' AND NOT ${userDecisionSql}
     AND r.state IN (${states.map(() => '?').join(',')}) ORDER BY r.first_seen,r.posting_id`).all(...states);
   for (const { posting_id: id } of candidates) {
     if (only && !only.has(id)) continue;

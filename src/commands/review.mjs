@@ -20,8 +20,11 @@ import { annotateMail, unhide, deliver, deliveryPolicy, logReview, parseJson } f
 import { claimItem, atomic } from '../review/lease.mjs';
 import { redecideReviews } from '../review/redecide.mjs';
 import { releaseHolds } from '../review/release-holds.mjs';
+import { reclassifyReviews } from '../review/reclassify.mjs';
+import { loadScanProfile } from '../scan/profile-input.mjs';
+import { profileOption, scanPolicy } from './scan.mjs';
 
-const usage = 'Usage: career-journal review run|redecide|release-holds|bootstrap|list|report|receipt|attach|add|annotate|unhide|resolve|ledger|audit|daily-finalize|eval';
+const usage = 'Usage: career-journal review run|redecide|reclassify|release-holds|bootstrap|list|report|receipt|attach|add|annotate|unhide|resolve|ledger|audit|daily-finalize|eval';
 const required = (value, name) => { if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required`); return value; };
 function numberOption(value, name, { zero = false, integer = true } = {}) {
   const result = Number(value);
@@ -81,6 +84,14 @@ export async function reviewCommand(parsed, io, runtime = {}) {
         await Promise.all(Object.values(judges).map((adapter) => adapter.ready));
         if (isBusy(context.db, now)) throw new Error('A review run is active');
         emit(await redecideReviews(context.db, { inputs, judges, held: true, done: options.done === true, now, postingIds }));
+        return 0;
+      }
+      case 'reclassify': {
+        const dryRun = options['dry-run'] === true;
+        const batch = numberOption(options.batch ?? 500, '--batch');
+        if (!dryRun && isBusy(context.db, now)) throw new Error('A review run is active');
+        const profile = await loadScanProfile(context.root, { path: profileOption(parsed) });
+        emit(reclassifyReviews(context.db, { policy: await scanPolicy(context), profile, now, dryRun, batch }));
         return 0;
       }
       case 'bootstrap': { const inputs = await loadReviewInputs(context.root); emit(bootstrapExisting(context.db, { provenance: inputs.provenance, policy: inputs.screeningPolicy, now })); return 0; }

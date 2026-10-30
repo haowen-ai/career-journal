@@ -3,7 +3,8 @@
 > **Superseded where the plan differs.** The screening release is built from
 > `docs/superpowers/plans/2026-10-26-screening-funnel.md`. Its "Changes against SPEC" and "Frozen interface contract"
 > sections win over this document (for example: no `full_time_only`/`non_us_only` drops, `outside_countries` and
-> `posting_excluded` instead, no R2 `out_of_area`, sightings keyed by partition, run kinds `scan|review|daily|prune`).
+> `posting_excluded` instead, `no_student_signal`/`out_of_direction`/`delisted` are drops since 2026-10-30 (`review reclassify`
+> settles rows queued before that; a drop reopens only when a sighting classifies for review or the posting is relisted), no R2 `out_of_area`, sightings keyed by partition, run kinds `scan|review|daily|prune`).
 > The former lane sheets `LANE-L1.md`/`LANE-L2.md` were deleted; their contracts live in the plan's frozen section.
 > This file remains the reference for mechanics the plan cites as `SPEC §n`.
 
