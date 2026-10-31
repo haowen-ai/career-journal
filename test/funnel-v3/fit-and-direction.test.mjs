@@ -459,6 +459,15 @@ test('[B] redecide keeps a delivered forced decision and corrects its inflated f
   const fixed = applicationOf(db, 'p-forced-old');
   assert.equal(fixed.fit, 'low');
   assert.ok(fixed.fit_note.includes('Primary low strength') && fixed.fit_note.includes(assumption), fixed.fit_note);
+
+  // The forced answer was given to another question (decision code changed what is asked): it is not reused.
+  const evidence = evidenceOf(db, 'p-forced-old');
+  db.prepare('UPDATE reviews SET evidence_json = ? WHERE posting_id = ?')
+    .run(JSON.stringify({ ...evidence, modelDecision: { ...evidence.modelDecision, question: 'Does the candidate operate Kubernetes clusters?' } }), 'p-forced-old');
+  const unchanged = JSON.stringify(reviewOf(db, 'p-forced-old'));
+  const again = await redecideReviews(db, { inputs: reviewInputs({ policy: REVIEW_POLICY }), judges, done: true, now: at(2) });
+  assert.equal(again.redecided, 0, JSON.stringify(again));
+  assert.equal(JSON.stringify(reviewOf(db, 'p-forced-old')), unchanged, 'left as it is');
 });
 
 test('[B] the startup pass re-judges an invalidated software settlement instead of restoring it, and withdraws a lead a freshness refresh re-queued (FD2)', async () => {
@@ -477,6 +486,17 @@ test('[B] the startup pass re-judges an invalidated software settlement instead 
   const stale = reviewOf(db, 'p-stale');
   assert.deepEqual([stale.state, stale.stage, stale.decision], ['due', 'judge', 'not_eligible'], 'queued for judgment, not restored as eligible');
   assert.equal(applicationOf(db, 'p-stale'), undefined, 'no lead appears');
+
+  // A scan drop later replaces a software settlement but keeps its old evidence marker: the drop wins.
+  insertPosting(db, { id: 'p-dropped', url: urlOf('p-dropped'), company: COMPANY, title: 'Software Engineer Intern' });
+  insertReview(db, { postingId: 'p-dropped', stage: 'deliver' });
+  deliver(db, { postingId: 'p-dropped', verdict: { ...ELIGIBLE, functionValue: 'engineering' }, fence: claimItem(db, 'p-dropped', { owner: 'worker-a', now: T0 }), now: T0,
+    policy: { ...SCREENING_POLICY, direction: rules } });
+  db.prepare("UPDATE reviews SET decision = 'dropped' WHERE posting_id = 'p-dropped'").run();
+  const dropped = JSON.stringify(reviewOf(db, 'p-dropped'));
+  applyRoleDirection(db, { now: at(1), policy: { ...SCREENING_POLICY, direction: null } });
+  assert.equal(JSON.stringify(reviewOf(db, 'p-dropped')), dropped, 'the dropped review is untouched');
+  assert.equal(applicationOf(db, 'p-dropped'), undefined, 'no lead appears');
 
   const lead = deliveredLead(db, 'p-refresh', { title: 'Software Engineer Intern', functionLabel: 'engineering' });
   db.prepare("UPDATE reviews SET state = 'due', stage = 'fetch', next_due = ? WHERE posting_id = 'p-refresh'").run(T0);
