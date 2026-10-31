@@ -157,7 +157,7 @@ test('[FD] softwareEngineeringFunction: SWE labels match after normalisation; AI
     'engineering/software', 'html_developer'];
   const no = ['ai_ml', 'AI/ML engineering', 'ai_ml_engineer', 'ML engineering', 'machine learning engineering', 'data_science', 'data_engineering',
     'analytics_bi', 'analytics engineering', 'quant', 'quant_developer', 'research_engineering', 'research', 'applied science', 'product_general', 'sales', 'hardware',
-    'genai_engineering', 'mlops_engineering', '', '   ', null, undefined, 42];
+    'genai_engineering', 'mlops_engineering', 'llm_engineering', 'LLM engineering', 'llms_developer', '', '   ', null, undefined, 42];
   const wrong = [...yes.filter((value) => softwareEngineeringFunction(value) !== true).map((value) => `${JSON.stringify(value)}: expected software engineering`),
     ...no.filter((value) => softwareEngineeringFunction(value) !== false).map((value) => `${JSON.stringify(value)}: expected not software engineering`)];
   assert.deepEqual(wrong, []);
@@ -352,4 +352,76 @@ test('[B] under neutral "deny" the startup pass withdraws visible neutral-title 
   await run(directionRules({ ...NEUTRAL_RAW, neutral: 'allow' }), at(1));
   assert.deepEqual(queued(db).sort(), [data, evaluation, pricing].sort(), 'under allow the withdrawn neutral leads come back');
   assert.equal(userRows(), users);
+});
+
+// ===================================================================== review round 1 (Codex)
+
+test('[B] the startup pass withdraws visible leads labelled pure software engineering, flags them in the queue, leaves exploration settlements alone, and restores them when the rules go (FD2)', async () => {
+  const { directionRules } = await directionModule();
+  const { listQueue } = await import('../../src/commands/queue.mjs');
+  const rules = directionRules({ allow: ['\\bdata\\b'] });
+  const db = freshDb();
+  const swe = deliveredLead(db, 'p-swe-lead', { title: 'Software Engineer Intern', functionLabel: 'engineering' });
+  const tools = deliveredLead(db, 'p-tools-lead', { title: 'Media Tools Intern', functionLabel: 'software_engineering' });
+  const ml = deliveredLead(db, 'p-ml-lead', { title: 'Software Engineer Intern', functionLabel: 'llm_engineering' });
+  const unlabelled = deliveredLead(db, 'p-unlabelled-lead', { title: 'Software Engineer Intern' });
+  const prepared = deliveredLead(db, 'p-swe-prepared', { title: 'Software Engineer Intern', functionLabel: 'engineering' });
+  db.prepare("UPDATE applications SET status = 'prepared' WHERE id = ?").run(prepared);
+  // An exploration-lane settlement shares the code but carries no software marker.
+  insertPosting(db, { id: 'p-explore', url: urlOf('p-explore'), company: COMPANY, title: 'Hardware Lab Intern' });
+  insertReview(db, { postingId: 'p-explore', stage: 'deliver', state: 'done', decision: 'not_eligible', lane: 'out_of_direction', nextDue: null });
+  db.prepare("UPDATE reviews SET code = 'out_of_direction', evidence_json = ? WHERE posting_id = 'p-explore'").run(JSON.stringify({ function: 'engineering' }));
+  const explore = JSON.stringify(reviewOf(db, 'p-explore'));
+  const preparedRow = JSON.stringify(db.prepare('SELECT * FROM applications WHERE id = ?').get(prepared));
+
+  const flagged = listQueue(db, null, { direction: rules });
+  assert.deepEqual(flagged.filter((row) => row.directionOk === false).map((row) => row.id).sort(), [swe, tools].sort(), 'the queue flags the software-labelled leads');
+
+  const { runReview } = await workerModule();
+  const run = (direction, now) => offline(() => runReview({ db, runId: `review-software-${seq += 1}`, owner: 'worker-a', now, budget: 0, deadlineMs: 600_000,
+    attemptDir: null, sleep: async () => {}, fetcher: fakeFetcher({}), judges: { primary: fakeJudge({ tier: 'primary' }), escalation: fakeJudge({ tier: 'escalation' }) },
+    inputs: () => reviewInputs({ policy: REVIEW_POLICY, direction }), hooks: {} }));
+  await run(rules, T0);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM attempts').get().n, 0, 'no paid attempt');
+  const wrong = [];
+  for (const [id, appId] of [['p-swe-lead', swe], ['p-tools-lead', tools]]) {
+    const row = reviewOf(db, id);
+    if (row.decision !== 'not_eligible' || row.code !== 'out_of_direction' || row.state !== 'done') wrong.push(`${id}: ${row.state} ${row.decision}/${row.code}`);
+    if (evidenceOf(db, id).roleDirection?.software !== true || evidenceOf(db, id).provenance !== 'automated') wrong.push(`${id}: evidence ${JSON.stringify(evidenceOf(db, id).roleDirection)}`);
+    if (db.prepare('SELECT status FROM applications WHERE id = ?').get(appId).status !== 'withdrawn') wrong.push(`${id}: not withdrawn`);
+  }
+  assert.deepEqual(wrong, [], wrong.join('\n'));
+  assert.deepEqual(listQueue(db, null).map((row) => row.id).sort(), [ml, unlabelled].sort(), 'the LLM-labelled and the unlabelled leads stay');
+  assert.equal(JSON.stringify(reviewOf(db, 'p-explore')), explore, 'the exploration settlement is untouched');
+  assert.equal(JSON.stringify(db.prepare('SELECT * FROM applications WHERE id = ?').get(prepared)), preparedRow, 'the prepared lead is untouched');
+
+  // A second run with the same rules changes nothing; without a rules file the software leads come back.
+  const settled = JSON.stringify(db.prepare('SELECT posting_id, state, decision, code FROM reviews ORDER BY posting_id').all());
+  await run(rules, at(1));
+  assert.equal(JSON.stringify(db.prepare('SELECT posting_id, state, decision, code FROM reviews ORDER BY posting_id').all()), settled);
+  await run(null, at(2));
+  assert.deepEqual(listQueue(db, null).map((row) => row.id).sort(), [ml, swe, tools, unlabelled].sort(), 'restored without the rules');
+  assert.equal(JSON.stringify(reviewOf(db, 'p-explore')), explore);
+});
+
+test('[B] redecide replays an escalation reached by a second-opinion disagreement, so the replayed fit stays the lower one (FD1)', async () => {
+  const { redecideReviews } = await load('B', './src/review/redecide.mjs', ['redecideReviews']);
+  const policy = { ...REVIEW_POLICY, judge: { secondOpinion: { runner: 'jev', model: 'jev-test', threshold: 0.1, eligibleThreshold: 0.7 } } };
+  const db = freshDb();
+  const { pages, answers } = setup(db, { 'p-jev': { primary: sure(fitOf('high', 'Primary high strength')), escalation: sure(fitOf('low', 'Escalation low strength')) } });
+  const judges = {
+    primary: fakeJudge({ tier: 'primary', answers: (request) => answers.primary[request.postingId] }),
+    escalation: fakeJudge({ tier: 'escalation', answers: (request) => answers.escalation[request.postingId] }),
+  };
+  const secondOpinion = { id: 'fake-jev', runner: 'jev', model: 'jev-test', async ask() { return { probability: 0.3, usage: {} }; } };
+  const { runReview } = await workerModule();
+  await offline(() => runReview({ db, runId: `review-fit-jev-${seq += 1}`, owner: 'worker-a', now: T0, budget: 20, deadlineMs: 600_000, attemptDir: null,
+    sleep: async () => {}, fetcher: fakeFetcher(pages), judges, secondOpinion, inputs: () => reviewInputs({ policy }), hooks: {} }));
+  assert.deepEqual(judges.escalation.calls.map((call) => call.request.postingId), ['p-jev'], 'fixture: the disagreement escalates');
+  assert.equal(applicationOf(db, 'p-jev').fit, 'low');
+
+  const report = await redecideReviews(db, { inputs: reviewInputs({ policy }), judges, done: true, now: at(1) });
+  assert.equal(report.redecided, 1, JSON.stringify(report));
+  assert.equal(applicationOf(db, 'p-jev').fit, 'low', 'the replay keeps the escalation and the lower fit');
+  assert.ok(applicationOf(db, 'p-jev').fit_note.includes('Escalation low strength'));
 });

@@ -9,7 +9,7 @@ import { companyKey } from '../scan/dedupe.mjs';
 import { rankLocation } from '../scan/filter.mjs';
 import { scoreFit } from '../scan/fit.mjs';
 import { loadScanProfile } from '../scan/profile-input.mjs';
-import { DIRECTION_CODE, directionNote, loadDirectionRules, roleDirection } from '../review/direction.mjs';
+import { DIRECTION_CODE, OUT_OF_DIRECTION_CODE, directionNote, loadDirectionRules, roleDirection, softwareNote, softwareOnlyRole } from '../review/direction.mjs';
 import { configuredDecisionAdapters } from './email.mjs';
 import { profileOption } from './scan.mjs';
 
@@ -97,7 +97,10 @@ export function listQueue(db, profile = null, { direction = null } = {}) {
       const result = roleDirection(row.role, direction);
       // A blocked title, or a neutral one under neutral 'deny': no function label rescues either.
       const out = !result.ok && ['block', 'neutral'].includes(result.reason);
-      return { ...item, directionOk: !out, directionReason: out ? `${DIRECTION_CODE}: ${directionNote(result)}` : null };
+      // A lead the judge labelled pure software engineering (the stored function label).
+      const software = !out && result.ok && softwareOnlyRole(row.role, evidence.function, direction);
+      return { ...item, directionOk: !out && !software,
+        directionReason: out ? `${DIRECTION_CODE}: ${directionNote(result)}` : software ? `${OUT_OF_DIRECTION_CODE}: ${softwareNote(evidence.function)}` : null };
     })
     .sort((left, right) => (left.directionOk === false) - (right.directionOk === false) || compareInTimezone(left, right, profile?.timezone));
 }

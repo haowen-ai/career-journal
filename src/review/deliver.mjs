@@ -192,8 +192,11 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     // User rule (2026-10-31): a role the judge labelled pure software engineering is out of direction unless its
     // title carries an AI/ML/data signal. A missing or blank label changes nothing.
     if (value.decision === 'eligible' && softwareOnlyRole(posting.title, value.functionValue, policy.direction)) {
-      value = { ...value, decision: 'not_eligible', code: OUT_OF_DIRECTION_CODE, direction: softwareNote(value.functionValue), question: null, holdFactIds: [], nextAction: null };
+      value = { ...value, decision: 'not_eligible', code: OUT_OF_DIRECTION_CODE, direction: softwareNote(value.functionValue), softwareDirection: true,
+        question: null, holdFactIds: [], nextAction: null };
     }
+    // Both direction settlements are automated and keep the verdict's fields, so the startup pass can restore them.
+    const directionOwned = value.code === DIRECTION_CODE || value.code === OUT_OF_DIRECTION_CODE && value.softwareDirection === true;
     // This guard also wins over eligible verdicts, quotas and exploration lanes.
     // It never merges postings or writes to the submitted application.
     if (duplicate) value = { decision: 'not_eligible', code: 'already_submitted', evidence: [duplicate] };
@@ -201,7 +204,7 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     // The cap keeps the eligible verdict's fields so the startup pass can restore it without a model call.
     if (capped) value = { ...value, decision: 'not_eligible', code: 'company_cap', judged: value.decision === 'eligible' };
     const userExcluded = !duplicate && value.code === 'company_excluded' && Boolean(value.excluded);
-    const capOwned = duplicate || value.code === 'company_cap' || value.code === DIRECTION_CODE || userExcluded;
+    const capOwned = duplicate || value.code === 'company_cap' || directionOwned || userExcluded;
     let action;
     let held = value.decision === 'unclear';
     if (protectedApp) { action = 'superseded_by_user'; held = false; }
@@ -254,8 +257,9 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
       if (oldEvidence.companyCap.provenance) evidence.provenance = oldEvidence.companyCap.provenance; else delete evidence.provenance;
       delete evidence.companyCap;
     }
-    if (value.code === DIRECTION_CODE) {
-      evidence.roleDirection = { note: value.direction ?? null, provenance: oldEvidence.roleDirection?.provenance ?? oldEvidence.provenance ?? null };
+    if (directionOwned && !duplicate) {
+      evidence.roleDirection = { note: value.direction ?? null, provenance: oldEvidence.roleDirection?.provenance ?? oldEvidence.provenance ?? null,
+        ...(value.softwareDirection === true ? { software: true } : {}) };
       evidence.provenance = 'automated';
     } else if (oldEvidence.roleDirection) {
       if (value.code !== 'company_cap') {
@@ -269,7 +273,7 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
         provenance: oldEvidence.companyExcluded ? oldEvidence.companyExcluded.provenance ?? null : evidence.provenance ?? null };
       evidence.provenance = 'automated';
     } else if (oldEvidence.companyExcluded) {
-      if (!['company_cap', DIRECTION_CODE].includes(value.code) && !duplicate) {
+      if (value.code !== 'company_cap' && !directionOwned && !duplicate) {
         if (oldEvidence.companyExcluded.provenance) evidence.provenance = oldEvidence.companyExcluded.provenance; else delete evidence.provenance;
       }
       delete evidence.companyExcluded;

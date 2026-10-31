@@ -3,7 +3,7 @@ import { buildJudgeRequest } from './prompt.mjs';
 import { inputState } from './worker.mjs';
 import { cachedJudgment, judgmentEnvelope } from './judgment-cache.mjs';
 import { decide } from './decide.mjs';
-import { applyCompanyCap, deliver, deliveryPolicy, heldReleaseBlock, parseJson, suppressSubmittedDuplicates } from './deliver.mjs';
+import { applyCompanyCap, deliver, deliveryPolicy, heldReleaseBlock, MODEL_HOLD_CODES, parseJson, suppressSubmittedDuplicates } from './deliver.mjs';
 import { atomic, claimItem } from './lease.mjs';
 import { reviewOwnershipJoins, userDecisionSql, userDecided } from './ownership.mjs';
 import { jevDecision, jevVerdict, usesJevSplit } from './jev-split.mjs';
@@ -51,6 +51,9 @@ export async function redecideReviews(db, { inputs, judges, held, done = false, 
       let verdict;
       let functionLabel;
       let primaryFit;
+      // The applied decision used the escalation tier: also when the primary verdict was final by itself but a
+      // second opinion disagreed. Replaying only the primary would drop the escalation's decision and fit.
+      const escalated = Boolean(stored.decisionRuntime?.escalation);
       if (parseJson(row.flags_json, []).includes('jev_decided') && stage.jev && usesJevSplit(inputs.policy)) {
         const thresholds = inputs.policy.judge.primary.thresholds;
         const decided = jevDecision(stage.jev, thresholds);
@@ -69,9 +72,12 @@ export async function redecideReviews(db, { inputs, judges, held, done = false, 
         verdict = exemptVerdict({ ...args, verdict: decide(args), company: posting.company, overrides: inputs.overrides, aliases });
         // As in the worker: an escalated posting is delivered with the lower of the two fits (fit.mjs).
         if (tier === 'escalation' && primaryFit !== undefined) verdict = { ...verdict, fit: lowerFit(primaryFit, verdict.fit) };
-        if (!verdict.escalate) break;
-        primaryFit = verdict.fit ?? null;
+        if (!verdict.escalate && !(tier === 'primary' && escalated)) break;
+        if (tier === 'primary') primaryFit = verdict.fit ?? null;
       }
+      // A delivered forced model decision cannot be replayed from the ordinary escalation judgment: keep it as it is.
+      if (verdict?.decision === 'unclear' && MODEL_HOLD_CODES.includes(verdict.code) && row.decision !== 'unclear'
+        && parseJson(row.flags_json, []).includes('model_decided')) return;
       if (!verdict || verdict.escalate) return;
       // A replayed judgment never answers a question hold; leave it held untouched.
       if (heldReleaseBlock(row, verdict)) { report.kept += 1; return; }

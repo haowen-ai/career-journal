@@ -83,7 +83,7 @@ export const directionNote = (result) => (result.reason === 'neutral' ? 'title h
 // (with genai/openai/aiops, llm/mlops, aiml) so that html or email do not count as AI/ML signals.
 export const OUT_OF_DIRECTION_CODE = 'out_of_direction';
 const SWE_FUNCTION = /software|engineer|(?:^|_)swe(?:_|$)|full_?stack|front_?end|back_?end|develop(?:er|ment)|(?:^|_)qa(?:_|$)/;
-const DIRECTION_FUNCTION = /(?:^|_)(?:gen|open)?ai(?:ops)?(?:_|$)|(?:^|_)(?:ll)?ml(?:ops)?(?:_|$)|(?:^|_)aiml(?:_|$)|machine_learning|deep_learning|data|analytic|research|quant|scien|statistic|intelligen|(?:^|_)nlp(?:_|$)|computer_vision/;
+const DIRECTION_FUNCTION = /(?:^|_)(?:gen|open)?ai(?:ops)?(?:_|$)|(?:^|_)(?:llms?|ml(?:ops)?)(?:_|$)|(?:^|_)aiml(?:_|$)|machine_learning|deep_learning|data|analytic|research|quant|scien|statistic|intelligen|(?:^|_)nlp(?:_|$)|computer_vision/;
 export const normalizedFunction = (value) => (typeof value === 'string' ? value.trim().toLowerCase().replace(/[\s/-]+/g, '_') : '');
 
 export function softwareEngineeringFunction(value) {
