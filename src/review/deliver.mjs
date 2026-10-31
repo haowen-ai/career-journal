@@ -10,7 +10,7 @@ import { validTimezone } from './deadline.mjs';
 import { companyKey } from '../scan/dedupe.mjs';
 import { reallowed, withOverrides } from './overrides.mjs';
 import { companyExcluded, USER_EXCLUDED_REASON } from './excluded.mjs';
-import { DIRECTION_CODE, directionNote, roleDirection } from './direction.mjs';
+import { DIRECTION_CODE, OUT_OF_DIRECTION_CODE, directionNote, roleDirection, softwareNote, softwareOnlyRole } from './direction.mjs';
 
 const key = (value) => String(value ?? '').normalize('NFKD').toLowerCase().replace(/[^a-z0-9]/g, '');
 const words = (value) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
@@ -189,6 +189,11 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     // settled automatically, never shown or held. It keeps the verdict's fields so a rules change can restore it.
     const direction = value.decision === 'eligible' ? roleDirection(posting.title, policy.direction, { functionValue: value.functionValue }) : null;
     if (direction && !direction.ok) value = { ...value, decision: 'not_eligible', code: DIRECTION_CODE, direction: directionNote(direction) };
+    // User rule (2026-10-31): a role the judge labelled pure software engineering is out of direction unless its
+    // title carries an AI/ML/data signal. A missing or blank label changes nothing.
+    if (value.decision === 'eligible' && softwareOnlyRole(posting.title, value.functionValue, policy.direction)) {
+      value = { ...value, decision: 'not_eligible', code: OUT_OF_DIRECTION_CODE, direction: softwareNote(value.functionValue), question: null, holdFactIds: [], nextAction: null };
+    }
     // This guard also wins over eligible verdicts, quotas and exploration lanes.
     // It never merges postings or writes to the submitted application.
     if (duplicate) value = { decision: 'not_eligible', code: 'already_submitted', evidence: [duplicate] };
@@ -317,7 +322,7 @@ export function suppressSubmittedDuplicates(db, { now, policy = {}, owner = 'rev
 export const restoredVerdict = (review, evidence) => ({ decision: 'eligible', code: null, evidence: evidence.evidence ?? [], needs: evidence.needs ?? {},
   fit: evidence.fit ?? null, deadline: evidence.deadline ?? { kind: 'none' }, program: evidence.program ?? null, location: evidence.location ?? null,
   factsUsed: evidence.factsUsed ?? [], flags: parseJson(review.flags_json, []), ...(evidence.modelDecision ? { modelDecision: evidence.modelDecision } : {}),
-  ...(evidence.jev ? { jev: evidence.jev } : {}) });
+  ...(evidence.jev ? { jev: evidence.jev } : {}), ...(Object.hasOwn(evidence, 'function') ? { functionValue: evidence.function } : {}) });
 
 export function applyCompanyCap(db, { now, policy = {}, owner = 'review-company-cap' }) {
   return atomic(db, () => {

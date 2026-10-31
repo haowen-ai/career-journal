@@ -28,6 +28,7 @@ import { usesJevSplit, createJevSplit, reviewJevSplit, jevCounts, jevDependencie
 import { exemptVerdict, jevPlaceOnly, locationExempt } from './overrides.mjs';
 import { applyRoleDirection } from './direction-pass.mjs';
 import { applyCompanyExclusion } from './exclusion-pass.mjs';
+import { lowerFit } from './fit.mjs';
 export { scheduleRefresh } from './freshness.mjs';
 
 const DAY = 86400000;
@@ -433,6 +434,8 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     let final;
     // The judge's function label for the role-direction filter at delivery (not part of the decision).
     let functionLabel;
+    // The primary tier's fit when it escalated: the escalation may not deliver a higher fit (fit.mjs).
+    let primaryFit;
     let opinionAsked = false;
     let jevProbabilities;
     // Whether the final verdict comes from judgments made under today's dependencies. A replay of an older
@@ -483,6 +486,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         firstSeen: posting.first_seen, jobType: stageInputs.profile?.search?.jobType };
       final = exemptVerdict({ ...decisionArgs, verdict: decide(decisionArgs), company: posting.company, overrides: stageInputs.overrides,
         aliases: stageInputs.screeningPolicy?.companyAliases });
+      if (tier === 'escalation' && primaryFit !== undefined) final = { ...final, fit: lowerFit(primaryFit, final.fit) };
       fresh = !replayed;
       // An inferred term is an assumption, not an answer to the term_or_area question this review is held on:
       // keep the question so the escalation tier's forced decision settles it.
@@ -493,7 +497,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
           firstSeen: posting.first_seen, secondOpinion, counts: receipt.counts.secondOpinion });
         final = result.verdict; opinionAsked = result.asked;
       }
-      if (tier === 'primary' && final.escalate) { final = null; continue; }
+      if (tier === 'primary' && final.escalate) { primaryFit = final.fit ?? null; final = null; continue; }
       if (tier === 'escalation' && final.decision === 'unclear' && MODEL_HOLD_CODES.includes(final.code) && !explorationLane(row)) {
         const question = final.question;
         const forcedRequest = buildForcedDecisionRequest(request, question);

@@ -95,7 +95,8 @@ export function listQueue(db, profile = null, { direction = null } = {}) {
       };
       if (!direction) return item;
       const result = roleDirection(row.role, direction);
-      const out = !result.ok && result.reason === 'block';
+      // A blocked title, or a neutral one under neutral 'deny': no function label rescues either.
+      const out = !result.ok && ['block', 'neutral'].includes(result.reason);
       return { ...item, directionOk: !out, directionReason: out ? `${DIRECTION_CODE}: ${directionNote(result)}` : null };
     })
     .sort((left, right) => (left.directionOk === false) - (right.directionOk === false) || compareInTimezone(left, right, profile?.timezone));

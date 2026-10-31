@@ -10,6 +10,7 @@ import { jevDecision, jevVerdict, usesJevSplit } from './jev-split.mjs';
 import { exemptVerdict, jevPlaceOnly, locationExempt } from './overrides.mjs';
 import { applyRoleDirection } from './direction-pass.mjs';
 import { applyCompanyExclusion } from './exclusion-pass.mjs';
+import { lowerFit } from './fit.mjs';
 
 const without = (parts, key) => Object.fromEntries(Object.entries(parts ?? {}).filter(([name]) => name !== key));
 
@@ -49,6 +50,7 @@ export async function redecideReviews(db, { inputs, judges, held, done = false, 
       const stage = parseJson(row.evidence_json);
       let verdict;
       let functionLabel;
+      let primaryFit;
       if (parseJson(row.flags_json, []).includes('jev_decided') && stage.jev && usesJevSplit(inputs.policy)) {
         const thresholds = inputs.policy.judge.primary.thresholds;
         const decided = jevDecision(stage.jev, thresholds);
@@ -65,7 +67,10 @@ export async function redecideReviews(db, { inputs, judges, held, done = false, 
         const args = { snapshotText: snapshot.text, judgment: output, facts: inputs.facts, policy: inputs.policy,
           tier, firstSeen: posting.first_seen, jobType: inputs.profile?.search?.jobType };
         verdict = exemptVerdict({ ...args, verdict: decide(args), company: posting.company, overrides: inputs.overrides, aliases });
+        // As in the worker: an escalated posting is delivered with the lower of the two fits (fit.mjs).
+        if (tier === 'escalation' && primaryFit !== undefined) verdict = { ...verdict, fit: lowerFit(primaryFit, verdict.fit) };
         if (!verdict.escalate) break;
+        primaryFit = verdict.fit ?? null;
       }
       if (!verdict || verdict.escalate) return;
       // A replayed judgment never answers a question hold; leave it held untouched.
