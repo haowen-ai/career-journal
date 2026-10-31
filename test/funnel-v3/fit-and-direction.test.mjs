@@ -154,10 +154,11 @@ test('[FD] softwareEngineeringFunction: SWE labels match after normalisation; AI
   const { softwareEngineeringFunction } = await directionModule();
   const yes = ['engineering', 'software_engineering', 'Software Engineering', 'software-engineering', 'swe', 'SWE', 'full_stack', 'Full-Stack',
     'full stack development', 'frontend', 'front-end', 'backend', 'back_end', 'developer', 'web developer', 'qa', 'QA engineering', 'software_engineer',
-    'engineering/software', 'html_developer'];
+    'engineering/software', 'html_developer', 'Software & Web Development', 'software engineering (backend)'];
   const no = ['ai_ml', 'AI/ML engineering', 'ai_ml_engineer', 'ML engineering', 'machine learning engineering', 'data_science', 'data_engineering',
     'analytics_bi', 'analytics engineering', 'quant', 'quant_developer', 'research_engineering', 'research', 'applied science', 'product_general', 'sales', 'hardware',
-    'genai_engineering', 'mlops_engineering', 'llm_engineering', 'LLM engineering', 'llms_developer', '', '   ', null, undefined, 42];
+    'genai_engineering', 'mlops_engineering', 'llm_engineering', 'LLM engineering', 'llms_developer', 'software engineering (AI/ML)', 'software engineering [ML]', 'Software Engineering (AI)',
+    '', '   ', '()', null, undefined, 42];
   const wrong = [...yes.filter((value) => softwareEngineeringFunction(value) !== true).map((value) => `${JSON.stringify(value)}: expected software engineering`),
     ...no.filter((value) => softwareEngineeringFunction(value) !== false).map((value) => `${JSON.stringify(value)}: expected not software engineering`)];
   assert.deepEqual(wrong, []);
@@ -424,4 +425,75 @@ test('[B] redecide replays an escalation reached by a second-opinion disagreemen
   assert.equal(report.redecided, 1, JSON.stringify(report));
   assert.equal(applicationOf(db, 'p-jev').fit, 'low', 'the replay keeps the escalation and the lower fit');
   assert.ok(applicationOf(db, 'p-jev').fit_note.includes('Escalation low strength'));
+});
+
+// ===================================================================== review round 2 (Codex)
+
+test('[B] redecide keeps a delivered forced decision and corrects its inflated fit, never turning it into a hold (FD1)', async () => {
+  const { redecideReviews } = await load('B', './src/review/redecide.mjs', ['redecideReviews']);
+  const db = freshDb();
+  const assumption = 'Assume the candidate can learn Python on the job';
+  const { pages, answers } = setup(db, {
+    'p-forced-old': { primary: unsure(fitOf('low', 'Primary low strength')), escalation: unsure(fitOf('high', 'Escalation high strength')),
+      forced: { decision: 'eligible', assumption } },
+  });
+  const judges = {
+    primary: fakeJudge({ tier: 'primary', answers: (request) => answers.primary[request.postingId] }),
+    escalation: fakeJudge({ tier: 'escalation', answers: (request) => (request.forceDecision === true ? answers.forced : answers.escalation)[request.postingId] }),
+  };
+  const { runReview } = await workerModule();
+  await offline(() => runReview({ db, runId: `review-forced-old-${seq += 1}`, owner: 'worker-a', now: T0, budget: 20, deadlineMs: 600_000, attemptDir: null,
+    sleep: async () => {}, fetcher: fakeFetcher(pages), judges, inputs: () => reviewInputs({ policy: REVIEW_POLICY }), hooks: {} }));
+  // Emulate a delivery made before the fix: the escalation's high fit was taken wholesale.
+  const app = applicationOf(db, 'p-forced-old');
+  db.prepare("UPDATE applications SET fit = 'high', fit_note = 'Strengths: Escalation high strength' WHERE id = ?").run(app.id);
+  const before = reviewOf(db, 'p-forced-old');
+  assert.equal(before.decision, 'eligible', 'fixture: the forced decision was delivered');
+
+  const report = await redecideReviews(db, { inputs: reviewInputs({ policy: REVIEW_POLICY }), judges, done: true, now: at(1) });
+  assert.equal(report.redecided, 1, JSON.stringify(report));
+  const after = reviewOf(db, 'p-forced-old');
+  assert.deepEqual([after.state, after.decision, after.code, after.hold_owner], ['done', 'eligible', before.code, null], 'the forced decision stays');
+  assert.ok(JSON.parse(after.flags_json).includes('model_decided'));
+  assert.equal(evidenceOf(db, 'p-forced-old').modelDecision?.assumption, assumption);
+  const fixed = applicationOf(db, 'p-forced-old');
+  assert.equal(fixed.fit, 'low');
+  assert.ok(fixed.fit_note.includes('Primary low strength') && fixed.fit_note.includes(assumption), fixed.fit_note);
+});
+
+test('[B] the startup pass re-judges an invalidated software settlement instead of restoring it, and withdraws a lead a freshness refresh re-queued (FD2)', async () => {
+  const { applyRoleDirection } = await load('RD', './src/review/direction-pass.mjs', ['applyRoleDirection']);
+  const { deliver, claimItem } = await delivery();
+  const { directionRules } = await directionModule();
+  const rules = directionRules({ allow: ['\\bdata\\b'] });
+  const db = freshDb();
+  insertPosting(db, { id: 'p-stale', url: urlOf('p-stale'), company: COMPANY, title: 'Software Engineer Intern' });
+  insertReview(db, { postingId: 'p-stale', stage: 'deliver' });
+  deliver(db, { postingId: 'p-stale', verdict: { ...ELIGIBLE, functionValue: 'engineering' }, fence: claimItem(db, 'p-stale', { owner: 'worker-a', now: T0 }), now: T0,
+    policy: { ...SCREENING_POLICY, direction: rules } });
+  assert.equal(reviewOf(db, 'p-stale').code, 'out_of_direction', 'fixture');
+  db.prepare('UPDATE reviews SET dep_hashes_json = ? WHERE posting_id = ?').run(JSON.stringify({ invalidated: true }), 'p-stale');
+  applyRoleDirection(db, { now: at(1), policy: { ...SCREENING_POLICY, direction: null } });
+  const stale = reviewOf(db, 'p-stale');
+  assert.deepEqual([stale.state, stale.stage, stale.decision], ['due', 'judge', 'not_eligible'], 'queued for judgment, not restored as eligible');
+  assert.equal(applicationOf(db, 'p-stale'), undefined, 'no lead appears');
+
+  const lead = deliveredLead(db, 'p-refresh', { title: 'Software Engineer Intern', functionLabel: 'engineering' });
+  db.prepare("UPDATE reviews SET state = 'due', stage = 'fetch', next_due = ? WHERE posting_id = 'p-refresh'").run(T0);
+  applyRoleDirection(db, { now: at(1), policy: { ...SCREENING_POLICY, direction: rules } });
+  const refreshed = reviewOf(db, 'p-refresh');
+  assert.deepEqual([refreshed.state, refreshed.decision, refreshed.code], ['done', 'not_eligible', 'out_of_direction']);
+  assert.equal(db.prepare('SELECT status FROM applications WHERE id = ?').get(lead).status, 'withdrawn');
+});
+
+test('[RD] the queue reads the stored function label: a requireAllow title with a non-allowed label is flagged, an unlabelled or allowed one is not (FD2)', async () => {
+  const { directionRules } = await directionModule();
+  const { listQueue } = await import('../../src/commands/queue.mjs');
+  const direction = directionRules({ allow: ['\\bdata\\b'], requireAllow: ['software'], allowFunctions: ['data', '(?:^|_)ai(?:_|$)'] });
+  const db = freshDb();
+  const labelledLead = deliveredLead(db, 'p-q-eng', { title: 'Software Engineer Intern', functionLabel: 'engineering' });
+  const allowedLead = deliveredLead(db, 'p-q-ai', { title: 'Software Engineer Intern', functionLabel: 'ai_platform' });
+  const unlabelledLead = deliveredLead(db, 'p-q-none', { title: 'Software Engineer Intern' });
+  const rows = Object.fromEntries(listQueue(db, null, { direction }).map((row) => [row.id, row.directionOk]));
+  assert.deepEqual(rows, { [allowedLead]: true, [unlabelledLead]: true, [labelledLead]: false });
 });

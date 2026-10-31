@@ -77,14 +77,15 @@ export const directionNote = (result) => (result.reason === 'neutral' ? 'title h
 // User rule (2026-10-31): pure software engineering is out of direction even when the title rules let the role
 // through ("Software Engineer Intern" labelled engineering, "Full-Stack Developer Intern" labelled
 // software_engineering, a media-tools developer labelled engineering all reached the queue as eligible). The judge's
-// function label is free text, so it is normalised (lowercase; spaces, '/' and '-' as '_') before matching.
+// function label is free text, so it is normalised (lowercase; spaces, '/', '-' and other separators as '_').
 // A label is software engineering when it names software/engineering/swe/full stack/frontend/backend/developer/qa
 // work and carries no AI, ML, data, analytics, research, quant or science signal. ai and ml are matched as words
 // (with genai/openai/aiops, llm/mlops, aiml) so that html or email do not count as AI/ML signals.
 export const OUT_OF_DIRECTION_CODE = 'out_of_direction';
 const SWE_FUNCTION = /software|engineer|(?:^|_)swe(?:_|$)|full_?stack|front_?end|back_?end|develop(?:er|ment)|(?:^|_)qa(?:_|$)/;
 const DIRECTION_FUNCTION = /(?:^|_)(?:gen|open)?ai(?:ops)?(?:_|$)|(?:^|_)(?:llms?|ml(?:ops)?)(?:_|$)|(?:^|_)aiml(?:_|$)|machine_learning|deep_learning|data|analytic|research|quant|scien|statistic|intelligen|(?:^|_)nlp(?:_|$)|computer_vision/;
-export const normalizedFunction = (value) => (typeof value === 'string' ? value.trim().toLowerCase().replace(/[\s/-]+/g, '_') : '');
+// Every other separator (brackets, '&', '.', ',') is a boundary too: "software engineering (AI/ML)" carries ai and ml.
+export const normalizedFunction = (value) => (typeof value === 'string' ? value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') : '');
 
 export function softwareEngineeringFunction(value) {
   const label = normalizedFunction(value);

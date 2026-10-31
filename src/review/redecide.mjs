@@ -75,9 +75,15 @@ export async function redecideReviews(db, { inputs, judges, held, done = false, 
         if (!verdict.escalate && !(tier === 'primary' && escalated)) break;
         if (tier === 'primary') primaryFit = verdict.fit ?? null;
       }
-      // A delivered forced model decision cannot be replayed from the ordinary escalation judgment: keep it as it is.
-      if (verdict?.decision === 'unclear' && MODEL_HOLD_CODES.includes(verdict.code) && row.decision !== 'unclear'
-        && parseJson(row.flags_json, []).includes('model_decided')) return;
+      // A delivered forced model decision: the ordinary escalation judgment replays to its question hold. Keep the
+      // forced decision and its assumption (evidence.modelDecision), with today's (lower) fit, never a new hold.
+      const flags = parseJson(row.flags_json, []);
+      if (verdict?.decision === 'unclear' && MODEL_HOLD_CODES.includes(verdict.code) && row.decision !== 'unclear' && flags.includes('model_decided')) {
+        if (!stage.modelDecision || verdict.code !== row.code) return;
+        verdict = { ...verdict, decision: row.decision, escalate: false, nextAction: null, modelDecision: stage.modelDecision,
+          flags: [...new Set([...(verdict.flags ?? []), ...flags.filter((flag) => ['model_decided', 'disputed'].includes(flag))])],
+          fit: { ...verdict.fit, note: [verdict.fit?.note, stage.modelDecision.assumption].filter(Boolean).join('. ') } };
+      }
       if (!verdict || verdict.escalate) return;
       // A replayed judgment never answers a question hold; leave it held untouched.
       if (heldReleaseBlock(row, verdict)) { report.kept += 1; return; }

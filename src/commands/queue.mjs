@@ -94,9 +94,11 @@ export function listQueue(db, profile = null, { direction = null } = {}) {
         tabHint: tabTitle({ company: row.company, needs: needsFromVerdict(evidence?.needs) }),
       };
       if (!direction) return item;
-      const result = roleDirection(row.role, direction);
-      // A blocked title, or a neutral one under neutral 'deny': no function label rescues either.
-      const out = !result.ok && ['block', 'neutral'].includes(result.reason);
+      const labelled = Object.hasOwn(evidence, 'function');
+      const result = roleDirection(row.role, direction, { functionValue: evidence.function });
+      // A blocked title, a neutral one under neutral 'deny', or a requireAllow title whose stored label is not allowed
+      // (an unlabelled older lead is not flagged, as in the startup pass).
+      const out = !result.ok && (['block', 'neutral'].includes(result.reason) || result.reason === 'require_allow' && labelled);
       // A lead the judge labelled pure software engineering (the stored function label).
       const software = !out && result.ok && softwareOnlyRole(row.role, evidence.function, direction);
       return { ...item, directionOk: !out && !software,
