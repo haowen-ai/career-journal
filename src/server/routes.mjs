@@ -1,6 +1,6 @@
 import { createApplication, listApplications } from '../commands/application.mjs';
 import { recordEvent } from '../domain/events.mjs';
-import { getTask, listTasks, setTaskStatus } from '../domain/tasks.mjs';
+import { compareTasksByDue, getTask, listTasks, setTaskStatus } from '../domain/tasks.mjs';
 import { createReadStream } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
@@ -45,11 +45,13 @@ export async function readJson(request) {
 
 // Role-queue columns (schema 5) are included by name only: the source name but
 // not its source_id, and no posting text or decision trace.
-function applicationDetail(db, id) {
-  const application = db.prepare(`SELECT id, company, role, external_id externalId, job_url jobUrl, status,
+const applicationSelect = `SELECT id, company, role, external_id externalId, job_url jobUrl, status,
     stage, applied_at appliedAt, created_at createdAt, updated_at updatedAt,
     source, location, posted_at postedAt, deadline_at deadlineAt, fit, fit_confidence fitConfidence,
-    fit_note fitNote, verified_at verifiedAt, skip_reason skipReason FROM applications WHERE id = ?`).get(id);
+    fit_note fitNote, verified_at verifiedAt, skip_reason skipReason FROM applications`;
+
+function applicationDetail(db, id) {
+  const application = db.prepare(`${applicationSelect} WHERE id = ?`).get(id);
   if (!application) return null;
   const events = db.prepare(`SELECT id, event_type type, occurred_at occurredAt, observed_at observedAt,
     recorded_at recordedAt, title, note, source_json source, status_after statusAfter
@@ -67,9 +69,7 @@ function publicTask({ id, kind, title, platform, link, dueAt, dueNote, status, n
 
 const safeSourceKinds = new Set(['api', 'cli', 'email', 'import', 'manual', 'system', 'role-scan', 'queue-verify']);
 
-function dashboardApplication(db, id) {
-  const detail = applicationDetail(db, id);
-  if (!detail) return null;
+function dashboardApplication(detail) {
   return {
     ...detail,
     events: detail.events.map(({ source, ...event }) => {
@@ -78,6 +78,35 @@ function dashboardApplication(db, id) {
       return { ...event, sourceKind: safeSourceKinds.has(candidate) ? candidate : 'other' };
     }),
   };
+}
+
+function dashboardApplications(db) {
+  const visible = "status != 'withdrawn' OR applied_at IS NOT NULL";
+  const applications = db.prepare(`${applicationSelect} WHERE ${visible}
+    ORDER BY company COLLATE NOCASE, role COLLATE NOCASE, id`).all();
+  if (!applications.length) return [];
+  const retainedIds = `SELECT id FROM applications WHERE ${visible}`;
+  const details = new Map(applications.map((application) => [application.id,
+    { ...application, events: [], artifacts: [], tasks: [] }]));
+  const events = db.prepare(`SELECT application_id applicationId, id, event_type type, occurred_at occurredAt,
+    observed_at observedAt, recorded_at recordedAt, title, note, source_json source, status_after statusAfter
+    FROM application_events WHERE application_id IN (${retainedIds}) ORDER BY recorded_at DESC, id`).all();
+  for (const { applicationId, source, ...event } of events) {
+    details.get(applicationId).events.push({ ...event, source: JSON.parse(source) });
+  }
+  const artifacts = db.prepare(`SELECT application_id applicationId, id, kind, lifecycle, file_name fileName,
+    sha256, submitted_at submittedAt, recorded_at recordedAt, verification
+    FROM artifacts WHERE application_id IN (${retainedIds}) ORDER BY recorded_at DESC, id`).all();
+  for (const { applicationId, ...artifact } of artifacts) details.get(applicationId).artifacts.push(artifact);
+  const tasks = db.prepare(`SELECT application_id applicationId, id, kind, title, platform, link, due_at dueAt,
+    due_note dueNote, status, note, source_json source, created_at createdAt, updated_at updatedAt
+    FROM application_tasks WHERE application_id IN (${retainedIds})`).all();
+  for (const { applicationId, source, ...task } of tasks) {
+    details.get(applicationId).tasks.push(publicTask({ ...task, source: JSON.parse(source) }));
+  }
+  return [...details.values()].map((detail) => dashboardApplication({
+    ...detail, tasks: detail.tasks.sort(compareTasksByDue),
+  }));
 }
 
 function latestApplicationTime(application) {
@@ -149,8 +178,7 @@ export async function handleApi(request, response, url, { db, config, artifactRo
     return true;
   }
   if (url.pathname === '/api/dashboard' && request.method === 'GET') {
-    const applications = listApplications(db)
-      .map((application) => dashboardApplication(db, application.id))
+    const applications = dashboardApplications(db)
       .sort((left, right) => latestApplicationTime(right) - latestApplicationTime(left)
         || left.company.localeCompare(right.company)
         || left.role.localeCompare(right.role));

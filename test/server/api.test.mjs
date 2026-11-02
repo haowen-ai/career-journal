@@ -11,6 +11,7 @@ import { archiveArtifact } from '../../src/domain/artifacts.mjs';
 import { getTask, upsertTask } from '../../src/domain/tasks.mjs';
 import { recordEvent } from '../../src/domain/events.mjs';
 import { verifyQueuedRole } from '../../src/commands/queue.mjs';
+import { handleApi } from '../../src/server/routes.mjs';
 
 async function withServer(run, serverOptions = {}) {
   const home = await mkdtemp(path.join(os.tmpdir(), 'jobops-server-'));
@@ -22,6 +23,87 @@ async function withServer(run, serverOptions = {}) {
   try { await run(baseUrl, context.db, context); }
   finally { await new Promise((resolve) => server.close(resolve)); context.db.close(); await rm(home, { recursive: true, force: true }); }
 }
+
+test('dashboard skips never-submitted withdrawn roles and preserves legacy detail fields and ordering in four queries', async () => withServer(async (baseUrl, db, context) => {
+  const seeds = [
+    { company: 'Filtered', status: 'withdrawn', appliedAt: null },
+    { company: 'Withdrawn', status: 'withdrawn', appliedAt: '2026-01-01T00:00:00Z' },
+    { company: 'Applied', status: 'applied', appliedAt: null },
+    { company: 'Lead', status: 'lead', appliedAt: null },
+  ];
+  const applications = [];
+  for (const seed of seeds) {
+    const application = await (await fetch(`${baseUrl}/api/applications`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...seed, role: 'Analyst' }),
+    })).json();
+    applications.push(application);
+    const sources = [{ kind: 'USER' }, { provider: 'EMAIL' }, { kind: 'unknown' }, { kind: 'queue-verify' }];
+    for (const [index, source] of sources.entries()) {
+      db.prepare(`INSERT INTO application_events
+        (id, application_id, event_type, observed_at, recorded_at, title, note, source_json, content_hash)
+        VALUES (?, ?, 'application_update', ?, ?, ?, ?, ?, ?)`)
+        .run(`${application.id}-event-${index}`, application.id, '2026-01-02T00:00:00Z',
+          index === 3 ? '2026-01-03T00:00:00Z' : '2026-01-02T00:00:00Z', `Update ${index}`, 'Event note',
+          JSON.stringify(source), `${application.id}-${index}`);
+    }
+    for (const index of [2, 1, 0]) {
+      db.prepare(`INSERT INTO artifacts
+        (id, application_id, kind, lifecycle, file_name, storage_path, sha256, submitted_at, recorded_at, verification)
+        VALUES (?, ?, 'resume', 'draft', 'resume.txt', '/private/not-read', ?, ?, ?, 'pending')`)
+        .run(`${application.id}-artifact-${index}`, application.id, String(index).repeat(64),
+          index === 2 ? '2026-01-04T00:00:00Z' : null,
+          index === 2 ? '2026-01-03T00:00:00Z' : '2026-01-02T00:00:00Z');
+      upsertTask(db, { id: `${application.id}-task-${index}`, applicationId: application.id, kind: 'other',
+        title: `Step ${index}`, dueAt: index === 2 ? null : '2026-01-05T10:00:00Z',
+        status: index === 1 ? 'done' : 'open', note: 'Task note', source: { kind: 'email', messageId: 'private-test-id' },
+      }, '2026-01-01T00:00:00Z');
+    }
+  }
+  db.prepare('UPDATE applications SET updated_at = ?').run('2026-01-01T00:00:00Z');
+  // The unchanged detail route is the old dashboard's detail loader. Apply its
+  // former source projection, then compare every returned field and array.
+  const expected = [];
+  for (const application of applications.slice(1)) {
+    const detail = await (await fetch(`${baseUrl}/api/applications/${application.id}`)).json();
+    expected.push({ ...detail, events: detail.events.map(({ source, ...event }) => ({
+      ...event, sourceKind: ({ USER: 'manual', EMAIL: 'email', 'queue-verify': 'queue-verify' })[source.kind ?? source.provider] ?? 'other',
+    })) });
+  }
+  expected.sort((left, right) => left.company.localeCompare(right.company) || left.role.localeCompare(right.role));
+  const dashboardResponse = await fetch(`${baseUrl}/api/dashboard`);
+  assert.equal(dashboardResponse.status, 200);
+  const dashboard = await dashboardResponse.json();
+  assert.deepEqual(dashboard.applications, expected);
+  assert.deepEqual(expected[0].events.map((event) => event.id.split('-').at(-1)), ['3', '0', '1', '2']);
+  assert.deepEqual(expected[0].artifacts.map((artifact) => artifact.id.split('-').at(-1)), ['2', '0', '1']);
+  assert.deepEqual(expected[0].tasks.map((task) => task.id.split('-').at(-1)), ['0', '1', '2']);
+  const all = await (await fetch(`${baseUrl}/api/applications`)).json();
+  assert.equal(all.length, 4);
+  assert.ok(all.some((application) => application.id === applications[0].id));
+
+  // Excluded details must never be decoded, even if their source is malformed.
+  db.prepare('UPDATE application_events SET source_json = ? WHERE application_id = ?').run('{', applications[0].id);
+  db.prepare('UPDATE application_tasks SET source_json = ? WHERE application_id = ?').run('{', applications[0].id);
+  const queries = [];
+  let result;
+  await handleApi({ method: 'GET' }, { writeHead() {}, end(body) { result = JSON.parse(body); } },
+    new URL(`${baseUrl}/api/dashboard`), {
+      db: { prepare(sql) { queries.push(sql); return db.prepare(sql); } }, config: context.config,
+    });
+  assert.deepEqual(result.applications, expected);
+  assert.equal(queries.length, 4, 'query count is independent of the number of retained applications');
+}));
+
+test('dashboard returns an empty list when every application is withdrawn without an applied date', async () => withServer(async (baseUrl) => {
+  const readDashboard = async () => (await (await fetch(`${baseUrl}/api/dashboard`)).json()).applications;
+  assert.deepEqual(await readDashboard(), []);
+  await fetch(`${baseUrl}/api/applications`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ company: 'Filtered', role: 'Analyst', status: 'withdrawn' }),
+  });
+  assert.deepEqual(await readDashboard(), []);
+  assert.equal((await (await fetch(`${baseUrl}/api/applications`)).json()).length, 1);
+}));
 
 test('health, create, list, detail, and idempotent event routes work', async () => withServer(async (baseUrl) => {
   assert.deepEqual(await (await fetch(`${baseUrl}/api/health`)).json(), { ok: true, schemaVersion: 1 });
@@ -282,11 +364,15 @@ test('dashboard and detail routes include role-queue fields without source ids, 
     source: 'greenhouse', location: 'New York, NY', postedAt: '2026-09-28T18:00:00Z', deadlineAt: '2026-10-15T23:59:00-04:00',
     fit: 'high', fitConfidence: 0.92, fitNote: 'primary direction in the title', verifiedAt: '2026-09-30T12:00:00Z', skipReason: null,
   });
-  assert.deepEqual(pick(byId.get(skipped.id)), {
+  assert.equal(byId.has(skipped.id), false);
+  const skippedDetail = await (await fetch(`${baseUrl}/api/applications/${skipped.id}`)).json();
+  assert.deepEqual(pick(skippedDetail), {
     source: 'lever', location: 'Seattle, WA', postedAt: '2026-09-20T10:00:00Z', deadlineAt: null,
     fit: 'low', fitConfidence: null, fitNote: 'no primary or secondary direction', verifiedAt: '2026-09-30T12:05:00Z', skipReason: 'PhD students only',
   });
-  assert.equal(byId.get(skipped.id).status, 'withdrawn');
+  assert.equal(skippedDetail.status, 'withdrawn');
+  assert.equal('sourceId' in skippedDetail, false);
+  assert.equal('source_id' in skippedDetail, false);
   assert.deepEqual(pick(byId.get(manual.id)), Object.fromEntries(queueFields.map((field) => [field, null])));
   for (const item of dashboard.applications) {
     assert.equal('sourceId' in item, false);
