@@ -23,7 +23,7 @@ export async function collectRoles(profile, { fetchImpl, careerOpsConfig, career
   }
   if (beforeDeadline()) {
     const config = { ...careerOpsConfig };
-    if (deadlineAt) config.scanTimeoutMs = Math.max(1, Math.min(config.scanTimeoutMs ?? 1_200_000, Date.parse(deadlineAt) - clock()));
+    if (deadlineAt) config.scanTimeoutMs = Math.max(1, Math.min(config.scanTimeoutMs ?? Infinity, Date.parse(deadlineAt) - clock()));
     parts.push(await fetchCareerOpsRoles(profile.sources.careerOps, config, careerOpsDependencies));
   }
   const settings = profile.sources.simplify;

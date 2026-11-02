@@ -29,7 +29,6 @@ export const WIDE_TITLE_FILTER = Object.freeze([
 ]);
 
 const REPLACED_SECTIONS = new Set(['title_filter', 'location_filter']);
-const DEFAULT_TIMEOUT_MS = 18 * 60 * 1000;
 const MAX_FIELD_CHARS = 4000;
 const IDENTITY_FIELDS = new Set(['id', 'sourceId', 'source', 'company', 'company_name', 'title', 'url',
   'applyUrl', 'hostedUrl', 'jobUrl', 'location', 'locations', 'requisitionId', 'jobReqId', 'partition']);
@@ -84,7 +83,7 @@ function run(command, args, options) {
   return executeCareerOpsProcess({ command, args, ...options });
 }
 
-export async function scanCareerOps(root, { execute = run, env = process.env, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+export async function scanCareerOps(root, { execute = run, env = process.env, timeoutMs } = {}) {
   const portals = env.CAREER_OPS_PORTALS || path.join(root, 'portals.yml');
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'career-journal-careerops-'));
   try {
@@ -157,7 +156,7 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
   return { roles, partitions, configuredPartitions };
 }
 
-export async function scanCareerOpsRaw(root, { execute = run, env = process.env, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+export async function scanCareerOpsRaw(root, { execute = run, env = process.env, timeoutMs } = {}) {
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'career-journal-careerops-raw-'));
   try {
     const portals = path.join(temporary, 'portals.yml');

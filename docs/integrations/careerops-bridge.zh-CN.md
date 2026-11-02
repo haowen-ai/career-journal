@@ -78,4 +78,4 @@ node <careerops-root>/career-journal-adapter.mjs scan
 
 ### 内置扫描桥接
 
-没有 CareerOps 适配器时，扫描以 CareerOps 根目录为工作目录运行 `node <career-journal>/src/integrations/careerops-scan-bridge.mjs scan`。这个桥接运行 CareerOps 自己的 `node scan.mjs --dry-run --json`（不写入任何文件），并把 `CAREER_OPS_SCAN_HISTORY` 和 `CAREER_OPS_PIPELINE` 指向临时目录。它读取 `portals.yml`（或 `CAREER_OPS_PORTALS`）的临时副本：`title_filter` 改为保留实习和 co-op 职位名称，去掉 `location_filter`；包括 `tracked_companies` 在内的其他设置不变，也从不修改 CareerOps 的原文件。职位来自回执里的 `added_urls`，与扫描为同一批职位打印的 `+ 公司 | 职位 | 地点` 行按顺序对应，因此不带职位描述。完整扫描需要几分钟；配置里的 `careerOps.scanTimeoutMs` 可以改写 20 分钟的上限。
+没有 CareerOps 适配器时，扫描以 CareerOps 根目录为工作目录运行 `node <career-journal>/src/integrations/careerops-scan-bridge.mjs scan`。这个桥接运行 CareerOps 自己的 `node scan.mjs --dry-run --json`（不写入任何文件），并把 `CAREER_OPS_SCAN_HISTORY` 和 `CAREER_OPS_PIPELINE` 指向临时目录。它读取 `portals.yml`（或 `CAREER_OPS_PORTALS`）的临时副本：`title_filter` 改为保留实习和 co-op 职位名称，去掉 `location_filter`；包括 `tracked_companies` 在内的其他设置不变，也从不修改 CareerOps 的原文件。职位来自回执里的 `added_urls`，与扫描为同一批职位打印的 `+ 公司 | 职位 | 地点` 行按顺序对应，因此不带职位描述。门户扫描默认不设时间上限；可配置 `careerOps.scanTimeoutMs` 显式限制。若传入整体扫描截止时间，仍以剩余时间为限。

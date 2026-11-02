@@ -118,8 +118,8 @@ export async function runCareerOpsScan(config = {}, dependencies = {}) {
     args: [health.entrypoint, health.builtInBridge ? 'scan-raw' : 'scan'],
     cwd: health.root,
     stdin: JSON.stringify({ action: health.builtInBridge ? 'scan-raw' : 'scan', readOnly: true }),
-    // A full CareerOps portal scan takes several minutes; the built-in bridge stops its own scan at 18.
-    timeoutMs: config.scanTimeoutMs ?? 1_200_000,
+    // Portal scans have no time cap unless the caller supplies one.
+    timeoutMs: config.scanTimeoutMs,
     maxBytes: MAX_RAW_SCAN_BYTES,
   });
   if (execution.exitCode !== 0) {

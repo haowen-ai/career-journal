@@ -43,7 +43,7 @@ export function executeCareerOpsProcess({ command, args, cwd, env, stdin, timeou
     const handle = { stop };
     const onAbort = () => stop('Process cancelled');
     active.add(handle);
-    timer = setTimeout(() => stop(`CareerOps request timed out after ${timeoutMs}ms`, 400, 'PROCESS_TIMEOUT'), timeoutMs);
+    if (timeoutMs != null) timer = setTimeout(() => stop(`CareerOps request timed out after ${timeoutMs}ms`, 400, 'PROCESS_TIMEOUT'), timeoutMs);
     const append = (chunk, stream) => {
       bytes += Buffer.byteLength(chunk);
       if (bytes > maxBytes) { stop('CareerOps output exceeds byte limit', 400, 'PROCESS_TOO_LARGE'); onLimit?.(); return; }
