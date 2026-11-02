@@ -343,3 +343,7 @@ footer { display: flex; justify-content: space-between; gap: 20px; padding: 27px
   .application-details > summary { display: none; }
   .application-details:not([open]) > .details-content { display: none; }
 }
+
+.pagination { display: flex; align-items: center; justify-content: center; gap: 1rem; margin: 1rem 0; flex-wrap: wrap; }
+.pagination button { padding: .5rem 1rem; border: 1px solid currentColor; border-radius: .5rem; background: transparent; color: inherit; cursor: pointer; }
+.pagination button:disabled { opacity: .45; cursor: default; }

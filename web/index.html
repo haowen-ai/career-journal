@@ -180,6 +180,11 @@
           </div>
         </div>
 
+        <nav class="pagination" aria-label="Pagination">
+          <button id="previous-page" type="button" data-i18n="previousPage" disabled>Previous page</button>
+          <span id="page-label" aria-live="polite"></span>
+          <button id="next-page" type="button" data-i18n="nextPage" disabled>Next page</button>
+        </nav>
         <p class="loading-state" id="loading" data-i18n="loading">Loading applications…</p>
         <div class="application-list" id="applications" aria-live="polite"></div>
         <section class="empty-state" id="empty" hidden>

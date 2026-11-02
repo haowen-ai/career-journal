@@ -1,13 +1,10 @@
+import { createDashboardLoader } from './dashboard-loader.js';
 import {
   applicationGroup,
   applicationStats,
   compareEventsNewestFirst,
   FIT_FILTERS,
-  filterApplications,
-  fitCounts,
-  hasOpenTask,
   hasRoleControls,
-  isQueued,
   latestEvent,
   materialKindLabel,
   openTasks,
@@ -20,7 +17,6 @@ import {
   taskDeadlineLabel,
   taskDeadlineStatus,
   taskKindLabel,
-  taskQueue,
   toApplyQueue,
   toApplyRow,
   toApplySummaryLine,
@@ -39,6 +35,7 @@ const copy = {
     applicationsBody: 'Different roles at the same company stay separate.', searchLabel: 'Search applications',
     searchPlaceholder: 'Search company, role, or ID', filterAll: 'All', filterWaiting: 'Waiting',
     filterInterview: 'Interview / Offer', filterClosed: 'Closed', filterPreparing: 'Preparing',
+    previousPage: 'Previous page', nextPage: 'Next page', pageLabel: (page, pages, total) => `Page ${page} / ${pages}, ${total} records`,
     loading: 'Loading applications…', emptyTitle: 'No applications found', emptyBody: 'Try a different search or status filter.',
     errorTitle: 'The dashboard could not load', retry: 'Try again', footerPrivacy: 'Local-first · SQLite · Your records stay on this computer',
     currentStage: 'Current stage', appliedDate: 'Applied date', latestUpdate: 'Latest update', suggestedNext: 'Suggested next step',
@@ -75,6 +72,7 @@ const copy = {
     statPreparing: '准备中', statPreparingNote: '尚未确认投递', applicationsTitle: '全部申请', applicationsBody: '同一家公司的不同职位，分别记录。',
     searchLabel: '搜索申请', searchPlaceholder: '搜索公司、职位或编号', filterAll: '全部', filterWaiting: '等待进展',
     filterInterview: '面试 / Offer', filterClosed: '已结束', filterPreparing: '准备中', loading: '正在加载申请…',
+    previousPage: '上一页', nextPage: '下一页', pageLabel: (page, pages, total) => `第 ${page} / ${pages} 页，共 ${total} 条`,
     emptyTitle: '没有找到申请', emptyBody: '请尝试其他搜索词或状态筛选。', errorTitle: '看板加载失败', retry: '重新加载',
     footerPrivacy: '本地优先 · SQLite · 求职记录保存在这台电脑上', currentStage: '当前阶段', appliedDate: '实际投递日期',
     latestUpdate: '最近进展', suggestedNext: '建议下一步', details: '查看档案与时间线', history: '申请时间线',
@@ -114,10 +112,12 @@ const sourceCopy = {
 };
 
 const state = {
+  summary: null, page: 1, requestedPage: 1, pageSize: 50, total: 0, fitCounts: {}, loading: false, failed: false,
   applications: [], group: 'all', locale: initialLocale(), timezone: 'UTC', generatedAt: null,
   sort: savedChoice('career-journal-role-sort', ROLE_SORTS, 'deadline'), fit: savedChoice('career-journal-role-fit', FIT_FILTERS, 'all'),
 };
 const elements = {
+  previous: document.querySelector('#previous-page'), next: document.querySelector('#next-page'), pageLabel: document.querySelector('#page-label'),
   search: document.querySelector('#search'), list: document.querySelector('#applications'), empty: document.querySelector('#empty'),
   loading: document.querySelector('#loading'), error: document.querySelector('#error'), errorMessage: document.querySelector('#error-message'),
   resultCount: document.querySelector('#result-count'), template: document.querySelector('#application-template'),
@@ -237,6 +237,7 @@ function renderMaterials(container, application) {
   }
   for (const artifact of artifacts) {
     const card = document.createElement('article'); card.className = `material-card ${artifact.lifecycle === 'submitted' ? 'submitted' : ''}`;
+    card.dataset.artifactId = artifact.id;
     const lifecycle = document.createElement('p'); lifecycle.className = 'eyebrow'; lifecycle.textContent = artifact.lifecycle === 'submitted' ? t('submitted') : t('draft');
     const name = document.createElement('div'); name.className = 'file-name'; name.textContent = artifact.fileName;
     const meta = document.createElement('p'); meta.className = 'material-meta';
@@ -283,10 +284,7 @@ async function updateTaskStatus(task, status, button) {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status }),
     });
     if (!response.ok) throw new Error('Task update failed');
-    const updated = (await response.json()).task;
-    const application = state.applications.find((item) => item.id === task.applicationId);
-    if (application) application.tasks = (application.tasks ?? []).map((item) => (item.id === updated.id ? updated : item));
-    render();
+    await load(state.requestedPage);
   } catch {
     button.textContent = t('taskUpdateError');
     window.setTimeout(() => { button.textContent = status === 'done' ? t('markDone') : t('undo'); button.disabled = false; }, 1800);
@@ -330,7 +328,7 @@ function renderTaskRow(task) {
 // The Assessments & interviews card counts open steps; it turns amber when a
 // step is past due or due within 2 days.
 function renderTasksCard() {
-  const summary = taskCardSummary(state.applications, { timeZone: state.timezone });
+  const summary = state.summary?.taskCardSummary ?? taskCardSummary([]);
   const hint = taskCardHint(summary, { locale: state.locale, timeZone: state.timezone });
   elements.tasksCount.textContent = summary.open;
   elements.tasksHint.textContent = hint;
@@ -339,7 +337,7 @@ function renderTasksCard() {
 }
 
 function renderTasks() {
-  const { open, done } = taskQueue(state.applications);
+  const { open, done } = state.summary?.taskQueue ?? { open: [], done: [] };
   elements.openTasks.replaceChildren(...open.map(renderTaskRow));
   elements.openTasks.hidden = open.length === 0;
   elements.tasksEmpty.hidden = open.length !== 0;
@@ -401,7 +399,7 @@ function renderApplyRow(application, now) {
 
 function renderToApply() {
   const now = Date.now();
-  const groups = toApplyQueue(state.applications, { now, timeZone: state.timezone });
+  const groups = state.summary?.toApplyQueue ?? toApplyQueue([]);
   for (const key of ['today', 'week', 'later', 'none']) {
     document.querySelector(`#apply-${key}-rows`).replaceChildren(...groups[key].map((application) => renderApplyRow(application, now)));
     document.querySelector(`#apply-group-${key}`).hidden = groups[key].length === 0;
@@ -549,16 +547,20 @@ function applyLocale() {
 }
 
 function render() {
+  const focused = document.activeElement;
+  const focusRow = focused?.closest('[data-application-id], [data-task-id]');
+  const focusKey = focusRow?.dataset.applicationId ?? focusRow?.dataset.taskId;
+  const focusRegion = ['application-card', 'apply-row', 'task-row'].find((region) => focusRow?.matches(`.${region}`));
+  const focusArtifact = focused?.closest('[data-artifact-id]')?.dataset.artifactId;
+  const focusClass = focused?.classList?.[0];
+  const focusTag = focused?.tagName?.toLowerCase();
   applyLocale();
-  const stats = applicationStats(state.applications);
+  const stats = state.summary?.stats ?? applicationStats([]);
   for (const key of ['applied', 'waiting', 'interview', 'closed', 'preparing']) {
     document.querySelector(`#stat-${key}`).textContent = stats[key];
     document.querySelector(`[data-stat="${key}"]`).setAttribute('aria-label', t('statCardLabel')(key, stats[key]));
   }
-  const filterCounts = {
-    all: filterApplications(state.applications).length, sent: stats.applied, waiting: stats.waiting, interview: stats.interview, closed: stats.closed, preparing: stats.preparing, skipped: stats.skipped,
-    tasks: state.applications.filter(hasOpenTask).length, queue: state.applications.filter(isQueued).length,
-  };
+  const filterCounts = state.summary?.groups ?? {};
   for (const [key, value] of Object.entries(filterCounts)) document.querySelector(`[data-count="${key}"]`).textContent = value;
   renderTasksCard();
   renderToApply();
@@ -566,48 +568,96 @@ function render() {
   const roleView = hasRoleControls(state.group);
   elements.roleControls.hidden = !roleView;
   if (roleView) {
-    const counts = fitCounts(filterApplications(state.applications, { group: state.group, query: elements.search.value }));
+    const counts = state.fitCounts;
     for (const [key, value] of Object.entries(counts)) document.querySelector(`[data-fit-count="${key}"]`).textContent = value;
     document.querySelectorAll('[data-sort]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.sort === state.sort)));
     document.querySelectorAll('[data-fit]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.fit === state.fit)));
   }
-  const visible = filterApplications(state.applications, { group: state.group, query: elements.search.value, sort: state.sort, fit: state.fit });
+  const visible = state.failed ? [] : state.applications;
+  const expanded = new Set([...elements.list.querySelectorAll('.application-card')].filter((card) => card.querySelector('details')?.open).map((card) => card.dataset.applicationId));
   elements.list.replaceChildren(...visible.map(renderCard));
-  elements.empty.hidden = visible.length !== 0;
-  elements.resultCount.textContent = t('results')(visible.length, state.applications.length);
+  for (const card of elements.list.querySelectorAll('.application-card')) {
+    if (expanded.has(card.dataset.applicationId) && card.querySelector('details')) card.querySelector('details').open = true;
+  }
+  elements.empty.hidden = state.loading || state.failed || visible.length !== 0;
+  renderPagination();
+  elements.resultCount.textContent = t('results')(visible.length, state.summary?.total ?? 0);
   if (state.generatedAt) elements.generatedAt.textContent = t('generated')(formatDate(state.generatedAt, { includeTime: true }));
+  if (focusKey && focusTag) {
+    const row = [...document.querySelectorAll('[data-application-id], [data-task-id]')].find((item) => (item.dataset.applicationId ?? item.dataset.taskId) === focusKey && item.matches(`.${focusRegion}`));
+    const controls = row?.querySelectorAll(focusClass ? `${focusTag}.${focusClass}` : focusTag) ?? [];
+    [...controls].find((control) => control.closest('[data-artifact-id]')?.dataset.artifactId === focusArtifact)?.focus({ preventScroll: true });
+  }
 }
 
-async function load() {
-  elements.loading.hidden = false; elements.error.hidden = true; elements.empty.hidden = true;
-  try {
-    const response = await fetch('/api/dashboard', { headers: { accept: 'application/json' } });
+function renderPagination() {
+  const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
+  elements.pageLabel.textContent = t('pageLabel')(state.page, pages, state.total);
+  elements.previous.disabled = state.loading || state.failed || state.page <= 1;
+  elements.next.disabled = state.loading || state.failed || state.page >= pages;
+}
+
+const requestDashboard = createDashboardLoader({
+  fetchJson: async (url) => {
+    const response = await fetch(url, { headers: { accept: 'application/json' } });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const payload = await response.json();
-    state.applications = payload.applications ?? [];
-    state.timezone = payload.timezone ?? 'UTC';
-    state.generatedAt = payload.generatedAt ?? null;
+    return response.json();
+  },
+  onLoading: (loading) => {
+    state.loading = loading;
+    if (loading) { state.failed = false; elements.error.hidden = true; elements.empty.hidden = true; }
+    elements.loading.hidden = !loading;
+    elements.list.setAttribute('aria-busy', String(loading));
+    renderPagination();
+  },
+  onData: ({ summary, result }) => {
+    state.summary = summary;
+    state.applications = result.applications;
+    state.timezone = summary.timezone ?? 'UTC';
+    state.generatedAt = summary.generatedAt;
+    state.page = result.page; state.requestedPage = result.page; state.pageSize = result.pageSize; state.total = result.total;
+    state.fitCounts = result.fitCounts;
+    state.failed = false;
     render();
-  } catch (error) {
-    elements.list.replaceChildren(); elements.error.hidden = false; elements.errorMessage.textContent = error.message;
-  } finally { elements.loading.hidden = true; }
-}
+    elements.empty.hidden = result.applications.length !== 0;
+  },
+  onError: (error) => {
+    state.failed = true;
+    elements.list.replaceChildren(); elements.empty.hidden = true;
+    elements.error.hidden = false; elements.errorMessage.textContent = error.message;
+  },
+});
 
-elements.search.addEventListener('input', render);
+let searchTimer;
+function load(page = state.page) {
+  state.requestedPage = page;
+  window.clearTimeout(searchTimer);
+  return requestDashboard({ group: state.group, query: elements.search.value, sort: state.sort, fit: state.fit, page, pageSize: state.pageSize });
+}
+elements.previous.addEventListener('click', () => load(state.page - 1));
+elements.next.addEventListener('click', () => load(state.page + 1));
+elements.search.addEventListener('input', () => {
+  state.requestedPage = 1;
+  // Invalidate in-flight responses immediately, then wait 300ms before fetching.
+  requestDashboard.invalidate();
+  state.loading = true; elements.loading.hidden = false; renderPagination();
+  window.clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(() => load(1), 300);
+});
 document.querySelectorAll('[data-filter]').forEach((button) => button.addEventListener('click', () => {
   state.group = button.dataset.filter;
   document.querySelectorAll('[data-filter]').forEach((candidate) => candidate.setAttribute('aria-pressed', String(candidate === button)));
-  render();
+  load(1);
 }));
 document.querySelectorAll('[data-sort]').forEach((button) => button.addEventListener('click', () => {
   state.sort = button.dataset.sort;
   saveChoice('career-journal-role-sort', state.sort);
-  render();
+  load(1);
 }));
 document.querySelectorAll('[data-fit]').forEach((button) => button.addEventListener('click', () => {
   state.fit = button.dataset.fit;
   saveChoice('career-journal-role-fit', state.fit);
-  render();
+  load(1);
 }));
 function scrollBehavior() {
   try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'; } catch { return 'smooth'; }
@@ -631,6 +681,6 @@ elements.languageToggle.addEventListener('click', () => {
   try { localStorage.setItem('career-journal-locale', state.locale); } catch {}
   render();
 });
-document.querySelector('#retry').addEventListener('click', load);
+document.querySelector('#retry').addEventListener('click', () => load(state.requestedPage));
 
 load();

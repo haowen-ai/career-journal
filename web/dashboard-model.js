@@ -1,3 +1,4 @@
+// Sorting/search deliberately use English in both host and browser (a narrowed locale contract).
 const waitingStatuses = new Set(['applied', 'assessment']);
 const interviewStatuses = new Set(['interview', 'offer']);
 const closedStatuses = new Set(['rejected', 'withdrawn', 'accepted', 'declined']);
@@ -47,8 +48,8 @@ export function compareTasksByDue(left, right) {
     if (rightDue === null) return -1;
     return leftDue - rightDue;
   }
-  return String(left.createdAt ?? '').localeCompare(String(right.createdAt ?? ''))
-    || String(left.id ?? '').localeCompare(String(right.id ?? ''));
+  return String(left.createdAt ?? '').localeCompare(String(right.createdAt ?? ''), 'en')
+    || String(left.id ?? '').localeCompare(String(right.id ?? ''), 'en');
 }
 
 export function openTasks(application) {
@@ -177,8 +178,8 @@ export function compareQueueApplications(left, right) {
   return lastIfMissing(FIT_ORDER[left.fit]) - lastIfMissing(FIT_ORDER[right.fit])
     || lastIfMissing(timeOrNull(left.deadlineAt)) - lastIfMissing(timeOrNull(right.deadlineAt))
     || (timeOrNull(right.postedAt) ?? Number.NEGATIVE_INFINITY) - (timeOrNull(left.postedAt) ?? Number.NEGATIVE_INFINITY)
-    || String(left.createdAt).localeCompare(String(right.createdAt))
-    || String(left.id).localeCompare(String(right.id));
+    || String(left.createdAt).localeCompare(String(right.createdAt), 'en')
+    || String(left.id).localeCompare(String(right.id), 'en');
 }
 
 export function queueApplications(applications) {
@@ -261,12 +262,12 @@ function matchesFilter(application, group) {
 // In the Preparing and Queue views, `fit` keeps one fit level and `sort` picks
 // the order. Without `sort`, the Queue view keeps the `queue list` order.
 export function filterApplications(applications, { group = 'all', query = '', sort = null, fit = 'all', now = Date.now() } = {}) {
-  const normalized = String(query).trim().toLocaleLowerCase();
+  const normalized = String(query).trim().toLocaleLowerCase('en');
   const visible = (applications ?? []).filter((application) => {
     const matchesGroup = matchesFilter(application, group);
     const displayedExternalId = application.externalId ? `#${application.externalId}` : null;
     const haystack = [application.company, application.role, application.externalId, displayedExternalId, application.id]
-      .filter(Boolean).join(' ').toLocaleLowerCase();
+      .filter(Boolean).join(' ').toLocaleLowerCase('en');
     return matchesGroup && (!normalized || haystack.includes(normalized));
   });
   if (!hasRoleControls(group)) return visible;
@@ -453,7 +454,7 @@ export function toApplyRow(application, { locale = 'en', now = Date.now(), timeZ
 export function compareEventsNewestFirst(left, right) {
   const leftTime = Date.parse(left.recordedAt ?? left.observedAt ?? left.occurredAt ?? 0) || 0;
   const rightTime = Date.parse(right.recordedAt ?? right.observedAt ?? right.occurredAt ?? 0) || 0;
-  return rightTime - leftTime || String(left.id ?? '').localeCompare(String(right.id ?? ''));
+  return rightTime - leftTime || String(left.id ?? '').localeCompare(String(right.id ?? ''), 'en');
 }
 
 export function latestEvent(application) {
