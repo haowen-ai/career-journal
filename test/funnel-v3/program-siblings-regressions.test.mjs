@@ -199,3 +199,13 @@ test('PS3 review: a member with a submission date counts as submitted whatever i
   assert.equal(entry.program.representative, was);
   assert.match(entry.programNote, /already submitted/);
 });
+
+test('PS3 review: a configuration without search locations is no area: the submitted member still represents', () => {
+  const db = freshDb();
+  const applied = seedApplication(db, { company: COMPANY, role: 'Product Intern', jobUrl: 'https://careers.siblingbank.example/jobs/78', status: 'applied' }).id;
+  const open = seed(db, { req: 'JR9701', office: 'HQ---San-Diego-CA' });
+  const [entry] = listQueue(db, { timezone: 'UTC' });
+  assert.equal(entry.id, open);
+  assert.equal(entry.program.representative, applied);
+  assert.equal(entry.programOk, false);
+});

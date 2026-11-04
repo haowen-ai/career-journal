@@ -80,11 +80,13 @@ export function compareQueueItems(left, right) {
 
 const memberSelect = 'SELECT id, company, role, job_url jobUrl, status, applied_at appliedAt, location, fit, skip_reason skipReason FROM applications';
 const OPEN_STATUSES = new Set(['lead', 'prepared']);
+// A profile defines an area only when it lists search locations (queue list also passes a bare { timezone }).
+const hasArea = (profile) => Boolean(profile?.search?.locations?.length);
 
 function programMember(row, profile) {
   const office = requisitionLocation(row.jobUrl);
   const locations = office ? [office] : String(row.location ?? '').split(/\s*;\s*/).filter(Boolean);
-  const ranked = profile && locations.length ? rankLocation({ title: row.role ?? '', locations }, profile) : null;
+  const ranked = hasArea(profile) && locations.length ? rankLocation({ title: row.role ?? '', locations }, profile) : null;
   const requisition = requisitionKey(row.jobUrl);
   return {
     id: row.id, role: row.role, jobUrl: row.jobUrl, requisition: requisition ? requisition.split(':').at(-1) : null,
@@ -113,7 +115,7 @@ export function programView(subjectId, rows, profile = null) {
   const members = rows.map((row) => programMember(row, profile)).sort(memberOrder);
   // With a profile only a member known to be in the area represents the program; a submission outside the area (or
   // with no known office) does not cover it. Without a profile nothing is known and the order alone decides.
-  const eligible = (member) => (profile ? member.inArea === true : member.inArea !== false);
+  const eligible = (member) => (hasArea(profile) ? member.inArea === true : member.inArea !== false);
   const submitted = members.find((member) => member.submitted && eligible(member));
   const outsideSubmitted = members.filter((member) => member.submitted && !eligible(member));
   const best = members[0];
