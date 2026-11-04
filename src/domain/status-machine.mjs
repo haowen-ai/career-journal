@@ -11,7 +11,13 @@ const transitions = new Map([
   ['declined', new Set(['declined'])],
 ]);
 
-export function assertStatusTransition(from, to) {
+// A submitted application reopens a withdrawal the review or dedupe made (never the user's own withdrawal).
+export function isSubmittedReopen(from, to, { eventType, skipOwner }) {
+  return from === 'withdrawn' && to === 'applied' && eventType === 'submitted' && skipOwner !== 'user';
+}
+
+export function assertStatusTransition(from, to, context = {}) {
+  if (isSubmittedReopen(from, to, context)) return true;
   if (!transitions.has(from) || !transitions.get(from).has(to)) throw new Error(`Invalid status transition: ${from} -> ${to}`);
   return true;
 }

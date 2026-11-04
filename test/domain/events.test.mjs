@@ -43,3 +43,21 @@ test('rejects an illegal status regression', async () => fixture(async (db) => {
   assert.throws(() => recordEvent(db, { ...event, statusAfter: 'applied' }), /Invalid status transition/);
 }));
 
+
+test('a submitted event reopens a withdrawal the user did not make', async () => fixture(async (db) => {
+  for (const owner of ['review', 'legacy', null]) {
+    db.prepare("UPDATE applications SET status='withdrawn', skip_reason='only MBA', skip_owner=? WHERE id='acme-role'").run(owner);
+    recordEvent(db, { ...event, id: `submit-${owner}`, type: 'submitted', statusAfter: 'applied' });
+    const row = db.prepare("SELECT status, skip_reason, skip_owner FROM applications WHERE id='acme-role'").get();
+    assert.deepEqual({ ...row }, { status: 'applied', skip_reason: null, skip_owner: null });
+  }
+}));
+
+test('withdrawn stays closed for the user own withdrawal or a non-submitted event', async () => fixture(async (db) => {
+  db.prepare("UPDATE applications SET status='withdrawn', skip_reason='not interested', skip_owner='user' WHERE id='acme-role'").run();
+  assert.throws(() => recordEvent(db, { ...event, type: 'submitted', statusAfter: 'applied' }), /Invalid status transition: withdrawn -> applied/);
+  db.prepare("UPDATE applications SET skip_owner='review' WHERE id='acme-role'").run();
+  assert.throws(() => recordEvent(db, { ...event, id: 'mail-002', statusAfter: 'applied' }), /Invalid status transition: withdrawn -> applied/);
+  assert.throws(() => recordEvent(db, { ...event, id: 'mail-003', type: 'submitted', statusAfter: 'interview' }), /Invalid status transition: withdrawn -> interview/);
+  assert.equal(db.prepare("SELECT status FROM applications WHERE id='acme-role'").get().status, 'withdrawn');
+}));

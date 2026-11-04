@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { assertStatusTransition, assertReviewRestore } from './status-machine.mjs';
+import { assertStatusTransition, assertReviewRestore, isSubmittedReopen } from './status-machine.mjs';
 
 function required(value, name) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required`);
@@ -42,7 +42,7 @@ export function recordEvent(db, input, { withinTransaction = false, reviewRestor
     if (existing.content_hash !== contentHash) throw new Error(`Event id conflict: ${event.id}`);
     return { created: false, eventId: event.id };
   }
-  const application = db.prepare('SELECT status FROM applications WHERE id = ?').get(event.applicationId);
+  const application = db.prepare('SELECT status, skip_owner FROM applications WHERE id = ?').get(event.applicationId);
   if (!application) throw new Error(`Unknown application: ${event.applicationId}`);
   if (event.statusAfter) {
     if (reviewRestore && event.type === 'review_restored') {
@@ -51,7 +51,7 @@ export function recordEvent(db, input, { withinTransaction = false, reviewRestor
         .map((row) => JSON.parse(row.evidence_json));
       assertReviewRestore(application.status, event.statusAfter, { actor: event.source.actor, lastActor: last && JSON.parse(last.source_json).actor,
         automated: evidence.some((value) => value?.provenance === 'automated'), systemReview: evidence.some((value) => value?.systemReview === true), liftedRule });
-    } else assertStatusTransition(application.status, event.statusAfter);
+    } else assertStatusTransition(application.status, event.statusAfter, { eventType: event.type, skipOwner: application.skip_owner });
   }
   if (!withinTransaction) db.exec('BEGIN IMMEDIATE');
   try {
@@ -61,6 +61,8 @@ export function recordEvent(db, input, { withinTransaction = false, reviewRestor
       .run(event.id, event.applicationId, event.type, event.occurredAt, event.observedAt, event.recordedAt, event.title, event.note, JSON.stringify(event.source), event.statusAfter, contentHash);
     if (event.statusAfter) db.prepare('UPDATE applications SET status = ?, stage = ?, updated_at = ? WHERE id = ?')
       .run(event.statusAfter, event.title, event.recordedAt, event.applicationId);
+    if (event.statusAfter && isSubmittedReopen(application.status, event.statusAfter, { eventType: event.type, skipOwner: application.skip_owner }))
+      db.prepare('UPDATE applications SET skip_reason = NULL, skip_owner = NULL WHERE id = ?').run(event.applicationId);
     if (!withinTransaction) db.exec('COMMIT');
   } catch (error) {
     if (!withinTransaction) db.exec('ROLLBACK');
