@@ -128,6 +128,22 @@ export function requisitionKey(value) {
   return null;
 }
 
+// The office a Workday requisition is posted for: the path segment before the job slug
+// (".../job/Edison-NJ/Product-Intern_JR5663" -> "Edison NJ"). Employers that post one program as one requisition per
+// office encode that office here; extra locations listed on the page or by a board do not change it.
+export function requisitionLocation(value) {
+  const url = parseUrl(value);
+  if (!url) return null;
+  const host = url.hostname.toLowerCase();
+  if (!/\.myworkdayjobs\.com$/.test(host) && !/(^|\.)myworkdaysite\.com$/.test(host)) return null;
+  const segments = url.pathname.split('/').filter(Boolean);
+  const index = segments.lastIndexOf('job');
+  if (index < 0 || segments.length !== index + 3) return null;
+  let office;
+  try { office = decodeURIComponent(segments[index + 1]); } catch { return null; }
+  return office.replace(/[-_\s]+/g, ' ').trim() || null;
+}
+
 export function canonicalUrl(value) {
   const url = parseUrl(value);
   if (!url) return null;

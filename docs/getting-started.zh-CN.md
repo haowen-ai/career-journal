@@ -246,6 +246,7 @@ career-journal scan run --home ~/job-search --json
 career-journal queue list --home ~/job-search
 career-journal queue verify --home ~/job-search --id <application> --result ok --reason "Official posting checked" --deadline 2026-10-15T23:59:00-04:00
 career-journal queue verify --home ~/job-search --id <application> --result skip --reason "PhD students only"
+career-journal queue siblings --home ~/job-search --url <job link>
 career-journal queue score --home ~/job-search
 ```
 
@@ -256,6 +257,7 @@ career-journal queue score --home ~/job-search
 - **去重：** 来源 ID 相同、链接中的职位编号相同、链接相同，或同一公司的职位名称几乎一致，都算同一个职位，只投一次。已经投递或已跳过的职位不会再次进入队列；名称相近的职位会进入队列并标注“可能重复”
 - **匹配度：** 先由 Jev 给出 `high`、`medium` 或 `low`，再交给已配置的大语言模型。两者都没有时，用本地规则判断：职位名称含主要方向为 `high`，含次要方向为 `medium`，并在备注中写明是规则判断
 - **队列：** Agent 逐个阅读新职位的官网原文，再用 `queue verify --id <application> --result ok|skip --reason <原因> [--deadline <iso>]` 记录；每个“不投”都有原因，`skip` 会把线索改为 `withdrawn`，并记录一条带原因的事件。`queue list` 列出尚未跳过的线索，按匹配度、截止时间、地点排序和发布时间排列。`queue score [--all] [--limit <n>] [--dry-run]` 给还没有匹配度的队列岗位评分（例如 2.0 之前记录的或手动加的线索），评分方式与扫描相同：先 Jev，再大语言模型，最后规则；`--all` 会重新评所有队列岗位
+- **同一项目的多个职位编号：** 有的公司把同一个项目按办公地点拆成几个职位编号。同一家公司、同一标题的申请算同一个项目；Workday 职位的办公地点以链接里的地点为准，页面另列的地点不算。`queue list` 为这类线索附上 `program`（每个编号的地点、是否在 `search.locations` 范围内、状态和跳过原因），并选出代表：范围内已投的那个；没有就选范围内地点最好的那个。范围外的编号永远不当代表，已投的也不算；不是代表的队列线索标 `programOk: false`、附说明并排到最后。`queue siblings --id <application> | --url <job link>` 对任何状态的申请给出同样的视图，挑投递批次前先看一下
 - **看板：** 线索卡片显示匹配度、按工作区时区显示的截止时间和剩余天数（或“已过截止”“未写截止日期”）、地点、来源，以及岗位原文是否已核实。**投递队列**筛选列出的岗位与 `queue list` 相同。**准备中**和**投递队列**两个视图可以按截止时间（默认）、匹配度或最新加入排序，也可以只看某一档匹配度，浏览器会记住这两项选择。按匹配度排序时与 `queue list` 顺序一致，只是浏览器中不按地点顺序排。被跳过的岗位显示在**已结束**中，并附跳过原因
 - **等待我投递：** 看板上“测评与面试准备”上方的区块列出没有跳过的线索和已准备材料的岗位，截止时间最近的排在前面，分为今天要投（2 天内截止，或刚过截止不到 1 天）、本周截止、稍后和未写截止日期，每行都有**打开官网**链接
 - **每日扫描（可选）：** 只有你在第 4 轮同意后才创建，而且总是单独的定时任务：另建一个 Codex heartbeat 或 Claude Code 定时任务，在 `pace.scanTime` 运行。它不能加入运行 `mail-sync` 和 `deadline-review` 的共享任务，那个任务固定在 20:00 和 20:15 运行，也不接受其他任务。`automation configure --task role-scan --enabled` 的时间取自 `pace.scanTime`，`automation register-external --task role-scan` 登记新任务自己的 ID。新用户配置时不会创建它，`doctor` 也不要求它

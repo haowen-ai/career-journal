@@ -5,7 +5,7 @@ import { recordEvent } from '../domain/events.mjs';
 import { normalizeDueAt } from '../domain/tasks.mjs';
 import { SUBMITTED_STATUSES } from '../funnel/contract.mjs';
 import { openHomeDatabase } from '../runtime/home.mjs';
-import { companyKey } from '../scan/dedupe.mjs';
+import { DUPLICATE_THRESHOLD, canonicalUrl, companyKey, requisitionKey, requisitionLocation, titleSimilarity } from '../scan/dedupe.mjs';
 import { rankLocation } from '../scan/filter.mjs';
 import { scoreFit } from '../scan/fit.mjs';
 import { loadScanProfile } from '../scan/profile-input.mjs';
@@ -13,7 +13,7 @@ import { DIRECTION_CODE, OUT_OF_DIRECTION_CODE, directionNote, loadDirectionRule
 import { configuredDecisionAdapters } from './email.mjs';
 import { profileOption } from './scan.mjs';
 
-const usage = 'Usage: career-journal queue list [--json] [--profile <path>] | queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>] | queue score [--all] [--limit <n>] [--dry-run] [--json] [--profile <path>]';
+const usage = 'Usage: career-journal queue list [--json] [--profile <path>] | queue siblings --id <application> | --url <job link> [--json] [--profile <path>] | queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>] | queue score [--all] [--limit <n>] [--dry-run] [--json] [--profile <path>]';
 const FIT_ORDER = Object.freeze({ high: 0, medium: 1, low: 2 });
 
 const queueSelect = `SELECT id, company, role, job_url jobUrl, status, source, source_id sourceId, location,
@@ -72,6 +72,89 @@ export function compareQueueItems(left, right) {
   return compareInTimezone(left, right);
 }
 
+// ------------------------------------------------------------- program siblings
+// One program posted as several requisitions (often one per office) is one program: applications of one company with
+// the same title. Each member's office is its requisition's own office when the link names one (Workday), else its
+// stored locations. The representative is a submitted member inside the area, else the best in-area member (open first,
+// then location rank, then fit); an out-of-area member never represents the program, even a submitted one.
+
+const memberSelect = 'SELECT id, company, role, job_url jobUrl, status, location, fit, skip_reason skipReason FROM applications';
+const OPEN_STATUSES = new Set(['lead', 'prepared']);
+
+function programMember(row, profile) {
+  const office = requisitionLocation(row.jobUrl);
+  const locations = office ? [office] : String(row.location ?? '').split(/\s*;\s*/).filter(Boolean);
+  const ranked = profile && locations.length ? rankLocation({ locations }, profile) : null;
+  const requisition = requisitionKey(row.jobUrl);
+  return {
+    id: row.id, role: row.role, jobUrl: row.jobUrl, requisition: requisition ? requisition.split(':').at(-1) : null,
+    location: locations.join('; ') || null, inArea: ranked ? ranked.ok : null, locRank: ranked?.locRank ?? null,
+    status: row.status, fit: row.fit ?? null, skipReason: row.skipReason ?? null,
+  };
+}
+
+function memberOrder(left, right) {
+  const area = (member) => (member.inArea === true ? 0 : member.inArea === null ? 1 : 2);
+  return area(left) - area(right)
+    || Number(!OPEN_STATUSES.has(left.status)) - Number(!OPEN_STATUSES.has(right.status))
+    || last(left.locRank) - last(right.locRank)
+    || last(FIT_ORDER[left.fit]) - last(FIT_ORDER[right.fit])
+    || String(left.id).localeCompare(String(right.id));
+}
+
+function describeMember(member) {
+  return `${member.id} (${[member.requisition, member.location ?? 'location unknown', member.status].filter(Boolean).join(', ')})`;
+}
+
+// rows: every application of the program, the subject included. Returns null for a lone application.
+export function programView(subjectId, rows, profile = null) {
+  if (rows.length < 2) return null;
+  const members = rows.map((row) => programMember(row, profile)).sort(memberOrder);
+  // A submission outside the area does not cover the program: the user would not take that office.
+  const submitted = members.find((member) => SUBMITTED_STATUSES.includes(member.status) && member.inArea !== false);
+  const outsideSubmitted = members.filter((member) => SUBMITTED_STATUSES.includes(member.status) && member.inArea === false);
+  const best = members[0];
+  const representative = submitted ?? (best.inArea !== false ? best : null);
+  const subject = members.find((member) => member.id === subjectId);
+  const others = members.filter((member) => member.id !== subjectId).map(describeMember).join('; ');
+  const outside = outsideSubmitted.length && !submitted
+    ? `; ${outsideSubmitted.map(describeMember).join('; ')} was submitted but is outside the profile area` : '';
+  let note;
+  if (!representative) note = `same program, no requisition in the profile area: ${others}`;
+  else if (representative.id === subjectId) note = `represents its program; same program also posted as ${others}${outside}`;
+  else if (submitted) note = `same program already submitted as ${describeMember(submitted)}; do not apply again`;
+  else if (subject?.inArea === false) note = `office ${subject.location} is outside the profile area; same program in area: apply via ${describeMember(representative)}`;
+  else note = `same program; apply via ${describeMember(representative)}${outside}`;
+  return { representative: representative?.id ?? null, ok: representative?.id === subjectId, note, members };
+}
+
+function programIndex(db) {
+  const byCompany = new Map();
+  for (const row of db.prepare(memberSelect).all()) {
+    const key = companyKey(row.company);
+    if (!byCompany.has(key)) byCompany.set(key, []);
+    byCompany.get(key).push(row);
+  }
+  return (row) => (byCompany.get(companyKey(row.company)) ?? [])
+    .filter((other) => other.id === row.id || titleSimilarity(other.role, row.role) >= DUPLICATE_THRESHOLD);
+}
+
+// The program view of any application, by id or by job link (any status), for picking an apply batch.
+export function programSiblings(db, { id = null, url = null } = {}, profile = null) {
+  let subject = id ? db.prepare(`${memberSelect} WHERE id = ?`).get(id) : null;
+  if (!subject && url) {
+    const requisition = requisitionKey(url);
+    const link = canonicalUrl(url);
+    subject = db.prepare(memberSelect).all().find((row) => (requisition && requisitionKey(row.jobUrl) === requisition)
+      || (link && canonicalUrl(row.jobUrl) === link)) ?? null;
+  }
+  if (!subject) throw new Error('Application not found');
+  const view = programView(subject.id, programIndex(db)(subject), profile);
+  return { id: subject.id, company: subject.company, role: subject.role, ...(view ?? {
+    representative: subject.id, ok: true, note: 'no other requisition of this program', members: [programMember(subject, profile)],
+  }) };
+}
+
 // With role-direction rules, a lead whose title is out of direction (block list) is flagged and listed after every
 // in-direction lead: leads added by hand never pass the delivery filter. Borderline titles are not demoted here.
 export function listQueue(db, profile = null, { direction = null } = {}) {
@@ -84,14 +167,17 @@ export function listQueue(db, profile = null, { direction = null } = {}) {
   }
   const reviewEvidence = db.prepare(`SELECT r.evidence_json FROM postings p JOIN reviews r ON r.posting_id = p.id
     WHERE p.application_id = ? AND p.merged_into IS NULL ORDER BY r.updated_at DESC, p.id LIMIT 1`);
+  const programOf = programIndex(db);
   return db.prepare(`${queueSelect} WHERE status = 'lead' AND skip_reason IS NULL`).all()
     .map((row) => {
       const evidence = JSON.parse(reviewEvidence.get(row.id)?.evidence_json ?? '{}');
+      const program = programView(row.id, programOf(row), profile);
       const item = {
         ...row,
         locRank: locationRank(row.location, profile),
         companyLoad: companyLoads.get(companyKey(row.company)) ?? 0,
         tabHint: tabTitle({ company: row.company, needs: needsFromVerdict(evidence?.needs) }),
+        ...(program ? { program: { representative: program.representative, members: program.members }, programOk: program.ok, programNote: program.note } : {}),
       };
       if (!direction) return item;
       const labelled = Object.hasOwn(evidence, 'function');
@@ -104,7 +190,8 @@ export function listQueue(db, profile = null, { direction = null } = {}) {
       return { ...item, directionOk: !out && !software,
         directionReason: out ? `${DIRECTION_CODE}: ${directionNote(result)}` : software ? `${OUT_OF_DIRECTION_CODE}: ${softwareNote(evidence.function)}` : null };
     })
-    .sort((left, right) => (left.directionOk === false) - (right.directionOk === false) || compareInTimezone(left, right, profile?.timezone));
+    .sort((left, right) => (left.directionOk === false) - (right.directionOk === false)
+      || (left.programOk === false) - (right.programOk === false) || compareInTimezone(left, right, profile?.timezone));
 }
 
 function required(value, name) {
@@ -228,7 +315,7 @@ async function queueProfile(home, parsed) {
 }
 
 export async function queueCommand(parsed, io, runtime = {}) {
-  if (!['list', 'verify', 'score'].includes(parsed.subcommand)) throw new Error(usage);
+  if (!['list', 'siblings', 'verify', 'score'].includes(parsed.subcommand)) throw new Error(usage);
   const home = parsed.options.home ?? process.cwd();
   const profile = parsed.subcommand === 'verify' ? null : await queueProfile(home, parsed);
   if (parsed.subcommand === 'score' && !profile) throw new Error('queue score needs the search profile; complete the profile interview first, or pass --profile <path>.');
@@ -246,12 +333,29 @@ export async function queueCommand(parsed, io, runtime = {}) {
       }
       return 0;
     }
+    if (parsed.subcommand === 'siblings') {
+      const id = parsed.options.id ?? parsed.positionals[0] ?? null;
+      const url = typeof parsed.options.url === 'string' ? parsed.options.url : null;
+      if (!id && !url) throw new Error(usage);
+      const view = programSiblings(context.db, { id, url }, profile);
+      if (parsed.options.json) io.out(JSON.stringify(view, null, 2));
+      else {
+        io.out(`${view.company}\t${view.role}\t${view.note}`);
+        for (const member of view.members) {
+          const area = member.inArea === true ? 'in area' : member.inArea === false ? 'OUT OF AREA' : 'area unknown';
+          io.out([member.id === view.representative ? '*' : '-', member.requisition ?? '-', member.location ?? '-', area, member.status, member.fit ?? '-', member.id, member.skipReason ?? ''].join('\t'));
+        }
+        io.out(view.representative ? `apply via ${view.representative}` : 'no requisition of this program is in the profile area');
+      }
+      return 0;
+    }
     if (parsed.subcommand === 'list') {
       const direction = await loadDirectionRules(path.join(path.resolve(home), '.career-journal', 'profile'));
       const items = listQueue(context.db, { ...profile, timezone: context.config.timezone }, { direction });
       if (parsed.options.json) io.out(JSON.stringify(items, null, 2));
       else for (const item of items) {
         io.out([item.fit ?? '-', item.deadlineAt ?? '-', item.location ?? '-', item.company, item.role, item.id].join('\t'));
+        if (item.programNote) io.out(`\t${item.programOk === false ? 'SIBLING' : 'program'}: ${item.programNote}`);
       }
       return 0;
     }
