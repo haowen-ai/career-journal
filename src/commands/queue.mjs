@@ -78,18 +78,19 @@ export function compareQueueItems(left, right) {
 // stored locations. The representative is a submitted member inside the area, else the best in-area member (open first,
 // then location rank, then fit); an out-of-area member never represents the program, even a submitted one.
 
-const memberSelect = 'SELECT id, company, role, job_url jobUrl, status, location, fit, skip_reason skipReason FROM applications';
+const memberSelect = 'SELECT id, company, role, job_url jobUrl, status, applied_at appliedAt, location, fit, skip_reason skipReason FROM applications';
 const OPEN_STATUSES = new Set(['lead', 'prepared']);
 
 function programMember(row, profile) {
   const office = requisitionLocation(row.jobUrl);
   const locations = office ? [office] : String(row.location ?? '').split(/\s*;\s*/).filter(Boolean);
-  const ranked = profile && locations.length ? rankLocation({ locations }, profile) : null;
+  const ranked = profile && locations.length ? rankLocation({ title: row.role ?? '', locations }, profile) : null;
   const requisition = requisitionKey(row.jobUrl);
   return {
     id: row.id, role: row.role, jobUrl: row.jobUrl, requisition: requisition ? requisition.split(':').at(-1) : null,
     location: locations.join('; ') || null, inArea: ranked ? ranked.ok : null, locRank: ranked?.locRank ?? null,
     status: row.status, fit: row.fit ?? null, skipReason: row.skipReason ?? null,
+    submitted: SUBMITTED_STATUSES.includes(row.status) || Boolean(row.appliedAt),
   };
 }
 
@@ -110,15 +111,17 @@ function describeMember(member) {
 export function programView(subjectId, rows, profile = null) {
   if (rows.length < 2) return null;
   const members = rows.map((row) => programMember(row, profile)).sort(memberOrder);
-  // A submission outside the area does not cover the program: the user would not take that office.
-  const submitted = members.find((member) => SUBMITTED_STATUSES.includes(member.status) && member.inArea !== false);
-  const outsideSubmitted = members.filter((member) => SUBMITTED_STATUSES.includes(member.status) && member.inArea === false);
+  // With a profile only a member known to be in the area represents the program; a submission outside the area (or
+  // with no known office) does not cover it. Without a profile nothing is known and the order alone decides.
+  const eligible = (member) => (profile ? member.inArea === true : member.inArea !== false);
+  const submitted = members.find((member) => member.submitted && eligible(member));
+  const outsideSubmitted = members.filter((member) => member.submitted && !eligible(member));
   const best = members[0];
-  const representative = submitted ?? (best.inArea !== false ? best : null);
+  const representative = submitted ?? (eligible(best) ? best : null);
   const subject = members.find((member) => member.id === subjectId);
   const others = members.filter((member) => member.id !== subjectId).map(describeMember).join('; ');
   const outside = outsideSubmitted.length && !submitted
-    ? `; ${outsideSubmitted.map(describeMember).join('; ')} was submitted but is outside the profile area` : '';
+    ? `; ${outsideSubmitted.map(describeMember).join('; ')} was submitted but is outside the profile area or its office is unknown` : '';
   let note;
   if (!representative) note = `same program, no requisition in the profile area: ${others}`;
   else if (representative.id === subjectId) note = `represents its program; same program also posted as ${others}${outside}`;

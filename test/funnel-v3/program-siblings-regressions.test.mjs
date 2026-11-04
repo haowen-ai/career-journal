@@ -9,7 +9,7 @@
 //   PS2  Applications of one company with the same title (title similarity >= DUPLICATE_THRESHOLD) are one program.
 //        A queued lead that has program siblings carries `program`: every member with its office, area verdict,
 //        status and skip reason, and the representative.
-//   PS3  The representative is a submitted member inside the area if one exists; otherwise the best in-area member,
+//   PS3  The representative is a submitted member (status or applied_at) known to be inside the area if one exists; otherwise the best in-area member,
 //        preferring open (lead/prepared) members, then the profile's location rank, then fit. An out-of-area member is
 //        never the representative, even with a higher fit or already submitted; with no in-area member there is none.
 //   PS4  A queued lead that is not the representative is flagged (programOk false, with a note naming the
@@ -158,4 +158,44 @@ test('PS5 queue siblings shows the program for a withdrawn application, by id or
     assert.match(text, /HQ San Diego CA/);
     assert.match(text, new RegExp(`apply via ${sanDiego}`));
   } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test('PS3 review: an unknown-location member never represents the program while the profile has an area', () => {
+  const db = freshDb();
+  // A submitted member with no office and no stored location, and an out-of-area lead.
+  const unknown = seedApplication(db, { company: COMPANY, role: 'Product Intern', jobUrl: 'https://careers.siblingbank.example/jobs/77', status: 'applied' }).id;
+  const edison = seed(db, { req: 'JR9401', office: 'Edison-NJ' });
+  const sanDiego = seed(db, { req: 'JR9402', office: 'HQ---San-Diego-CA' });
+  const items = listQueue(db, PROFILE);
+  assert.equal(item(items, sanDiego).program.representative, sanDiego, 'a known in-area lead wins over an unknown-location submission');
+  assert.match(item(items, sanDiego).programNote, new RegExp(`${unknown}.*location unknown`));
+  assert.equal(item(items, edison).program.representative, sanDiego);
+  const other = freshDb();
+  seedApplication(other, { company: COMPANY, role: 'Product Intern', jobUrl: 'https://careers.siblingbank.example/jobs/77', status: 'applied' });
+  const alone = seed(other, { req: 'JR9401', office: 'Edison-NJ' });
+  assert.equal(item(listQueue(other, PROFILE), alone).program.representative, null, 'unknown and out-of-area members only: no representative');
+});
+
+test('PS3 review: season-limited areas follow the program title', () => {
+  const db = freshDb();
+  const profile = { search: { remoteOk: false, locations: [
+    { label: 'California', match: ['california', 'san diego', 'ca'], seasons: ['summer'] },
+    { label: 'New York, NY', match: ['new york'] },
+  ] } };
+  const ca = seedApplication(db, { company: COMPANY, role: 'Fall Product Intern', jobUrl: wd('HQ---San-Diego-CA', 'JR9501', 'Fall-Product-Intern'), fit: 'high' }).id;
+  const ny = seedApplication(db, { company: COMPANY, role: 'Fall Product Intern', jobUrl: wd('New-York-NY', 'JR9502', 'Fall-Product-Intern'), fit: 'low' }).id;
+  const items = listQueue(db, profile);
+  assert.equal(item(items, ca).program.representative, ny);
+  assert.equal(item(items, ca).programOk, false);
+});
+
+test('PS3 review: a member with a submission date counts as submitted whatever its later status', () => {
+  const db = freshDb();
+  const was = seed(db, { req: 'JR9601', office: 'Los-Angeles-CA', status: 'withdrawn' });
+  db.prepare("UPDATE applications SET applied_at = '2026-10-20T12:00:00Z' WHERE id = ?").run(was);
+  const open = seed(db, { req: 'JR9602', office: 'HQ---San-Diego-CA', fit: 'high' });
+  const [entry] = listQueue(db, PROFILE);
+  assert.equal(entry.id, open);
+  assert.equal(entry.program.representative, was);
+  assert.match(entry.programNote, /already submitted/);
 });
