@@ -34,7 +34,7 @@ function normalizedEvent(input) {
   };
 }
 
-export function recordEvent(db, input, { withinTransaction = false, reviewRestore = false, liftedRule = false } = {}) {
+export function recordEvent(db, input, { withinTransaction = false, reviewRestore = false, liftedRule = false, reopenUserWithdrawal = false } = {}) {
   const event = normalizedEvent(input);
   const contentHash = createHash('sha256').update(JSON.stringify(event)).digest('hex');
   const existing = db.prepare('SELECT content_hash FROM application_events WHERE id = ?').get(event.id);
@@ -51,7 +51,7 @@ export function recordEvent(db, input, { withinTransaction = false, reviewRestor
         .map((row) => JSON.parse(row.evidence_json));
       assertReviewRestore(application.status, event.statusAfter, { actor: event.source.actor, lastActor: last && JSON.parse(last.source_json).actor,
         automated: evidence.some((value) => value?.provenance === 'automated'), systemReview: evidence.some((value) => value?.systemReview === true), liftedRule });
-    } else assertStatusTransition(application.status, event.statusAfter, { eventType: event.type, skipOwner: application.skip_owner });
+    } else assertStatusTransition(application.status, event.statusAfter, { eventType: event.type, skipOwner: application.skip_owner, reopenUserWithdrawal });
   }
   if (!withinTransaction) db.exec('BEGIN IMMEDIATE');
   try {
@@ -61,7 +61,7 @@ export function recordEvent(db, input, { withinTransaction = false, reviewRestor
       .run(event.id, event.applicationId, event.type, event.occurredAt, event.observedAt, event.recordedAt, event.title, event.note, JSON.stringify(event.source), event.statusAfter, contentHash);
     if (event.statusAfter) db.prepare('UPDATE applications SET status = ?, stage = ?, updated_at = ? WHERE id = ?')
       .run(event.statusAfter, event.title, event.recordedAt, event.applicationId);
-    if (event.statusAfter && isSubmittedReopen(application.status, event.statusAfter, { eventType: event.type, skipOwner: application.skip_owner }))
+    if (event.statusAfter && isSubmittedReopen(application.status, event.statusAfter, { eventType: event.type, skipOwner: application.skip_owner, reopenUserWithdrawal }))
       db.prepare('UPDATE applications SET skip_reason = NULL, skip_owner = NULL WHERE id = ?').run(event.applicationId);
     if (!withinTransaction) db.exec('COMMIT');
   } catch (error) {

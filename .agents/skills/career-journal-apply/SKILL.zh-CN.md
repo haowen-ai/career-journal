@@ -74,7 +74,7 @@
 
 ## 用户提交之后
 
-- 用证据确认每一次提交：所选求职邮箱里的确认邮件（通常由每日 `mail-sync` 读到）、网站的“已收到”页面，或候选人后台中的状态。只有其中之一显示了该申请，才记为 `applied`；填好的表、`✅` 标签标题或子 Agent 的报告都不是提交证据。然后记录 `event add --id <application> --type application_submitted --title "Application submitted" --status-after applied --source <email|site|user> --note "<证据>"`；只有证据写明了时间时才加 `--occurred-at`。
+- 用证据确认每一次提交：所选求职邮箱里的确认邮件（通常由每日 `mail-sync` 读到）、网站的“已收到”页面，或候选人后台中的状态。只有其中之一显示了该申请，才记为 `applied`；填好的表、`✅` 标签标题或子 Agent 的报告都不是提交证据。然后记录 `event add --id <application> --type application_submitted --title "Application submitted" --status-after applied --source <email|site|user> --note "<证据>"`；只有证据写明了时间时才加 `--occurred-at`。审阅或去重撤回的岗位也用这条命令改回 `applied`；用户自己撤回的岗位保持撤回，除非用户说明仍然提交了，此时加 `--reopen-user-withdrawal`。
 - 按 `career-journal` 的证据规则，用户明确说某一个无歧义的申请已提交，也可以作为证据，用 `--source user` 记录。没有证据时，该申请仍留在队列中，下一次邮件同步后再查。
 - 没有写明岗位的拒信，只有附上明确的“推断”说明、写清为什么对应到这个申请，才可以记到该申请上。这家公司有多个申请都可能对应时，不要归到任何一个，询问用户。
 - 只有填表报告写明了实际上传的那个文件、且用户没有替换时，才用 `material mark-submitted --id <application> --file <resumePath> --confirm` 记录提交的简历。

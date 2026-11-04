@@ -16,7 +16,7 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Fixed
 
-- A `submitted` event can now move a `withdrawn` application to `applied` when the withdrawal came from review or dedupe, not from the user; the old skip reason is cleared. A user's own withdrawal stays final.
+- A `submitted` event can now move a `withdrawn` application to `applied` when the withdrawal came from review or dedupe, not from the user; the old skip reason is cleared. A user's own withdrawal stays withdrawn unless `event add --reopen-user-withdrawal` is given. Both `submitted` and `application_submitted` count.
 
 ### Security
 

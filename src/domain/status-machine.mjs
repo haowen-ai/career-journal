@@ -11,9 +11,10 @@ const transitions = new Map([
   ['declined', new Set(['declined'])],
 ]);
 
-// A submitted application reopens a withdrawal the review or dedupe made (never the user's own withdrawal).
-export function isSubmittedReopen(from, to, { eventType, skipOwner }) {
-  return from === 'withdrawn' && to === 'applied' && eventType === 'submitted' && skipOwner !== 'user';
+// A submitted application reopens a withdrawal the review or dedupe made. A user-owned withdrawal
+// reopens only when the user asks for it explicitly (reopenUserWithdrawal), never on its own.
+export function isSubmittedReopen(from, to, { eventType, skipOwner, reopenUserWithdrawal = false }) {
+  return from === 'withdrawn' && to === 'applied' && ['submitted', 'application_submitted'].includes(eventType) && (skipOwner !== 'user' || reopenUserWithdrawal === true);
 }
 
 export function assertStatusTransition(from, to, context = {}) {

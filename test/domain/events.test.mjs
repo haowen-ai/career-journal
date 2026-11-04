@@ -45,9 +45,9 @@ test('rejects an illegal status regression', async () => fixture(async (db) => {
 
 
 test('a submitted event reopens a withdrawal the user did not make', async () => fixture(async (db) => {
-  for (const owner of ['review', 'legacy', null]) {
+  for (const [owner, type] of [['review', 'submitted'], ['legacy', 'application_submitted'], [null, 'submitted']]) {
     db.prepare("UPDATE applications SET status='withdrawn', skip_reason='only MBA', skip_owner=? WHERE id='acme-role'").run(owner);
-    recordEvent(db, { ...event, id: `submit-${owner}`, type: 'submitted', statusAfter: 'applied' });
+    recordEvent(db, { ...event, id: `submit-${owner}`, type, statusAfter: 'applied' });
     const row = db.prepare("SELECT status, skip_reason, skip_owner FROM applications WHERE id='acme-role'").get();
     assert.deepEqual({ ...row }, { status: 'applied', skip_reason: null, skip_owner: null });
   }
@@ -60,4 +60,12 @@ test('withdrawn stays closed for the user own withdrawal or a non-submitted even
   assert.throws(() => recordEvent(db, { ...event, id: 'mail-002', statusAfter: 'applied' }), /Invalid status transition: withdrawn -> applied/);
   assert.throws(() => recordEvent(db, { ...event, id: 'mail-003', type: 'submitted', statusAfter: 'interview' }), /Invalid status transition: withdrawn -> interview/);
   assert.equal(db.prepare("SELECT status FROM applications WHERE id='acme-role'").get().status, 'withdrawn');
+}));
+
+test('an explicit override reopens a user-owned withdrawal only for a submitted event', async () => fixture(async (db) => {
+  db.prepare("UPDATE applications SET status='withdrawn', skip_reason='dup', skip_owner='user' WHERE id='acme-role'").run();
+  assert.throws(() => recordEvent(db, { ...event, statusAfter: 'applied' }, { reopenUserWithdrawal: true }), /Invalid status transition/);
+  recordEvent(db, { ...event, id: 'mail-002', type: 'submitted', statusAfter: 'applied' }, { reopenUserWithdrawal: true });
+  const row = db.prepare("SELECT status, skip_reason, skip_owner FROM applications WHERE id='acme-role'").get();
+  assert.deepEqual({ ...row }, { status: 'applied', skip_reason: null, skip_owner: null });
 }));

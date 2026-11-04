@@ -16,7 +16,7 @@
 
 ### 修复
 
-- 审阅或去重撤回的申请（不是用户自己撤回的），记一条 `submitted` 事件即可从 `withdrawn` 改回 `applied`，并清掉原跳过原因。用户自己撤回的仍不可逆。
+- 审阅或去重撤回的申请（不是用户自己撤回的），记一条 `submitted` 事件即可从 `withdrawn` 改回 `applied`，并清掉原跳过原因。用户自己撤回的仍保持撤回，除非 `event add` 加 `--reopen-user-withdrawal`。`submitted` 与 `application_submitted` 两种事件类型都算。
 
 ### 安全
 
