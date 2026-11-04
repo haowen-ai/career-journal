@@ -62,7 +62,7 @@ export function assessSourceHealth(db, { runId, now, manifest, reported, baselin
     let failStreak = 0;
     if (failed({ status, truncated: item.truncated || item.capDetected })) {
       failStreak = 1;
-      for (const row of history) { if (!attempted(row.status)) continue; if (!failed(row)) break; failStreak += 1; }
+      for (const row of history) { if (!failed(row)) break; failStreak += 1; }
     }
     const result = { ...item, status, count, rawCount: item.rawCount ?? count, baseline, alert, coldStart, failStreak };
     if (result.detail) result.detail = redact(result.detail);

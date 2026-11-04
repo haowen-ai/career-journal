@@ -22,7 +22,12 @@ export function parseCareerOpsRoles(result) {
 
 export function parseCareerOpsRaw(result) {
   const roles = parseCareerOpsRoles(result);
-  const partitions = result?.partitions?.length ? result.partitions : [{ partition: 'all', status: 'partial', count: roles.length, detail: 'legacy display-line bridge' }];
+  // An empty partition list next to an empty inventory means every portals.yml entry is turned off;
+  // only a bridge that sends no partition list at all is the legacy display-line bridge.
+  const allDisabled = Array.isArray(result?.partitions) && !result.partitions.length && Array.isArray(result?.configuredPartitions) && !result.configuredPartitions.length && !roles.length;
+  const partitions = result?.partitions?.length ? result.partitions
+    : allDisabled ? [{ partition: 'all', status: 'disabled', count: 0, detail: 'every CareerOps entry is enabled: false' }]
+    : [{ partition: 'all', status: 'partial', count: roles.length, detail: 'legacy display-line bridge' }];
   const sources = partitions.map((part) => {
     const count = roles.filter((role) => role.partition === part.partition).length;
     return { ...part, source: 'careerops', rawCount: count, count,

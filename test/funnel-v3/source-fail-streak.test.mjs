@@ -32,3 +32,11 @@ test('a source that keeps failing reports how many runs in a row it has failed, 
   assert.equal(view(recovered, 'greenhouse:beta').failStreak, 4);
   assert.ok(recovered.alerts.some((item) => item.partition === 'greenhouse:beta' && item.failStreak === 4), 'the alert list carries the streak');
 });
+
+test('a run where the source was not attempted (disabled) breaks the streak', async () => {
+  const db = freshDb();
+  await scan(db, 0, [['greenhouse:alpha', { status: 'error', count: 0 }], ['greenhouse:beta']]);
+  await scan(db, 1, [['greenhouse:alpha', { status: 'disabled', count: 0 }], ['greenhouse:beta']]);
+  const last = await scan(db, 2, [['greenhouse:alpha', { status: 'error', count: 0 }], ['greenhouse:beta']]);
+  assert.equal(view(last, 'greenhouse:alpha').failStreak, 1);
+});

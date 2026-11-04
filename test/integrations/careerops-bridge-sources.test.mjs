@@ -88,3 +88,14 @@ test('entries marked enabled: false are not fetched and leave the configured inv
   assert.deepEqual(result.configuredPartitions, ['demo:On', 'demo:Default']);
   assert.deepEqual(result.partitions.map((p) => p.partition), ['demo:On', 'demo:Default']);
 });
+
+test('when every entry is enabled: false the scan reports CareerOps as disabled, not as a legacy partial list', async () => {
+  const { parseCareerOpsRaw } = await import('../../src/scan/sources/careerops.mjs');
+  const provider = { id: 'demo', fetch: async () => { throw new Error('must not fetch'); } };
+  const raw = await collect([{ name: 'Off', enabled: false }], provider);
+  const parsed = parseCareerOpsRaw({ ok: true, ...raw });
+  assert.deepEqual(parsed.sources.map((s) => [s.partition, s.status]), [['all', 'disabled']]);
+  assert.match(parsed.sources[0].detail, /enabled: false/);
+  const legacy = parseCareerOpsRaw({ ok: true, roles: [] });
+  assert.equal(legacy.sources[0].detail, 'legacy display-line bridge', 'a bridge with no partition list is still treated as legacy');
+});
