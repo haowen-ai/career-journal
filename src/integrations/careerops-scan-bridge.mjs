@@ -110,17 +110,47 @@ export async function scanCareerOps(root, { execute = run, env = process.env, ti
   }
 }
 
+// CareerOps HTTP helpers abort after 10 s; large official boards (Lever's Spotify list is
+// about 0.8 MB) sometimes take longer. Calls without their own timeout get this one, and an
+// entry can set `timeout_ms` in portals.yml.
+export const DEFAULT_ENTRY_TIMEOUT_MS = 30_000;
+// A transient failure is retried in the same run so one slow response does not drop a board
+// for the night. A definite answer (404, a parse error, a missing provider) is not retried.
+export const RETRY_DELAYS_MS = Object.freeze([2_000, 5_000]);
+const TRANSIENT_MESSAGE = /\babort|\btimed? ?out\b|timeout|fetch failed|socket|network|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|UND_ERR/i;
+
+export function isTransientError(error) {
+  const status = Number(error?.status ?? error?.statusCode);
+  if (Number.isInteger(status) && status > 0) return status === 429 || status >= 500;
+  return TRANSIENT_MESSAGE.test(`${error?.name ?? ''} ${error?.message ?? ''} ${error?.cause?.code ?? ''} ${error?.cause?.message ?? ''}`);
+}
+
+function withEntryTimeout(ctx, entry) {
+  const configured = Number(entry.timeout_ms ?? entry.timeoutMs);
+  const timeoutMs = Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_ENTRY_TIMEOUT_MS;
+  const wrapped = { ...ctx };
+  for (const name of ['fetchJson', 'fetchText', 'fetchResponse']) {
+    if (typeof ctx?.[name] === 'function') wrapped[name] = (url, opts = {}) => ctx[name](url, { timeoutMs, ...opts });
+  }
+  return wrapped;
+}
+
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // Each fetch is sequential: stderr cap messages belong only to the current entry.
-export async function collectCareerOpsRaw({ portals, providers, resolveProvider, makeHttpCtx }) {
+export async function collectCareerOpsRaw({ portals, providers, resolveProvider, makeHttpCtx, sleep = defaultSleep, retryDelaysMs = RETRY_DELAYS_MS }) {
   const roles = [];
   const partitions = [];
   const configuredPartitions = [];
-  const entries = [...(portals.tracked_companies ?? []), ...(portals.job_boards ?? [])];
+  // `enabled: false` turns an entry off (CareerOps's own scan skips it too); it then leaves the
+  // configured inventory, so its partition is retired instead of failing every night.
+  const entries = [...(portals.tracked_companies ?? []), ...(portals.job_boards ?? [])].filter((entry) => entry?.enabled !== false);
   for (const entry of entries) {
     let provider;
     let partition = `unknown:${entry.name ?? entry.board ?? entry.url ?? ''}`;
     const originalError = console.error;
     let capDetected = false;
+    let attempts = 0;
     try {
       const resolved = await resolveProvider(entry, providers);
       provider = resolved?.provider ?? resolved;
@@ -132,7 +162,19 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
         if (/\btruncat(?:ed|ion)\b|\bpartial (?:result|census)|\b(?:page|result) (?:limit|cap)\b/i.test(line)) capDetected = true;
         originalError(...args);
       };
-      const jobs = await provider.fetch(entry, await makeHttpCtx(entry, portals));
+      let jobs;
+      for (;;) {
+        attempts += 1;
+        capDetected = false;
+        try {
+          jobs = await provider.fetch(entry, withEntryTimeout(await makeHttpCtx(entry, portals), entry));
+          break;
+        } catch (error) {
+          if (attempts > retryDelaysMs.length || !isTransientError(error)) throw error;
+          originalError(`careerops bridge: ${partition} attempt ${attempts} failed (${error.message}); retrying`);
+          await sleep(retryDelaysMs[attempts - 1]);
+        }
+      }
       if (!Array.isArray(jobs)) throw new Error('Provider returned no job array');
       const maxPages = Number(entry.max_pages ?? entry.maxPages ?? entry.workday?.max_pages ?? portals.workday?.max_pages ?? 100);
       if (provider.id === 'workday' && Number.isFinite(maxPages) && maxPages > 0 && jobs.length >= maxPages * 20) capDetected = true;
@@ -148,9 +190,9 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
         }
         roles.push(role);
       }
-      partitions.push({ partition, status: truncated ? 'partial' : 'ok', count: jobs.length, rawCount: jobs.length, truncated, capDetected });
+      partitions.push({ partition, status: truncated ? 'partial' : 'ok', count: jobs.length, rawCount: jobs.length, truncated, capDetected, attempts });
     } catch (error) {
-      partitions.push({ partition, status: 'error', count: 0, rawCount: 0, error: error.message, truncated: capDetected, capDetected });
+      partitions.push({ partition, status: 'error', count: 0, rawCount: 0, error: error.message, truncated: capDetected, capDetected, attempts });
     } finally { configuredPartitions.push(partition); console.error = originalError; }
   }
   return { roles, partitions, configuredPartitions };

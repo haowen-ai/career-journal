@@ -80,7 +80,7 @@ export function scanFailed(summary) { return scanExitCode(summary) === 1; }
 
 export function formatScanSummary(summary) {
   const lines = [`Role scan${summary.dryRun ? ' (dry run: nothing written)' : ''}: ${summary.status}`];
-  lines.push(`Sources: ${summary.sources.map((item) => `${item.partition} ${item.status} ${item.count}${item.detail ? ` (${item.detail})` : ''}${item.alert ? ` [${item.alert}]` : ''}`).join('; ')}`);
+  lines.push(`Sources: ${summary.sources.map((item) => `${item.partition} ${item.status} ${item.count}${item.detail ? ` (${item.detail})` : ''}${item.alert ? ` [${item.alert}${item.failStreak > 1 ? `, ${item.failStreak} runs in a row` : ''}]` : ''}`).join('; ')}`);
   const { raw, observed, newPostings, reused, dropped, review, quarantined } = summary.counts;
   lines.push(`Raw ${raw}; observed ${observed}; new postings ${newPostings}; reused ${reused}; review ${review}; quarantined ${quarantined}`);
   if (Object.keys(dropped).length) lines.push(`Dropped: ${Object.entries(dropped).map(([code, count]) => `${code} ${count}`).join(', ')}`);

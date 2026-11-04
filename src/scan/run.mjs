@@ -120,7 +120,7 @@ export async function runScan(options) {
       const finishedAt = timestamp();
       const sources = assessSourceHealth(db, { runId, now: finishedAt, manifest, reported });
       const expectedKeys = new Set(manifest.map((item) => `${item.source}\0${item.partition}`));
-      const alerts = sources.filter((item) => item.alert).map(({ source, partition, alert }) => ({ source, partition, alert }));
+      const alerts = sources.filter((item) => item.alert).map(({ source, partition, alert, failStreak }) => ({ source, partition, alert, ...(failStreak ? { failStreak } : {}) }));
       const attempted = reported.filter((item) => ['ok', 'empty', 'partial', 'error'].includes(item.status));
       const status = attempted.length && attempted.every((item) => item.status === 'error') ? 'failed'
         : sources.some((item) => item.alert && expectedKeys.has(`${item.source}\0${item.partition}`)) ? 'partial' : 'ok';

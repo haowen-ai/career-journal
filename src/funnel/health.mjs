@@ -56,7 +56,15 @@ export function assessSourceHealth(db, { runId, now, manifest, reported, baselin
       const sample = db.prepare('SELECT status FROM source_samples WHERE partition=? AND sampled_at<=? ORDER BY sampled_at DESC LIMIT 1').get(item.partition, now);
       if (sample?.status === 'sample_mismatch') alert = 'sample_mismatch';
     }
-    const result = { ...item, status, count, rawCount: item.rawCount ?? count, baseline, alert, coldStart };
+    // Runs in a row (this one included) that ended in an error or a capped/partial list, so a
+    // board that has failed for a week is not read as tonight's one-off.
+    const failed = (row) => row.status === 'error' || (row.status === 'partial' && Boolean(row.truncated));
+    let failStreak = 0;
+    if (failed({ status, truncated: item.truncated || item.capDetected })) {
+      failStreak = 1;
+      for (const row of history) { if (!attempted(row.status)) continue; if (!failed(row)) break; failStreak += 1; }
+    }
+    const result = { ...item, status, count, rawCount: item.rawCount ?? count, baseline, alert, coldStart, failStreak };
     if (result.detail) result.detail = redact(result.detail);
     db.prepare(`INSERT INTO run_sources (run_id,source,partition,status,count,errors,truncated,expected,detail,baseline,alert,raw_count,quarantined)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id,source,partition) DO UPDATE SET status=excluded.status,count=excluded.count,
