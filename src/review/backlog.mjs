@@ -6,8 +6,8 @@
 // user-owned rows (user skips, prepared/submitted applications, user log entries), and write through a
 // claimed item fence in short transactions.
 import { classifyRole } from '../funnel/classify.mjs';
-import { SIGNAL_DROP_CODES } from '../funnel/contract.mjs';
-import { currentRecordReader, latestSightings } from '../funnel/membership.mjs';
+import { EVIDENCE_DROP_CODES, SIGNAL_DROP_CODES } from '../funnel/contract.mjs';
+import { currentRecordReader, latestSightings, postingEvidenceHash, storeSettledEvidence } from '../funnel/membership.mjs';
 import { companyKey } from '../scan/dedupe.mjs';
 import { deliver, logReview, parseJson } from './deliver.mjs';
 import { atomic, claimItem } from './lease.mjs';
@@ -167,6 +167,7 @@ export function settleBacklog(db, { policy, profile, now, apply = false }) {
         db.prepare(`UPDATE reviews SET state='done',stage='deliver',decision=?,code=?,next_due=NULL,hold_owner=NULL,hold_since=NULL,
           lease_owner=NULL,lease_until=NULL,updated_at=? WHERE posting_id=? AND lease_owner=? AND lease_generation=?`)
           .run(decision, code, now, row.posting_id, fence.owner, fence.generation);
+        if (decision === 'dropped' && EVIDENCE_DROP_CODES.includes(code)) storeSettledEvidence(db, row.posting_id, postingEvidenceHash(db, row.posting_id));
         logReview(db, row.posting_id, { now, payload: { action: 'backlog_settled', class: kind, decision, code } });
         report.settled += 1;
       }

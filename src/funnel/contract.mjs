@@ -6,6 +6,8 @@ export const LANES = Object.freeze(['deadline', 'aged', 'bootstrap', 'new', 'ref
 export const DROP_CODES = Object.freeze(['company_excluded', 'posting_excluded', 'outside_countries', 'no_student_signal', 'out_of_direction', 'delisted']);
 // Drops read from one source's record. Another source can still carry the student signal.
 export const SIGNAL_DROP_CODES = Object.freeze(['no_student_signal', 'out_of_direction']);
+// System drops the posting's own content decides. Only these reopen on new evidence (authorization evidence_changed).
+export const EVIDENCE_DROP_CODES = Object.freeze([...SIGNAL_DROP_CODES, 'outside_countries']);
 export const REUSE_CODES = Object.freeze(['already_submitted', 'user_declined']);
 export const HOLD_CODES = Object.freeze(['user_review', 'browser_review', 'identity_conflict', 'provenance_unknown', 'system_failure', 'quota_full', 'quota_reconciliation', 'quota_unclear', 'unavailable', 'already_applied_mail', 'missing_fact']);
 export const SUBMITTED_STATUSES = Object.freeze(['applied', 'assessment', 'interview', 'offer', 'accepted', 'declined', 'rejected']);

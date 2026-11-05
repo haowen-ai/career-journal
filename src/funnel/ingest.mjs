@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { aliasesFor, canonicalUrl, resolvePosting, postingCandidates, submittedApplicationIndex, submittedDuplicate } from './identity.mjs';
 import { classifyRole, CERTAIN_DROP_CODES } from './classify.mjs';
-import { SIGNAL_DROP_CODES, SUBMITTED_STATUSES } from './contract.mjs';
+import { EVIDENCE_DROP_CODES, SIGNAL_DROP_CODES, SUBMITTED_STATUSES } from './contract.mjs';
 import { redact } from '../runtime/redact.mjs';
 import { assertScanOwner } from './scan-lease.mjs';
-import { currentRecordReader, latestSightings } from './membership.mjs';
+import { currentRecordReader, latestSightings, postingEvidenceHash, settledEvidenceHash, storeSettledEvidence } from './membership.mjs';
 import { userDecided, userLoggedPostings } from '../review/ownership.mjs';
 import { autoReopenAllowed } from '../review/reopen-policy.mjs';
 
@@ -18,8 +18,7 @@ const stable = (value) => Array.isArray(value) ? value.map(stable) : value && ty
 export const DEFAULT_CERTAIN_DROP_CODES = CERTAIN_DROP_CODES;
 // Settlements that only say the posting left the board. A later listing is a relist.
 const DELIST_CODES = new Set(['delisted', 'closed_verified']);
-// Drops the posting's own content decides; only these reopen on new evidence (evidence_changed).
-const EVIDENCE_DROP_CODES = new Set([...SIGNAL_DROP_CODES, 'outside_countries']);
+const EVIDENCE_CODES = new Set(EVIDENCE_DROP_CODES);
 
 function quarantine(db, record, reason, now) {
   const payload = redact(JSON.stringify({ reason, record }));
@@ -57,6 +56,13 @@ export function createIngestContext(db, { policy = {} } = {}) {
     userLogged: userLoggedPostings(db),
     latest: null, // built on first need, then maintained per sighting
   };
+}
+
+// Evidence never reopens a posting whose linked application (any merge member) is withdrawn, by anyone and for any
+// reason, or skipped by the user or a legacy import.
+function evidenceBlocked(db, members) {
+  return db.prepare(`SELECT 1 FROM postings p JOIN applications a ON a.id=p.application_id WHERE p.id IN (SELECT value FROM json_each(?))
+    AND (a.status='withdrawn' OR a.skip_owner IN ('user','legacy')) LIMIT 1`).get(JSON.stringify(members)) != null;
 }
 
 function effectiveId(db, id) {
@@ -187,12 +193,16 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
       const relist = Boolean(old && DELIST_CODES.has(old.code) && record.listed !== false && (!posting.listed || reappeared));
       // Decide once is about rule edits, not new evidence about the posting itself. A system drop decided by the
       // posting's own content (no signal, out of direction, outside the countries) reopens with authorization
-      // evidence_changed when this source's content changed or another source shows the posting, once per
-      // evidence hash. A relaxed rule (re-allowed company, removed exclusion) changes no evidence: `review rejudge`.
-      const evidence = reopened && EVIDENCE_DROP_CODES.has(old.code) && (changed || !previous)
-        && !(application && (application.status === 'withdrawn' && application.skip_owner !== 'review' || ['user', 'legacy'].includes(application.skip_owner)))
-        && !db.prepare(`SELECT 1 FROM review_log WHERE posting_id=? AND kind='outcome' AND json_extract(payload_json,'$.authorization')='evidence_changed'
-          AND json_extract(payload_json,'$.evidenceHash')=?`).get(id, contentHash);
+      // evidence_changed when the evidence it was settled on (reviews.dep_hashes_json.settledEvidenceHash: every current
+      // source record and the location list) differs now. Seeing the settled evidence again (A, B, A) or a rule edit
+      // changes nothing: `review rejudge`. A withdrawn or user/legacy-skipped application, or a user decision, blocks it.
+      const evidenceCode = old?.state === 'done' && old.decision === 'dropped' && EVIDENCE_CODES.has(old.code);
+      let evidenceNow;
+      const currentEvidence = () => evidenceNow ??= postingEvidenceHash(db, id, { latest: context.latest ??= latestSightings(db).latest, reader });
+      const settledHash = evidenceCode ? settledEvidenceHash(old) : null;
+      const evidence = reopened && Boolean(settledHash) && currentEvidence() !== settledHash
+        && !evidenceBlocked(db, reader.members(id))
+        && !userDecided(db, { ...old, application_id: posting.application_id }, { userLogged });
       const authorization = relist ? 'relist' : evidence ? 'evidence_changed' : null;
       const resetAllowed = autoReopenAllowed({ review: old, application, authorization });
       const renew = old && old.state !== 'leased' && old.hold_owner !== 'user' && !stillDelisted
@@ -214,8 +224,13 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
         if (renew && authorization) {
           db.prepare("INSERT INTO review_log (posting_id,at,stage,kind,payload_json) VALUES (?,?,'scan','outcome',?)")
             .run(id, now, JSON.stringify(relist ? { action: 'relisted', authorization: 'relist', previousCode: old.code }
-              : { action: 'evidence_reopened', authorization: 'evidence_changed', previousCode: old.code, evidenceHash: contentHash, source: record.source }));
+              : { action: 'evidence_reopened', authorization: 'evidence_changed', previousCode: old.code, settledEvidenceHash: settledHash, evidenceHash: currentEvidence(), source: record.source }));
         }
+        // A system drop settles on the evidence it saw: once per evidence state.
+        if (decision === 'dropped' && EVIDENCE_CODES.has(result.code)) storeSettledEvidence(db, id, currentEvidence());
+      } else if (evidenceCode && !settledHash) {
+        // Settled before evidence hashes were stored: today's evidence is its baseline, never a reopen.
+        storeSettledEvidence(db, id, currentEvidence());
       }
       db.prepare('UPDATE postings SET last_seen=?,listed=?,updated_at=? WHERE id=?').run(now, record.listed === false ? 0 : 1, now, id);
     }
