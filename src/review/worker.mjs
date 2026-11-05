@@ -43,7 +43,8 @@ export const BROWSER_AT_ONCE = Object.freeze(['http_403', 'challenge', 'wrong_po
 // Decide once: the automatic re-queue passes select only open work (reopen-policy.mjs), never the
 // whole settled history. The SQL narrows the scan; autoReopenAllowed stays the single rule.
 // Expects reviews r and the ownership joins (applications a) in the enclosing query.
-export const OPEN_REVIEW_SQL = "(r.state IN ('due','held','leased','failed') OR r.decision='eligible' AND a.status='lead')";
+// A sign-in-wall hold (`review hold`) waits for `review attach`; no automatic pass re-queues it.
+export const OPEN_REVIEW_SQL = "(r.state IN ('due','held','leased','failed') OR r.decision='eligible' AND a.status='lead') AND COALESCE(r.code,'')<>'external_signin_wall'";
 const reopenable = (row) => autoReopenAllowed({ review: row, application: row.application_status == null ? null : { status: row.application_status } });
 const explorationLane = (row) => ['no_student_signal', 'out_of_direction'].includes(row.lane);
 const postingUrl = (posting) => /^https?:/.test(posting.canonical_url) ? posting.canonical_url : `https://${posting.canonical_url}`;
@@ -344,7 +345,21 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       hooks.insideDeliver?.({ postingId: id });
       deliver(db, { postingId: id, verdict, fence, now, policy: deliveryPolicy(current), fresh });
       if (dependencies) db.prepare('UPDATE reviews SET dep_hashes_json=? WHERE posting_id=?').run(JSON.stringify(dependencies), id);
+      // A rejudge authorization is single-use: it is consumed by the delivery it authorized.
+      const evidence = parseJson(db.prepare('SELECT evidence_json FROM reviews WHERE posting_id=?').get(id).evidence_json);
+      if (evidence.reopenAuthorization) {
+        delete evidence.reopenAuthorization;
+        db.prepare('UPDATE reviews SET evidence_json=? WHERE posting_id=?').run(JSON.stringify(evidence), id);
+      }
     });
+  }
+  // After `review rejudge`, only judgments remembered since then (rememberJudgment writes the envelope that
+  // rejudge cleared) count; the raw logs from before the rejudge are history, not answers.
+  function sinceRejudge(id, { tier, depsHash, snapshotHash, forceDecision = false, question = null }) {
+    const evidence = parseJson(db.prepare('SELECT evidence_json FROM reviews WHERE posting_id=?').get(id)?.evidence_json);
+    const value = forceDecision ? evidence.forcedDecision : evidence.judgments?.[tier];
+    return value?.tier === tier && Boolean(value.forceDecision) === forceDecision && (!forceDecision || value.question === question)
+      && value.depsHash === depsHash && value.snapshotHash === snapshotHash ? value.output : null;
   }
   async function fetchItem(row) {
     const id = row.posting_id;
@@ -403,7 +418,10 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     const stageInputs = await refreshInputs();
     const startState = inputState(stageInputs);
     const stored = parseJson(row.dep_hashes_json);
-    const replayReleasedHold = stored.releasedHold?.inputs === releasedInputsHash(stageInputs)
+    // `review rejudge` asked for new checks: judgments cached before it are not replayed (redesign B2).
+    const forceFresh = parseJson(row.evidence_json).reopenAuthorization?.fresh === true;
+    const lookup = (context) => (forceFresh ? sinceRejudge(id, context) : cachedJudgment(db, id, context));
+    const replayReleasedHold = !forceFresh && stored.releasedHold?.inputs === releasedInputsHash(stageInputs)
       && stored.releasedHold.snapshot === snapshot.content_hash;
     // runtime retains the parts that produced each judgment, including legacy
     // records already invalidated by replan. inputs.code is only a mixed change
@@ -545,10 +563,10 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       const depsHash = dependencyHash(request.deps.parts);
       let parts = request.deps.parts;
       let replayed = false;
-      let output = cachedJudgment(db, id, { tier, depsHash, snapshotHash: snapshot.content_hash });
+      let output = lookup({ tier, depsHash, snapshotHash: snapshot.content_hash });
       const previous = stored.runtime?.[tier];
       const replayParts = (value) => comparison.parts(value, parts, { omit: settled.has(id) ? ['decide','model'] : ['decide'], policyAliases: stored.policyAliases });
-      if (!output && previous && (replayReleasedHold || dependencyHash(replayParts(previous)) === dependencyHash(replayParts(parts)))) {
+      if (!output && !forceFresh && previous && (replayReleasedHold || dependencyHash(replayParts(previous)) === dependencyHash(replayParts(parts)))) {
         // A decision-code change can replay even an invalidated review. Look up
         // the original hash, never relabel an old judgment with today's hash.
         output = cachedJudgment(db, id, { tier, depsHash: dependencyHash(previous), snapshotHash: snapshot.content_hash });
@@ -589,7 +607,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         const question = final.question;
         const forcedRequest = buildForcedDecisionRequest(request, question);
         const context = { tier, depsHash: dependencyHash(forcedRequest.deps.parts), snapshotHash: snapshot.content_hash, forceDecision: true, question };
-        let forced = cachedJudgment(db, id, context);
+        let forced = lookup(context);
         forced ??= await dispatchJudge(tier, forcedRequest, { forced: true, question });
         if (forced && halted && stageInputs.policy.judge?.secondOpinion && secondOpinion) { release(id, fence, { stage: 'judge' }); return; }
         final = forced ? await verifyForcedVerdict({ verdict: final, output: forced, inputs: stageInputs, snapshotText: snapshot.text,
