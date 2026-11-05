@@ -78,7 +78,10 @@ export function rejudgeReviews(db, { codes = null, leads = false, postings = nul
         const { judgments: _j, forcedDecision: _f, ...kept } = evidence;
         kept.reopenAuthorization = { authorization: REJUDGE_AUTHORIZATION, at: now, selector: report.selector, fresh: true,
           ...(codes ? { codes } : {}), ...(company ? { company } : {}), ...(since ? { since } : {}) };
+        // Explicit work is not sampling: an exploration-lane row moves to the normal lane, so it is scheduled
+        // and counted as actionable whatever the exploration share.
         db.prepare(`UPDATE reviews SET state='due',stage='fetch',next_due=?,hold_owner=NULL,hold_since=NULL,lease_owner=NULL,lease_until=NULL,
+          lane=CASE WHEN lane IN ('no_student_signal','out_of_direction') THEN 'new' ELSE lane END,
           evidence_json=?,updated_at=? WHERE posting_id=? AND lease_owner=? AND lease_generation=?`)
           .run(now, JSON.stringify(kept), now, row.posting_id, fence.owner, fence.generation);
         logReview(db, row.posting_id, { now, stage: 'fetch', kind: 'replan', payload: { action: 'rejudge', authorization: REJUDGE_AUTHORIZATION,

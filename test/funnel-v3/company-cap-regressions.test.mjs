@@ -283,6 +283,19 @@ test('[B] a cap settlement keeps an unrelated withdrawal reason, and the cap rel
   assert.equal(db.prepare('SELECT status FROM applications WHERE id = ?').get(legacy).status, 'withdrawn', 'the withdrawal event decides, not a rewritten reason');
 });
 
+// Review finding 2026-11-05: a cap release is an explicit authorization, so an exploration-lane row it reopens
+// moves to the normal lane and is scheduled even with exploration off.
+test('[B] a cap release reopens an exploration-lane review into the normal lane (company cap C4)', async () => {
+  const db = freshDb();
+  fiveSubmissions(db, { ages: [80, 80, 10, 5, 3] });
+  const q = queue();
+  q.add(db, 'p-cap-explore', { lane: 'no_student_signal' });
+  await review(db, { budget: 0, now: T0 });
+  assert.deepEqual([reviewOf(db, 'p-cap-explore').state, reviewOf(db, 'p-cap-explore').code], ['done', 'company_cap'], 'fixture: capped before judgment');
+  await review(db, { budget: 0, now: at(15) });
+  assert.deepEqual([reviewOf(db, 'p-cap-explore').state, reviewOf(db, 'p-cap-explore').lane], ['due', 'new']);
+});
+
 // ===================================================================== C5 — below the cap
 
 test('[B] four submissions in 90 days, or a fifth older than the window, leave the company uncapped; leads and prepared applications do not count (company cap C1/C5)', async () => {

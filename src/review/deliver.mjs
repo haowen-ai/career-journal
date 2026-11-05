@@ -406,7 +406,9 @@ export function applyCompanyCap(db, { now, policy = {}, owner = 'review-company-
           const application = row.application_id ? { status: row.application_status } : null;
           if (!autoReopenAllowed({ review: row, application, authorization: 'cap_release' })) continue;
           const kept = { ...evidence, reopenAuthorization: { authorization: 'cap_release', at: now, code: row.code } };
-          db.prepare(`UPDATE reviews SET state='due',stage='fetch',decision=NULL,code=NULL,next_due=?,hold_owner=NULL,hold_since=NULL,evidence_json=?,updated_at=?
+          // Authorized work is not sampling: an exploration-lane row moves to the normal lane.
+          db.prepare(`UPDATE reviews SET state='due',stage='fetch',decision=NULL,code=NULL,next_due=?,hold_owner=NULL,hold_since=NULL,evidence_json=?,updated_at=?,
+            lane=CASE WHEN lane IN ('no_student_signal','out_of_direction') THEN 'new' ELSE lane END
             WHERE posting_id=? AND state IN ('due','done') AND code=?`).run(now, JSON.stringify(kept), now, row.id, row.code);
           logReview(db, row.id, { now, stage: 'fetch', payload: { action: 'company_cap_restored', judged: false, code: row.code, authorization: 'cap_release' } });
         }

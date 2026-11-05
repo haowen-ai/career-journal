@@ -82,6 +82,26 @@ test('[B2] a rejudged review is judged afresh (cached judgments are not replayed
   assert.equal(reviewOf(db, 'p-r').state, 'done');
 });
 
+// Review finding 2026-11-05: a rejudged exploration-lane row is explicit work. With exploration.share 0 it is
+// still scheduled and judged, never left due behind an ok receipt.
+test('[B2] a rejudged exploration-lane row is judged even when exploration is off', async () => {
+  const db = freshDb();
+  for (const lane of ['no_student_signal', 'out_of_direction']) {
+    const id = `p-${lane}`;
+    insertPosting(db, { id, url: urlOf(id), title: snapshotTitle(SNAPSHOTS.eligible) });
+    insertReview(db, { postingId: id, state: 'done', lane, decision: 'dropped', code: lane, stage: 'deliver', nextDue: null });
+  }
+  const report = rejudgeReviews(db, { codes: ['no_student_signal', 'out_of_direction'], now: at(1), apply: true });
+  assert.equal(report.requeued, 2);
+  const pages = Object.fromEntries(['p-no_student_signal', 'p-out_of_direction'].map((id) => [urlOf(id), page(urlOf(id), SNAPSHOTS.eligible)]));
+  const j = { primary: fakeJudge({ tier: 'primary', answers: () => ({ output: JUDGMENTS.eligible }) }), escalation: fakeJudge({ tier: 'escalation', answers: () => ({ output: JUDGMENTS.eligible }) }) };
+  const receipt = await runReview({ db, runId: 'r-explore-off', owner: 'w', now: at(1), budget: 20, deadlineMs: 600_000, attemptDir: null, sleep: async () => {},
+    fetcher: fakeFetcher(pages), judges: j, inputs: () => reviewInputs({ policy: { ...REVIEW_POLICY, exploration: { share: 0 } } }), hooks: {} });
+  for (const id of ['p-no_student_signal', 'p-out_of_direction']) assert.notEqual(reviewOf(db, id).state, 'due', `${id} is judged`);
+  assert.ok(j.primary.calls.length >= 2, 'both rows reach the judge');
+  assert.equal(receipt.backlog.actionable_due, 0);
+});
+
 test('[B8] settle-backlog restores provable settlements, settles exploration rows to their drop, and leaves the rest due', () => {
   const db = freshDb();
   settled(db, 'p-prev', { state: 'due' });
