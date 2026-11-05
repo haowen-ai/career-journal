@@ -225,7 +225,7 @@ test('[A] two application rows for one requisition are resolved by the system: s
 
 // ===================================================================== I5
 
-test('[A] a genuine identity contradiction is held for the user only when the posting matters (identity I5)', async () => {
+test('[A] a genuine identity contradiction keeps the postings separate and never holds for the user (identity I5)', async () => {
   const db = freshDb();
   // Each Simplify listing was first seen on a Greenhouse job, then re-pointed to a Workday requisition.
   const cases = [
@@ -244,16 +244,17 @@ test('[A] a genuine identity contradiction is held for the user only when the po
     assert.ok(fresh, `${name}: the re-pointed requisition is its own posting`);
     assert.notEqual(fresh, postingFor(db, `source:simplify:${sourceId}`), `${name}: never merged into the Greenhouse posting`);
     const review = reviewOf(db, fresh);
+    // Amended for the redesign (Lane C9): contradictory ids prove two requisitions; a posting that matters is
+    // judged on its own (due), never held for the user.
     if (userOwned) {
-      assert.equal(review.state, 'held', name);
-      assert.equal(review.code, 'identity_conflict', name);
-      assert.equal(review.hold_owner, 'user', `${name}: a posting that matters asks the user`);
+      assert.equal(review.state, 'due', name);
+      assert.equal(review.hold_owner, null, `${name}: no identity hold`);
     } else {
       assert.notEqual(review?.hold_owner, 'user', `${name}: a posting that does not matter never asks the user`);
     }
   }
   assert.equal(conflictLinks(db), cases.length, 'every contradiction keeps its conflict link for audit');
-  assert.equal(userHolds(db), 1);
+  assert.equal(userHolds(db), 0);
 });
 
 // ===================================================================== I6

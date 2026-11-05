@@ -253,16 +253,18 @@ test('[B] the startup pass withdraws visible leads and settles due and held revi
   assert.deepEqual(refreshed.fetcher.calls, [], 'nor fetched');
   assert.deepEqual(outcome(db, 'p-lead-disliked'), ['done', 'not_eligible', 'company_excluded']);
 
-  // Redesign B1 (decide once): removing the exclusions no longer restores settled rows by itself; the user runs
-  // `review rejudge --code company_excluded` for that. Nothing is judged, fetched or restored by the run.
+  // Redesign B1/C5 (decide once, withdrawals stick): removing the exclusions no longer restores settled rows by
+  // itself; the user runs `review rejudge --code company_excluded` (authorization 'rejudge') for that. Nothing is
+  // judged, fetched or restored by the run.
   const later = await review(db, { budget: 0, now: at(3), overrides: await overrides({ rule: 'synthetic' }) });
   assert.deepEqual(judgedIds(later.judges), []);
   assert.equal(attemptsCount(db), 0, 'no paid attempt');
   for (const id of [visible, agencyLead]) {
     const row = db.prepare('SELECT * FROM applications WHERE id = ?').get(id);
-    assert.equal(row.status, 'withdrawn', `${id} stays withdrawn`);
+    assert.deepEqual([row.status, row.skip_reason], ['withdrawn', 'company_excluded (user)'], `${id} stays withdrawn`);
   }
   for (const id of ['p-lead-disliked', 'p-due-disliked', 'p-held-agency', 'p-due-withdrawn']) assert.deepEqual(outcome(db, id), ['done', 'not_eligible', 'company_excluded'], `${id} stays settled`);
+  assert.equal(evidenceOf(db, 'p-lead-disliked').provenance, 'automated', 'the settlement keeps its automated provenance for an explicit rejudge');
   assert.equal(earlierRow(), earlierBefore, 'restoring does not touch the withdrawn application either');
   assert.equal(userRows(), users, 'user decisions are still untouched');
 });

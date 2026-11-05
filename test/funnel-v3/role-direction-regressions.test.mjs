@@ -252,7 +252,8 @@ test('[B] the startup pass withdraws visible out-of-direction leads without a mo
   await review(db, { budget: 0, now: at(1), direction });
   assert.equal(reviewRows(db), settled, 'a settled role_direction review is not touched again');
 
-  // Redesign B1 (decide once): dropping the rules file no longer reopens settled rows; `review rejudge` does.
+  // Redesign B1/C5 (decide once, withdrawals stick): dropping the rules file no longer reopens settled rows or turns
+  // withdrawals back into leads; only `review rejudge` (authorization 'rejudge') may.
   const later = await review(db, { budget: 0, now: at(2), direction: null });
   assert.equal(attemptsCount(db), 0, 'no paid attempt');
   assert.deepEqual(judgedIds(later.judges), []);

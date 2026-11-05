@@ -1008,14 +1008,22 @@ test('[B] the ledger reports sightings, attempts, quotes, visibility and termina
   const q = queue();
   const delivered = q.add(db, { id: 'p-led' });
   // Amended for model-decides H1 (2026-10-27): an escalation-tier user_review is no longer held, so the held
-  // posting is a system hold instead (a full company quota at delivery).
-  const held = q.add(db, { id: 'p-held', company: 'Quota Full Example' });
+  // posting is a system hold instead. Amended for the redesign (C2): a full company quota is a decision now,
+  // not a hold, so the held posting is a browser-review hold delivered after the run.
+  const held = q.add(db, { id: 'p-held', company: 'Held Example' });
   db.prepare("INSERT INTO observations (id, posting_id, source, source_id, partition, first_run_id, observed_at, fields_json, completeness_json, listed, content_hash) VALUES ('o-led', 'p-led', 'simplify', 's-led', 'simplify:1', 'scan-1', ?, '{}', '{}', 1, 'h-led')").run(T0);
   for (const partition of ['simplify:1', 'simplify:2']) {
     db.prepare("INSERT INTO observation_sightings (run_id, posting_id, observation_id, source, partition, seen_at) VALUES ('scan-1', 'p-led', 'o-led', 'simplify', ?, ?)").run(partition, T0);
   }
   const answers = { 'p-led': { output: JUDGMENTS.eligible }, 'p-held': { output: JUDGMENTS.eligible } };
   await runReview(runOptions(db, { pages: q.pages, judges: { primary: fakeJudge({ tier: 'primary', answers }), escalation: fakeJudge({ tier: 'escalation', answers }) } }));
+  {
+    const { claimItem } = await leaseModule();
+    const { deliver } = await deliverModule();
+    db.prepare("UPDATE reviews SET state = 'due' WHERE posting_id = ?").run(held);
+    const fence = claimItem(db, held, { owner: 'worker-a', now: at(0.1) });
+    deliver(db, { postingId: held, fence, now: at(0.1), policy: reviewInputs().screeningPolicy, verdict: { decision: 'unclear', code: 'browser_review', question: 'Open the official posting' } });
+  }
   const ledger = postingLedger(db, [delivered, held]);
   const one = ledger.find((entry) => entry.postingId === delivered);
   assert.equal(countOf(one.sightings), 2);

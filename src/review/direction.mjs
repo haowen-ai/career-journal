@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { companyKey } from '../scan/dedupe.mjs';
 
 // User rule (2026-10-29): a lead's role direction must be AI / machine learning / data science / data analytics,
 // or a data-heavy product/tech PM. The judge's function dimension let buyer, claims, operations, generic PM and
@@ -16,6 +17,8 @@ import path from 'node:path';
 //     neutral        'allow' (the default when missing) or 'deny': what a title matching none of the lists is.
 //                    With 'deny' it is out (reason 'neutral') and no function label rescues it (2026-10-31: the
 //                    judge labelled a pricing, a risk-management and a media-tools role analytics/engineering).
+//     anyFunctionCompanies  company names (compared through the alias map) whose roles are wanted in any
+//                    function: the direction filter (title lists, neutral, software-only) is skipped for them.
 export const DIRECTION_FILE = 'role-direction.json';
 export const DIRECTION_CODE = 'role_direction';
 
@@ -34,8 +37,16 @@ export function directionRules(raw) {
   if (typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`Cannot load ${DIRECTION_FILE}: expected an object`);
   const neutral = raw.neutral ?? 'allow';
   if (!['allow', 'deny'].includes(neutral)) throw new Error(`Cannot load ${DIRECTION_FILE}: neutral must be "allow" or "deny"`);
+  const companies = raw.anyFunctionCompanies ?? [];
+  if (!Array.isArray(companies) || !companies.every((item) => typeof item === 'string' && item.trim())) throw new Error(`Cannot load ${DIRECTION_FILE}: anyFunctionCompanies must be a list of non-empty strings`);
   return { allow: patterns(raw.allow, 'allow'), block: patterns(raw.block, 'block'), requireAllow: patterns(raw.requireAllow, 'requireAllow'),
-    allowFunctions: patterns(raw.allowFunctions, 'allowFunctions'), neutral };
+    allowFunctions: patterns(raw.allowFunctions, 'allowFunctions'), neutral, anyFunctionCompanies: companies.map((item) => item.trim()) };
+}
+
+// A company whose roles are wanted in any function (anyFunctionCompanies).
+export function anyFunctionCompany(company, rules, aliases = {}) {
+  if (!company || !rules?.anyFunctionCompanies?.length) return false;
+  return rules.anyFunctionCompanies.some((name) => companyKey(name, aliases) === companyKey(company, aliases));
 }
 
 // A missing file means no direction filter; a malformed one fails loudly.
@@ -53,9 +64,10 @@ export async function loadDirectionRules(profileDir) {
 
 // { ok, reason, match } for a title and, when known, the judge's function label.
 // Without rules every title is in direction.
-export function roleDirection(title, rules, { functionValue = null } = {}) {
+export function roleDirection(title, rules, { functionValue = null, company = null, aliases = {} } = {}) {
   const text = String(title ?? '');
   if (!rules) return { ok: true, reason: null, match: null };
+  if (anyFunctionCompany(company, rules, aliases)) return { ok: true, reason: 'any_function_company', match: company };
   const found = (list) => list.find((pattern) => pattern.test(text));
   const allowed = found(rules.allow);
   if (allowed) return { ok: true, reason: 'allow', match: text.match(allowed)[0] };
@@ -99,5 +111,6 @@ export const titleAllowed = (title, rules) => TITLE_SIGNAL.test(String(title ?? 
 
 // An eligible role whose judge function label is pure software engineering and whose title has no allowed signal.
 // Like every direction rule it needs profile/role-direction.json: without the file nothing is filtered.
-export const softwareOnlyRole = (title, functionValue, rules) => Boolean(rules) && softwareEngineeringFunction(functionValue) && !titleAllowed(title, rules);
+export const softwareOnlyRole = (title, functionValue, rules, { company = null, aliases = {} } = {}) => Boolean(rules) && softwareEngineeringFunction(functionValue)
+  && !titleAllowed(title, rules) && !anyFunctionCompany(company, rules, aliases);
 export const softwareNote = (functionValue) => `software engineering function: ${functionValue}`;

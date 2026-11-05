@@ -96,8 +96,9 @@ test('[L1] contradictory authoritative aliases are quarantined, not merged', asy
   assert.equal(result.action, 'quarantined');
   assert.equal(effective(db, first), first);
   assert.equal(effective(db, second), second);
-  assert.equal(reviewOf(db, first).state, 'held');
-  assert.equal(reviewOf(db, first).code, 'identity_conflict');
+  // Amended for the redesign (Lane C9): the postings stay separate and each is judged on its own; no identity hold.
+  assert.equal(reviewOf(db, first).state, 'due');
+  assert.notEqual(reviewOf(db, first).code, 'identity_conflict');
   assert.equal(db.prepare("SELECT COUNT(*) n FROM posting_links WHERE kind = 'conflict'").get().n, 1);
 });
 

@@ -348,11 +348,16 @@ test('[B] bootstrap re-queues provenance_unknown applications as system work tha
   const fetched = fetcher.calls.map((call) => call.url);
   for (const n of [1, 2]) assert.ok(fetched.includes(url(n)), `the unknown-provenance posting ${url(n)} is fetched: ${JSON.stringify(fetched)}`);
   for (const n of [3, 4, 5]) assert.equal(fetched.includes(url(n)), false, `the user-decided posting ${url(n)} is never fetched`);
-  for (const name of ['withdrawn', 'hidden']) {
-    const row = reviewOf(db, ids[name]);
-    assert.deepEqual([row.state, row.decision, row.code, row.hold_owner], ['done', 'eligible', null, null], `${name}: judged and delivered like any other review`);
-    const app = applicationOf(db, ids[name]);
-    assert.deepEqual([app.status, app.skip_reason], ['lead', null], `${name}: the eligible posting is a visible lead again`);
+  // Amended for the redesign (Lane C5, withdrawals stick): the hidden lead is delivered like any other review; the
+  // withdrawn one is judged but stays withdrawn, because only an explicit rejudge may restore a withdrawal.
+  {
+    const row = reviewOf(db, ids.hidden);
+    assert.deepEqual([row.state, row.decision, row.code, row.hold_owner], ['done', 'eligible', null, null], 'hidden: judged and delivered like any other review');
+    const app = applicationOf(db, ids.hidden);
+    assert.deepEqual([app.status, app.skip_reason], ['lead', null], 'hidden: the eligible posting is a visible lead again');
+    const kept = reviewOf(db, ids.withdrawn);
+    assert.deepEqual([kept.state, kept.hold_owner], ['done', null], 'withdrawn: settled, not held');
+    assert.equal(applicationOf(db, ids.withdrawn).status, 'withdrawn', 'withdrawn: the withdrawal sticks');
   }
   for (const name of protectedNames) {
     assert.deepEqual({ review: { ...reviewOf(db, ids[name]) }, app: { ...applicationOf(db, ids[name]) } }, before[name], `${name}: untouched`);

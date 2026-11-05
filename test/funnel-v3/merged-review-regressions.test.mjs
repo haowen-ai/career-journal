@@ -87,11 +87,11 @@ const verdict = (overrides = {}) => ({
   needs: { essay: false, documents: false, assessment: false, quotes: { essay: null, documents: null, assessment: null } },
   ...overrides,
 });
-async function deliverVerdict(db, postingId, value, now = T0) {
+async function deliverVerdict(db, postingId, value, now = T0, authorization = null) {
   const { deliver, claimItem } = await deliveryModules();
   db.prepare("UPDATE reviews SET state = 'due', stage = 'deliver' WHERE posting_id = ? AND state != 'leased'").run(postingId);
   const fence = claimItem(db, postingId, { owner: 'worker-a', now });
-  return deliver(db, { postingId, verdict: value, fence, now, policy: SCREENING_POLICY });
+  return deliver(db, { postingId, verdict: value, fence, now, policy: SCREENING_POLICY, authorization });
 }
 
 async function decideWith({ text, judged, tier = 'escalation', policy = REVIEW_POLICY, facts = FACTS }) {
@@ -262,12 +262,15 @@ test('[B] an automated withdrawal classified by bootstrap is restored by an elig
   const postingOf = (app) => db.prepare('SELECT id FROM postings WHERE application_id = ?').get(app.id).id;
   assert.equal(reviewOf(db, postingOf(automated)).state, 'due', 'bootstrap re-queues the automated withdrawal');
 
-  const restored = await deliverVerdict(db, postingOf(automated), verdict(), at(1));
+  // Amended for the redesign (Lane C5): a normal run keeps the withdrawal; the explicit rejudge restores it.
+  assert.equal((await deliverVerdict(db, postingOf(automated), verdict(), at(1))).action, 'withdrawal_kept', 'no restore without an authorization');
+  assert.equal(application(db, automated.id).status, 'withdrawn');
+  const restored = await deliverVerdict(db, postingOf(automated), verdict(), at(1), 'rejudge');
   assert.equal(restored.action, 'restored', 'the verified automated provenance permits the guarded restore');
   assert.equal(application(db, automated.id).status, 'lead');
   assert.notEqual(reviewOf(db, postingOf(automated)).code, 'superseded_by_user');
 
-  const kept = await deliverVerdict(db, postingOf(declined), verdict(), at(1));
+  const kept = await deliverVerdict(db, postingOf(declined), verdict(), at(1), 'rejudge');
   assert.equal(kept.action, 'superseded_by_user', 'a user decline is never restored');
   assert.equal(application(db, declined.id).status, 'withdrawn');
 });

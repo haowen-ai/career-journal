@@ -11,9 +11,11 @@ import { companyKey } from '../scan/dedupe.mjs';
 import { reallowed, withOverrides } from './overrides.mjs';
 import { companyExcluded, USER_EXCLUDED_REASON } from './excluded.mjs';
 import { DIRECTION_CODE, OUT_OF_DIRECTION_CODE, directionNote, roleDirection, softwareNote, softwareOnlyRole } from './direction.mjs';
+import { companySizeGate } from './company-size.mjs';
+import { evaluateLimits, limitCounts, programRule, LIMIT_CODES } from './limits.mjs';
+import { duplicateOfSubmitted } from './duplicate.mjs';
+import { REOPEN_AUTHORIZATIONS } from './reopen-policy.mjs';
 
-const key = (value) => String(value ?? '').normalize('NFKD').toLowerCase().replace(/[^a-z0-9]/g, '');
-const words = (value) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
 export const parseJson = (value, fallback = {}) => { try { return JSON.parse(value); } catch { return fallback; } };
 export function logReview(db, postingId, { now, stage = 'deliver', kind = 'outcome', attemptId = null, payload = {} }) {
   db.prepare('INSERT INTO review_log(posting_id,at,stage,kind,attempt_id,payload_json) VALUES (?,?,?,?,?,?)')
@@ -49,77 +51,36 @@ function excludedVerdict(posting, verdict, policy) {
     ...(excluded.source === 'user' ? { skipReason: USER_EXCLUDED_REASON, excluded: { ...excluded, judged: verdict.decision === 'eligible' || verdict.excluded?.judged === true } } : {}) };
 }
 
+// Program- or country-scoped quota rules of the screening policy: a blocked rule is a decision
+// (not_eligible company_limit, releasable by the startup pass), never a hold. Unblocked notes join the fit note.
 function companyVerdict(posting, verdict, policy) {
   const excluded = excludedVerdict(posting, verdict, policy);
   if (excluded) return excluded;
-  let note = '';
-  for (const rule of policy.rules ?? []) {
-    if (key(rule.company) !== key(posting.company)) continue;
-    const hold = (code) => ({ ...verdict, decision: 'unclear', code, question: rule.note ?? code, nextAction: 'recheck', resetAt: rule.resetAt ?? null });
-    if (rule.program || rule.countryScope) {
-      if (!verdict.program) return hold('quota_unclear');
-      const scope = new Set(words(`${verdict.program.name} ${verdict.program.countryScope}`));
-      if (!words(`${rule.program ?? ''} ${rule.countryScope ?? ''}`).every((word) => scope.has(word))) continue;
-    }
-    if (rule.blockReason === 'quota-reconciliation-pending' || (rule.blocked && rule.distinctApplicationsInWindow === null)) return hold('quota_reconciliation');
-    if (Number.isFinite(rule.limit) && (rule.usedConfirmed ?? rule.used ?? 0) >= rule.limit) return hold('quota_full');
-    if (rule.blocked) return hold('quota_unclear');
-    if (rule.note) note += ` ${rule.note}`;
-  }
+  const rule = programRule(posting.company, verdict.program, policy);
+  if (rule.code) return { ...verdict, decision: 'not_eligible', code: 'company_limit', judged: verdict.decision === 'eligible', limit: rule, question: null, holdFactIds: [], nextAction: null };
+  const note = rule.notes.map((item) => ` ${item}`).join('');
   return { ...verdict, fit: { ...verdict.fit, note: `${verdict.fit?.note ?? ''}${note}`.trim() } };
 }
 
-// User rule (2026-10-27): at most `max` submissions per company in any rolling
-// `windowDays`. The cap is review policy, not a judge dependency, so it is
-// applied at delivery and by the startup pass, never by re-judging.
-const CAP_STATUSES = ['applied', 'assessment', 'interview', 'rejected', 'offer'];
-const capOf = (value) => (Number.isInteger(value?.max) && value.max > 0 && Number(value?.windowDays) > 0 ? value : null);
-// User overrides (re-allowed companies, active caps, lifted rules) apply here, outside the judge dependencies.
+// User rule (2026-10-27): at most `max` submissions per company in any rolling `windowDays`, plus
+// per-company limits and active caps (src/review/limits.mjs). Limits are review policy, not judge
+// dependencies, so they are applied at delivery and by the startup pass, never by re-judging.
+// User overrides (re-allowed companies, active caps, limits, aliases, company sizes) apply here, outside the judge dependencies.
 export const deliveryPolicy = (inputs) => withOverrides({ ...inputs.screeningPolicy, companyCap: inputs.policy?.companyCap ?? null, direction: inputs.direction ?? null }, inputs.overrides);
 
-// User rule (2026-10-29): some companies allow at most `max` applications in progress at a time;
-// ended applications (rejected, withdrawn, accepted, declined) do not count.
-const ACTIVE_STATUSES = ['applied', 'assessment', 'interview', 'offer'];
-export function activeApplications(db, { companyAliases }) {
-  const counts = new Map();
-  for (const app of db.prepare(`SELECT id,company FROM applications WHERE status IN (${ACTIVE_STATUSES.map(() => '?').join(',')})`).all(...ACTIVE_STATUSES)) {
-    const company = companyKey(app.company, companyAliases);
-    const entry = counts.get(company) ?? { count: 0, applicationIds: [] };
-    entry.count += 1; entry.applicationIds.push(app.id);
-    counts.set(company, entry);
-  }
-  return counts;
+// Decide once (P4): a withdrawn application becomes a lead again only with an explicit authorization.
+// `review rejudge` records 'rejudge' durably on the review; this accessor reads it (integration point:
+// replace the body with the stored field once that lane lands). The default is no authorization.
+export function storedReopenAuthorization(db, review) { return null; } // eslint-disable-line no-unused-vars
+export const RELIST_REASONS = Object.freeze(['delisted', 'closed_verified', 'unavailable']);
+function restoreAuthorized(app, authorization) {
+  if (!REOPEN_AUTHORIZATIONS.includes(authorization)) return false;
+  if (authorization === 'cap_release') return app.skip_owner === 'review' && LIMIT_CODES.includes(app.skip_reason);
+  if (authorization === 'relist') return app.skip_owner === 'review' && RELIST_REASONS.includes(app.skip_reason);
+  return app.skip_owner !== 'user' && app.skip_owner !== 'legacy';
 }
-
-// Submission date: applied_at, else the latest 'submitted' event, else updated_at.
-export function companySubmissions(db, { now, cap, companyAliases }) {
-  const counts = new Map();
-  if (!capOf(cap)) return counts;
-  const since = Date.parse(now) - cap.windowDays * 86_400_000;
-  for (const app of db.prepare(`SELECT a.id,a.company,COALESCE(NULLIF(a.applied_at,''),(SELECT e.occurred_at FROM application_events e
-      WHERE e.application_id=a.id AND e.event_type='submitted' AND COALESCE(e.occurred_at,'')<>'' ORDER BY e.occurred_at DESC,e.rowid DESC LIMIT 1),a.updated_at) submitted_at
-      FROM applications a WHERE a.status IN (${CAP_STATUSES.map(() => '?').join(',')})`).all(...CAP_STATUSES)) {
-    if (!(Date.parse(app.submitted_at) > since)) continue;
-    const company = companyKey(app.company, companyAliases);
-    const entry = counts.get(company) ?? { count: 0, applicationIds: [] };
-    entry.count += 1; entry.applicationIds.push(app.id);
-    counts.set(company, entry);
-  }
-  return counts;
-}
-function companyCapped(db, company, { now, policy, counts, active }) {
-  const activeCap = (policy.activeCaps ?? []).find((item) => companyKey(item.company, policy.companyAliases) === companyKey(company, policy.companyAliases));
-  if (activeCap) {
-    active ??= activeApplications(db, { companyAliases: policy.companyAliases });
-    const entry = active.get(companyKey(company, policy.companyAliases));
-    if (entry && entry.count >= activeCap.max) return { ...entry, max: activeCap.max, windowDays: null, active: true };
-  }
-  const cap = capOf(policy.companyCap);
-  if (!cap) return null;
-  counts ??= companySubmissions(db, { now, cap, companyAliases: policy.companyAliases });
-  const entry = counts.get(companyKey(company, policy.companyAliases));
-  return entry && entry.count >= cap.max ? { ...entry, max: cap.max, windowDays: cap.windowDays } : null;
-}
+// The exact suppression annotateMail writes; mail unhide clears only this one.
+export const MAIL_SUPPRESSION = 'already_applied_mail 邮件确认';
 
 // Holds that ask the user (or the forced model decision) a question about the posting.
 export const MODEL_HOLD_CODES = Object.freeze(['missing_fact', 'requirement_unclear', 'user_review', 'term_or_area']);
@@ -147,11 +108,16 @@ function appendEvent(db, appId, type, now, { statusAfter = null, note = '', sour
     source: { actor: 'review-worker', ...source }, statusAfter }, { withinTransaction: true, reviewRestore, liftedRule });
 }
 
-export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh = false, explicit = false }) {
+// Codes the gate settles automatically; each keeps the verdict's fields so a release can restore it.
+export const GATE_CODES = Object.freeze(['company_cap', 'company_limit', 'company_small', 'duplicate_submitted']);
+const isUserActor = (actor) => actor === 'user' || actor === 'apply';
+
+export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh = false, explicit = false, authorization = null, text = null }) {
   return atomic(db, () => {
     assertFence(db, postingId, fence);
     let posting = db.prepare('SELECT * FROM postings WHERE id=?').get(postingId);
     const review = db.prepare('SELECT * FROM reviews WHERE posting_id=?').get(postingId);
+    authorization ??= storedReopenAuthorization(db, review);
     if (heldReleaseBlock(review, verdict, { fresh, explicit })) verdict = keepHold(review, verdict);
     let app = posting.application_id ? db.prepare('SELECT * FROM applications WHERE id=?').get(posting.application_id) : null;
     const duplicate = submittedDuplicate(db, posting, { companyAliases: policy.companyAliases });
@@ -162,7 +128,7 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     const isUserEvent = (event) => {
       if (!event) return false;
       const source = parseJson(event.source_json);
-      return source.actor === 'user' || source.actor !== 'review-worker'
+      return isUserActor(source.actor) || source.actor !== 'review-worker'
         && (['user','manual','event-command'].includes(source.kind) || /^(?:manual_|user_)/.test(event.event_type));
     };
     const userWithdrawal = app?.status === 'withdrawn' && isUserEvent(lastStatus);
@@ -179,19 +145,19 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     value = excludedVerdict(posting, value, policy) ?? value;
     // Exploration never creates a user question, including delivery-time holds
     // such as company quotas. Keep the sampled lane as the negative reason.
-    // A cap settlement keeps its own code so the startup pass can restore it.
-    if (['no_student_signal', 'out_of_direction'].includes(review.lane) && value.code !== 'company_cap') {
+    // A gate settlement keeps its own code so the startup pass can restore it.
+    if (['no_student_signal', 'out_of_direction'].includes(review.lane) && !LIMIT_CODES.includes(value.code)) {
       value = value.decision === 'eligible'
         ? { ...value, flags: [...new Set([...(value.flags ?? []), 'found_by_sampling'])] }
         : { ...value, decision: 'not_eligible', code: review.lane, question: null, holdFactIds: [], nextAction: null };
     }
     // User rule (2026-10-29): an eligible verdict outside the role direction (profile/role-direction.json) is
     // settled automatically, never shown or held. It keeps the verdict's fields so a rules change can restore it.
-    const direction = value.decision === 'eligible' ? roleDirection(posting.title, policy.direction, { functionValue: value.functionValue }) : null;
+    const direction = value.decision === 'eligible' ? roleDirection(posting.title, policy.direction, { functionValue: value.functionValue, company: posting.company, aliases: policy.companyAliases }) : null;
     if (direction && !direction.ok) value = { ...value, decision: 'not_eligible', code: DIRECTION_CODE, direction: directionNote(direction) };
     // User rule (2026-10-31): a role the judge labelled pure software engineering is out of direction unless its
     // title carries an AI/ML/data signal. A missing or blank label changes nothing.
-    if (value.decision === 'eligible' && softwareOnlyRole(posting.title, value.functionValue, policy.direction)) {
+    if (value.decision === 'eligible' && softwareOnlyRole(posting.title, value.functionValue, policy.direction, { company: posting.company, aliases: policy.companyAliases })) {
       value = { ...value, decision: 'not_eligible', code: OUT_OF_DIRECTION_CODE, direction: softwareNote(value.functionValue), softwareDirection: true,
         question: null, holdFactIds: [], nextAction: null };
     }
@@ -200,11 +166,41 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     // This guard also wins over eligible verdicts, quotas and exploration lanes.
     // It never merges postings or writes to the submitted application.
     if (duplicate) value = { decision: 'not_eligible', code: 'already_submitted', evidence: [duplicate] };
-    const capped = !duplicate && (value.decision === 'eligible' || value.code === 'company_cap') && companyCapped(db, posting.company, { now, policy });
+    // A cross-ATS repost of a submitted role (src/review/duplicate.mjs): linked, never merged.
+    const repost = !duplicate && value.decision === 'eligible'
+      ? duplicateOfSubmitted(db, posting, { companyAliases: policy.companyAliases, text, locations: (value.location?.offices ?? []).map((office) => office.place) }) : null;
+    if (repost) value = { ...value, decision: 'not_eligible', code: 'duplicate_submitted', judged: true, question: null, holdFactIds: [], nextAction: null };
+    const capped = !duplicate && (value.decision === 'eligible' || LIMIT_CODES.includes(value.code))
+      && evaluateLimits(posting.company, { policy, now, db, program: value.program, exclude: app?.id ?? null });
     // The cap keeps the eligible verdict's fields so the startup pass can restore it without a model call.
-    if (capped) value = { ...value, decision: 'not_eligible', code: 'company_cap', judged: value.decision === 'eligible' };
+    if (capped) value = { ...value, decision: 'not_eligible', code: capped.code, judged: value.decision === 'eligible' || value.judged === true, question: null, holdFactIds: [], nextAction: null };
+    // User rule (2026-10-20): big companies only. Known small → settled; unknown → the posting waits for the
+    // company decision (ensureCompanySizes) with no decision and no application change. A user's explicit
+    // resolve is not held back by a pending size decision.
+    const size = value.decision === 'eligible' && !protectedApp ? companySizeGate(posting.company, policy.companySizes) : 'large';
+    if (size === 'small') value = { ...value, decision: 'not_eligible', code: 'company_small', judged: true, question: null, holdFactIds: [], nextAction: null };
+    if (size === 'unknown' && !explicit && app?.status !== 'prepared') {
+      db.prepare(`UPDATE reviews SET state='due',stage='judge',next_due=?,lease_owner=NULL,lease_until=NULL,last_error='company_size_pending',updated_at=?
+        WHERE posting_id=? AND lease_owner=? AND lease_generation=?`).run(now, now, postingId, fence.owner, fence.generation);
+      logReview(db, postingId, { now, kind: 'delivery', payload: { action: 'company_size_pending', company: posting.company, applicationId: app?.id ?? null } });
+      if (db.prepare('SELECT state FROM reviews WHERE posting_id=?').get(postingId).state !== 'due') throw new Error('Delivery readback mismatch');
+      return { action: 'company_size_pending', applicationId: app?.id ?? null };
+    }
+    // P4: a withdrawn application becomes a lead again only with an authorization (rejudge, cap_release, relist).
+    // A withdrawal made only because the posting closed is relisted when the posting is listed and open again.
+    if (!authorization && app?.status === 'withdrawn' && RELIST_REASONS.includes(app.skip_reason) && posting.listed && posting.availability === 'open') authorization = 'relist';
+    if (!protectedApp && app?.status === 'withdrawn' && value.decision === 'eligible' && !restoreAuthorized(app, authorization)) {
+      const keptDecision = review.decision && review.decision !== 'eligible' ? review.decision : 'not_eligible';
+      const keptCode = review.code ?? 'withdrawal_kept';
+      db.prepare(`UPDATE reviews SET state='done',decision=?,code=?,stage='deliver',hold_owner=NULL,hold_since=NULL,next_due=NULL,lease_owner=NULL,lease_until=NULL,updated_at=?
+        WHERE posting_id=? AND lease_owner=? AND lease_generation=?`).run(keptDecision, keptCode, now, postingId, fence.owner, fence.generation);
+      logReview(db, postingId, { now, kind: 'delivery', payload: { action: 'withdrawal_kept', applicationId: app.id, authorization, skipReason: app.skip_reason ?? null } });
+      if (db.prepare('SELECT state FROM reviews WHERE posting_id=?').get(postingId).state !== 'done') throw new Error('Delivery readback mismatch');
+      return { action: 'withdrawal_kept', applicationId: app.id };
+    }
     const userExcluded = !duplicate && value.code === 'company_excluded' && Boolean(value.excluded);
-    const capOwned = duplicate || value.code === 'company_cap' || directionOwned || userExcluded;
+    const gateOwned = !duplicate && GATE_CODES.includes(value.code);
+    const capOwned = duplicate || gateOwned || directionOwned || userExcluded;
     let action;
     let held = value.decision === 'unclear';
     if (protectedApp) { action = 'superseded_by_user'; held = false; }
@@ -222,7 +218,7 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
           const restored = app.status === 'withdrawn';
           appendEvent(db, app.id, restored ? 'review_restored' : 'review_delivered', now, { statusAfter: restored ? 'lead' : null, reviewRestore: restored, liftedRule: restored && Boolean(liftedRule),
             source: { postingId, automatedProvenance: automated, ...(oldEvidence.systemReview ? { systemReview: true, provenance: oldEvidence.provenance } : {}),
-              ...(restored && liftedRule ? { liftedRule } : {}) } });
+              ...(restored && liftedRule ? { liftedRule } : {}), ...(restored ? { authorization } : {}) } });
           db.prepare('UPDATE applications SET skip_reason=NULL,skip_owner=NULL WHERE id=?').run(app.id);
           action = restored ? 'restored' : action ?? (app.skip_reason ? 'unhidden' : 'updated');
         } else if (held) {
@@ -249,9 +245,11 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     }
     const evidence = { ...oldEvidence, evidence: value.evidence ?? [], needs: value.needs ?? {}, fit: value.fit ?? null, deadline: value.deadline ?? { kind: 'none' },
       program: value.program ?? null, location: value.location ?? null, factsUsed: value.factsUsed ?? [], question: value.question ?? null, holdFactIds: value.holdFactIds ?? [] };
-    if (value.code === 'company_cap') {
-      evidence.companyCap = { provenance: oldEvidence.companyCap?.provenance ?? oldEvidence.provenance ?? null, judged: value.judged === true,
-        ...(capped ? { count: capped.count, max: capped.max, windowDays: capped.windowDays, applicationIds: capped.applicationIds, ...(capped.active ? { active: true } : {}) } : {}) };
+    if (LIMIT_CODES.includes(value.code)) {
+      evidence.companyCap = { provenance: oldEvidence.companyCap?.provenance ?? oldEvidence.provenance ?? null, judged: value.judged === true, code: value.code,
+        ...(capped ? { count: capped.count, max: capped.max, windowDays: capped.windowDays ?? null, applicationIds: capped.applicationIds, kind: capped.kind, source: capped.source,
+          ...(capped.cycleStart ? { cycleStart: capped.cycleStart } : {}), ...(capped.reason ? { reason: capped.reason, program: capped.program } : {}),
+          ...(capped.flaggedDates?.length ? { flaggedDates: capped.flaggedDates } : {}), ...(capped.active ? { active: true } : {}) } : {}) };
       evidence.provenance = 'automated';
     } else if (oldEvidence.companyCap) {
       if (oldEvidence.companyCap.provenance) evidence.provenance = oldEvidence.companyCap.provenance; else delete evidence.provenance;
@@ -262,7 +260,7 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
         ...(value.softwareDirection === true ? { software: true } : {}) };
       evidence.provenance = 'automated';
     } else if (oldEvidence.roleDirection) {
-      if (value.code !== 'company_cap') {
+      if (!LIMIT_CODES.includes(value.code)) {
         if (oldEvidence.roleDirection.provenance) evidence.provenance = oldEvidence.roleDirection.provenance; else delete evidence.provenance;
       }
       delete evidence.roleDirection;
@@ -273,13 +271,24 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
         provenance: oldEvidence.companyExcluded ? oldEvidence.companyExcluded.provenance ?? null : evidence.provenance ?? null };
       evidence.provenance = 'automated';
     } else if (oldEvidence.companyExcluded) {
-      if (value.code !== 'company_cap' && !directionOwned && !duplicate) {
+      if (!LIMIT_CODES.includes(value.code) && !directionOwned && !duplicate) {
         if (oldEvidence.companyExcluded.provenance) evidence.provenance = oldEvidence.companyExcluded.provenance; else delete evidence.provenance;
       }
       delete evidence.companyExcluded;
     }
     // The judge's function label, kept so the startup pass can re-check the direction without a model call.
     if (value.functionValue !== undefined) evidence.function = value.functionValue ?? null;
+    // Size and cross-ATS duplicate settlements: automated, restorable by an explicit rejudge.
+    if (value.code === 'company_small' || value.code === 'duplicate_submitted') {
+      evidence.gate = { code: value.code, judged: value.judged === true, provenance: oldEvidence.gate ? oldEvidence.gate.provenance ?? null : evidence.provenance ?? null,
+        ...(repost ? { duplicateOf: repost } : {}) };
+      evidence.provenance = 'automated';
+    } else if (oldEvidence.gate) {
+      if (!LIMIT_CODES.includes(value.code) && !directionOwned && !duplicate && !userExcluded) {
+        if (oldEvidence.gate.provenance) evidence.provenance = oldEvidence.gate.provenance; else delete evidence.provenance;
+      }
+      delete evidence.gate;
+    }
     if (duplicate) evidence.provenance = 'automated';
     if (value.modelDecision) evidence.modelDecision = value.modelDecision;
     else delete evidence.modelDecision;
@@ -297,6 +306,8 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     return { action, applicationId: app?.id ?? null };
   });
 }
+
+// Reconcile legacy/delivered leads even when no fetch or cached judgment is due.
 
 // Reconcile legacy/delivered leads even when no fetch or cached judgment is due.
 // Claim only duplicates and settle them through the normal fenced event writer;
@@ -328,39 +339,55 @@ export const restoredVerdict = (review, evidence) => ({ decision: 'eligible', co
   factsUsed: evidence.factsUsed ?? [], flags: parseJson(review.flags_json, []), ...(evidence.modelDecision ? { modelDecision: evidence.modelDecision } : {}),
   ...(evidence.jev ? { jev: evidence.jev } : {}), ...(Object.hasOwn(evidence, 'function') ? { functionValue: evidence.function } : {}) });
 
+// Startup reconciliation and cap release, with the same evaluator as delivery (src/review/limits.mjs):
+// settles due reviews and visible leads of a company over a limit, restores what a limit withdrew once
+// the current rule no longer blocks it (authorization cap_release, exact skip owner and reason), and gives
+// legacy quota holds a decision.
+export const QUOTA_HOLD_CODES = Object.freeze(['quota_full', 'quota_reconciliation', 'quota_unclear']);
 export function applyCompanyCap(db, { now, policy = {}, owner = 'review-company-cap' }) {
   return atomic(db, () => {
-    const cap = capOf(policy.companyCap);
-    const counts = companySubmissions(db, { now, cap, companyAliases: policy.companyAliases });
-    const active = (policy.activeCaps ?? []).length ? activeApplications(db, { companyAliases: policy.companyAliases }) : new Map();
-    let capped = 0; let restored = 0;
-    for (const row of db.prepare(`SELECT p.*,r.posting_id,r.state,r.decision,r.code,r.flags_json,r.evidence_json,r.dep_hashes_json,a.status application_status,a.skip_reason application_skip
+    const counts = limitCounts(db);
+    let capped = 0; let restored = 0; let holds = 0;
+    const codes = LIMIT_CODES.map((code) => `'${code}'`).join(',');
+    for (const row of db.prepare(`SELECT p.*,r.posting_id,r.state,r.decision,r.code,r.flags_json,r.evidence_json,r.dep_hashes_json,a.status application_status,a.skip_reason application_skip,a.skip_owner application_skip_owner
       FROM postings p JOIN reviews r ON r.posting_id=p.id LEFT JOIN applications a ON a.id=p.application_id
-      WHERE p.merged_into IS NULL AND (r.state='due' OR r.state='done' AND (r.code='company_cap' OR r.decision='eligible'))`).all()) {
+      WHERE p.merged_into IS NULL AND (r.state='due' OR r.state='done' AND (r.code IN (${codes}) OR r.decision='eligible')
+        OR r.state='held' AND r.code IN (${QUOTA_HOLD_CODES.map((code) => `'${code}'`).join(',')}))`).all()) {
       if (userDecided(db, row)) continue;
-      const over = companyCapped(db, row.company, { now, policy, counts, active });
       const evidence = parseJson(row.evidence_json);
-      if (row.code === 'company_cap') {
-        // A freshness refresh or replan re-queues capped reviews; while the cap
+      const over = evaluateLimits(row.company, { policy, now, counts, program: evidence.program, exclude: row.application_id ?? null });
+      if (row.state === 'held') {
+        // A quota hold from before limits became decisions: deliver its kept verdict through the gate.
+        const fence = claimItem(db, row.id, { owner, now });
+        if (!fence) continue;
+        deliver(db, { postingId: row.id, fence, now, policy, verdict: restoredVerdict(row, evidence) });
+        holds += 1;
+        continue;
+      }
+      if (LIMIT_CODES.includes(row.code)) {
+        // A freshness refresh or replan re-queues capped reviews; while the limit
         // holds, settle them again instead of paying to re-judge. A replan's
         // invalidation means the kept verdict is stale, so it must be re-judged.
         const judged = evidence.companyCap?.judged === true && !parseJson(row.dep_hashes_json).invalidated;
         if (over) {
           if (row.state === 'due') {
-            db.prepare(`UPDATE reviews SET state='done',stage='deliver',next_due=NULL,evidence_json=?,updated_at=? WHERE posting_id=? AND state='due' AND code='company_cap'`)
-              .run(JSON.stringify({ ...evidence, companyCap: { ...evidence.companyCap, judged } }), now, row.id);
-            logReview(db, row.id, { now, payload: { action: 'company_cap_settled', judged } });
+            db.prepare(`UPDATE reviews SET state='done',stage='deliver',decision='not_eligible',next_due=NULL,evidence_json=?,updated_at=? WHERE posting_id=? AND state='due' AND code=?`)
+              .run(JSON.stringify({ ...evidence, companyCap: { ...evidence.companyCap, judged } }), now, row.id, row.code);
+            logReview(db, row.id, { now, payload: { action: 'company_cap_settled', judged, code: row.code } });
           }
           continue;
         }
+        // Release only what this limit withdrew: the review owns the withdrawal and its reason is exactly the code.
+        if (row.application_id && row.application_status === 'withdrawn'
+          && !(row.application_skip_owner === 'review' && row.application_skip === row.code)) continue;
         if (judged) {
           const fence = claimItem(db, row.id, { owner, now });
           if (!fence) continue;
-          deliver(db, { postingId: row.id, fence, now, policy, verdict: restoredVerdict(row, evidence) });
+          deliver(db, { postingId: row.id, fence, now, policy, authorization: 'cap_release', verdict: restoredVerdict(row, evidence) });
         } else {
           db.prepare(`UPDATE reviews SET state='due',stage='fetch',decision=NULL,code=NULL,next_due=?,hold_owner=NULL,hold_since=NULL,updated_at=?
-            WHERE posting_id=? AND state IN ('due','done') AND code='company_cap'`).run(now, now, row.id);
-          logReview(db, row.id, { now, stage: 'fetch', payload: { action: 'company_cap_restored', judged: false } });
+            WHERE posting_id=? AND state IN ('due','done') AND code=?`).run(now, now, row.id, row.code);
+          logReview(db, row.id, { now, stage: 'fetch', payload: { action: 'company_cap_restored', judged: false, code: row.code } });
         }
         restored += 1;
         continue;
@@ -370,10 +397,27 @@ export function applyCompanyCap(db, { now, policy = {}, owner = 'review-company-
       if (row.state === 'done' && row.application_id && (row.application_status !== 'lead' || row.application_skip)) continue;
       const fence = claimItem(db, row.id, { owner, now });
       if (!fence) continue;
-      deliver(db, { postingId: row.id, fence, now, policy, verdict: row.state === 'done' ? restoredVerdict(row, evidence) : { decision: 'not_eligible', code: 'company_cap' } });
+      deliver(db, { postingId: row.id, fence, now, policy, verdict: row.state === 'done' ? restoredVerdict(row, evidence) : { decision: 'not_eligible', code: over.code } });
       capped += 1;
     }
-    return { capped, restored };
+    return { capped, restored, holds };
+  });
+}
+
+// Recovery-created system_failure holds are re-queued once; a second failure stays held and is
+// reported as an external failure (returned in `external`).
+export function requeueSystemFailures(db, { now }) {
+  return atomic(db, () => {
+    const result = { requeued: 0, external: [] };
+    for (const row of db.prepare("SELECT posting_id,flags_json,last_error FROM reviews WHERE state='held' AND code='system_failure'").all()) {
+      const flags = parseJson(row.flags_json, []);
+      if (flags.includes('system_failure_requeued')) { result.external.push({ postingId: row.posting_id, error: row.last_error ?? 'system_failure' }); continue; }
+      db.prepare(`UPDATE reviews SET state='due',code=NULL,decision=NULL,hold_owner=NULL,hold_since=NULL,next_due=?,flags_json=?,updated_at=? WHERE posting_id=? AND state='held'`)
+        .run(now, JSON.stringify([...flags, 'system_failure_requeued']), now, row.posting_id);
+      logReview(db, row.posting_id, { now, stage: 'fetch', payload: { action: 'system_failure_requeued' } });
+      result.requeued += 1;
+    }
+    return result;
   });
 }
 
@@ -384,7 +428,7 @@ export function annotateMail(db, { postingId, match, messageId, subject, receive
     const app = db.prepare('SELECT * FROM applications WHERE id=?').get(posting.application_id);
     appendEvent(db, app.id, 'mail_note', now, { note: subject ?? '', source: { kind: 'mail', messageId, received, matched, match } });
     if (match === 'exact' && app.status === 'lead' && (!app.skip_owner || app.skip_owner === 'review')) {
-      db.prepare("UPDATE applications SET skip_reason='already_applied_mail 邮件确认',skip_owner='review',updated_at=? WHERE id=?").run(now, app.id);
+      db.prepare("UPDATE applications SET skip_reason=?,skip_owner='review',updated_at=? WHERE id=?").run(MAIL_SUPPRESSION, now, app.id);
     }
   });
 }
@@ -392,7 +436,8 @@ export function unhide(db, { postingId, now }) {
   return atomic(db, () => {
     const posting = db.prepare('SELECT application_id FROM postings WHERE id=?').get(postingId);
     if (!posting?.application_id) return;
-    const changed = db.prepare("UPDATE applications SET skip_reason=NULL,skip_owner=NULL,updated_at=? WHERE id=? AND skip_owner='review' AND status='lead'").run(now, posting.application_id).changes;
+    // Only the exact suppression annotateMail wrote; any other review hold or system suppression stays.
+    const changed = db.prepare("UPDATE applications SET skip_reason=NULL,skip_owner=NULL,updated_at=? WHERE id=? AND skip_owner='review' AND status='lead' AND skip_reason=?").run(now, posting.application_id, MAIL_SUPPRESSION).changes;
     if (changed) appendEvent(db, posting.application_id, 'mail_unhidden', now, { source: { actor: 'user', postingId } });
   });
 }

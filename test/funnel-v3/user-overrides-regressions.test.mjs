@@ -281,7 +281,9 @@ test('[B] the override files are read with the review inputs but are not judge d
     assert.deepEqual(withFiles.overrides.locationExempt.brands, OVERRIDES.locationExempt.brands, 'the brand list is loaded');
     assert.deepEqual(withFiles.overrides.reallowedCompanies, [REALLOWED]);
     assert.deepEqual(withFiles.overrides.activeCaps, OVERRIDES.activeCaps);
-    assert.deepEqual(without.overrides, { locationExempt: { brands: [], windows: null }, reallowedCompanies: [], activeCaps: [], liftedSkipReasons: [], excludedCompanies: [], excludedCompanyPatterns: [] }, 'missing files mean no overrides');
+    // Amended for the redesign (Lane C1/C2): the empty overrides also carry an empty alias map, no limits and no size rule.
+    assert.deepEqual(without.overrides, { locationExempt: { brands: [], windows: null }, reallowedCompanies: [], activeCaps: [], liftedSkipReasons: [], excludedCompanies: [], excludedCompanyPatterns: [],
+      aliases: {}, limits: [], companySizes: null }, 'missing files mean no overrides');
     const adapter = { runner: 'fake', model: 'fake-primary', tier: 'primary', effort: null, cliVersion: 'fake-1' };
     const deps = (inputs) => judgeDependencies({ inputs, adapter, skeletonVersion: 'v', schemaHash: 's', decideVersion: 'd' }).hash;
     assert.equal(deps(withFiles), deps(without), 'the dependency hash is unchanged');
@@ -383,10 +385,15 @@ test('[L2] a lead withdrawn by a lifted company rule is restored by an eligible 
   const db = freshDb();
   const policy = deliveryPolicy(reviewInputs({ screeningPolicy: SCREENING, overrides: OVERRIDES }));
   const eligible = { decision: 'eligible', code: null, fit: { level: 'high', note: '' }, deadline: { kind: 'none' } };
-  const run = (id) => deliver(db, { postingId: id, fence: claimItem(db, id, { owner: 'worker-a', now: T0 }), now: T0, verdict: eligible, policy });
+  // Amended for the redesign (Lane C5): restoring a withdrawn application needs an explicit authorization; the
+  // lifted rule is restored by `review rejudge` (authorization 'rejudge'), and a normal run keeps the withdrawal.
+  const run = (id, authorization = 'rejudge') => deliver(db, { postingId: id, fence: claimItem(db, id, { owner: 'worker-a', now: T0 }), now: T0, verdict: eligible, policy, authorization });
   const lifted = withdrawnLead(db, 'p-lifted', { company: REALLOWED, reason: 'RULE shared cap: two at most' });
   const otherReason = withdrawnLead(db, 'p-other-reason', { company: REALLOWED, reason: 'not interested' });
   const otherCompany = withdrawnLead(db, 'p-other-company', { company: OTHER, reason: 'RULE shared cap: two at most' });
+  db.prepare("UPDATE reviews SET state = 'due' WHERE posting_id = 'p-lifted'").run();
+  assert.equal(run('p-lifted', null).action, 'withdrawal_kept', 'a normal run never restores');
+  assert.equal(db.prepare('SELECT status FROM applications WHERE id = ?').get(lifted).status, 'withdrawn');
   assert.equal(run('p-lifted').action, 'restored');
   const app = db.prepare('SELECT * FROM applications WHERE id = ?').get(lifted);
   assert.deepEqual([app.status, app.skip_reason], ['lead', null]);

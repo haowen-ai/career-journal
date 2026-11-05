@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { companyKey, titleSimilarity, titleContainment } from '../scan/dedupe.mjs';
 import { SUBMITTED_STATUSES } from './contract.mjs';
+import { autoReopenAllowed } from '../review/reopen-policy.mjs';
 
 const parseUrl = (value) => {
   try {
@@ -127,15 +128,26 @@ const quietLanes = new Set(['no_student_signal', 'out_of_direction']);
 function matters(posting, classification = {}) {
   return (classification.listed ?? Boolean(posting.listed)) && classification.kind !== 'drop' && classification.decision !== 'dropped' && !quietLanes.has(classification.lane);
 }
+// Contradictory authoritative ids prove two requisitions (C9): the postings stay separate and each is
+// judged on its own, with no identity hold. Only a posting being judged (leased) whose fetched page
+// names another requisition cannot be judged from that page: a browser reads its official page.
 function conflict(db, from, to, now, classification) {
   link(db, from, to, 'conflict', 'contradictory authoritative aliases', now);
   const posting = effective(db, from);
   const review = db.prepare('SELECT state,lane,decision FROM reviews WHERE posting_id=?').get(from);
   const current = classification ?? review;
-  if (matters(posting, current)) markReview(db, from, { now, state: 'held', decision: 'unclear', code: 'identity_conflict', holdOwner: 'user' });
-  else if (review?.state === 'leased') markReview(db, from, { now, state: 'done', decision: 'unclear', code: 'identity_conflict' });
+  if (review?.state === 'leased') {
+    if (matters(posting, current)) markReview(db, from, { now, state: 'held', decision: 'unclear', code: 'browser_review', holdOwner: 'user' });
+    else markReview(db, from, { now, state: 'done', decision: 'unclear', code: 'identity_conflict' });
+  }
   return { action: 'quarantined', postingId: from };
 }
+
+// Requisition ids written with and without a tenant prefix ("R26_0000029135" vs "0000029135") are one id.
+const canonicalId = (alias) => {
+  const at = alias.lastIndexOf(':');
+  return `${alias.slice(0, at)}:${alias.slice(at + 1).replace(/^[a-z]+\d*_(?=\d)/i, '')}`;
+};
 
 function authority(db, postingId) {
   return db.prepare(`WITH RECURSIVE members(id) AS (SELECT ? UNION SELECT p.id FROM postings p JOIN members m ON p.merged_into=m.id)
@@ -143,7 +155,8 @@ function authority(db, postingId) {
 }
 function contradicts(left, right) {
   const authoritative = (items) => items.filter((item) => ['req', 'company_req'].includes(item.kind));
-  left = authoritative(left); right = authoritative(right);
+  left = authoritative(left).map((item) => ({ ...item, alias: canonicalId(item.alias) }));
+  right = authoritative(right).map((item) => ({ ...item, alias: canonicalId(item.alias) }));
   if (!left.length || !right.length) return false;
   const rightAliases = new Set(right.map((item) => item.alias));
   if (!left.some((item) => rightAliases.has(item.alias))) return true;
@@ -249,7 +262,9 @@ export function reconcileAliases(db, postingId, aliases, { now, fence, classific
       if (fromReview.decision === 'dropped') {
         // A drop carries nothing to review: it never overwrites the target or reopens it.
         if (!targetReview) markReview(db, target.id, { now, state: 'done', decision: 'dropped', code: fromReview.code });
-      } else if (!targetReview || targetReview.updated_at <= fromReview.updated_at) {
+      } else if (!targetReview || (targetReview.updated_at <= fromReview.updated_at
+        // Decide once: a settled target review is never replaced by due work from another identity.
+        && autoReopenAllowed({ review: targetReview, application: target.application_id ? db.prepare('SELECT status FROM applications WHERE id=?').get(target.application_id) : null }))) {
         markReview(db, target.id, { now, state: 'due' });
         db.prepare('UPDATE reviews SET stage=?,lane=?,flags_json=?,evidence_json=?,dep_hashes_json=? WHERE posting_id=?')
           .run(fromReview.stage, fromReview.lane, fromReview.flags_json, fromReview.evidence_json, fromReview.dep_hashes_json, target.id);
@@ -460,4 +475,26 @@ export function duplicateGroups(db, { since, companyAliases } = {}) {
     applicationIds: group.map((a) => a.id).sort(), postingIds: [...new Set(group.flatMap((a) => postings.get(a.id)))].sort(),
     historical: Boolean(since) && group.every((app) => Date.parse(app.created_at) < Date.parse(since)),
   }));
+}
+
+// Startup reconciliation of identity holds written before C9: when the authoritative ids prove one
+// requisition (same tenant id, with or without a prefix) the held posting is bound to its partner (a
+// settled partner keeps its decision); otherwise both stay separate and the held one is judged on its own.
+export function resolveIdentityConflicts(db, { now, companyAliases } = {}) {
+  const result = { bound: [], separated: [] };
+  for (const row of db.prepare("SELECT posting_id FROM reviews WHERE state='held' AND code='identity_conflict'").all()) {
+    const id = row.posting_id;
+    const partners = db.prepare("SELECT CASE WHEN left_id=? THEN right_id ELSE left_id END other FROM posting_links WHERE kind='conflict' AND (left_id=? OR right_id=?)").all(id, id, id)
+      .map((link) => effective(db, link.other)).filter((posting) => posting && posting.id !== id);
+    const own = authority(db, id).map((item) => canonicalId(item.alias));
+    const same = partners.find((partner) => authority(db, partner.id).some((item) => own.includes(canonicalId(item.alias))));
+    if (same) {
+      const aliases = db.prepare('SELECT alias,kind FROM posting_aliases WHERE posting_id=?').all(same.id);
+      const outcome = reconcileAliases(db, id, aliases, { now, companyAliases, linkSiblings: false });
+      if (outcome.action === 'bound') { result.bound.push({ postingId: id, boundTo: same.id }); continue; }
+    }
+    markReview(db, id, { now, state: 'due' });
+    result.separated.push({ postingId: id });
+  }
+  return result;
 }
