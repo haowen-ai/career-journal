@@ -13,18 +13,21 @@ import { migration009 } from './migrations/009-review-lookup-indexes.mjs';
 
 export const schemaMigrations = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009];
 
+// A writer waits this long for another writer's transaction (a scan batch, a prune) before failing.
+export const BUSY_TIMEOUT_MS = 120_000;
+
 export function openDatabase(file) {
   const resolved = file === ':memory:' ? file : path.resolve(file);
   if (resolved !== ':memory:') mkdirSync(path.dirname(resolved), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(resolved);
-  db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
+  db.exec(`PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS};`);
   return db;
 }
 
 export function openReadOnlyDatabase(file) {
   const resolved = path.resolve(file);
   const db = new DatabaseSync(resolved, { readOnly: true });
-  db.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+  db.exec(`PRAGMA foreign_keys = ON; PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS};`);
   return db;
 }
 
