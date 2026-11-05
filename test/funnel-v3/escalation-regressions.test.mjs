@@ -205,7 +205,8 @@ test('[B] a second opinion that disagrees or is in between escalates as today, a
   }
 });
 
-test('[B] a second-opinion adapter that throws escalates exactly as today and is counted as an error (escalation E2)', async () => {
+// Redesign B3: an operational second-opinion failure no longer escalates; the posting waits, due, for the next run.
+test('[B] a second-opinion adapter that throws leaves the posting due without escalating and is counted as an error (escalation E2, redesign B3)', async () => {
   for (const kind of ['degree', 'eligible']) {
     const db = freshDb();
     const q = queue(db, { 'p-error': kind });
@@ -213,12 +214,12 @@ test('[B] a second-opinion adapter that throws escalates exactly as today and is
     const { receipt, called } = await review(db, { ...q, policy: withSecondOpinion, secondOpinion: jev });
 
     assert.equal(asked(jev), 1, `primary ${kind}: the configured second opinion is asked (${asked(jev)} calls)`);
-    assert.deepEqual(called('escalation'), ['p-error'], `primary ${kind}: an adapter error escalates`);
-    assert.deepEqual(outcome(db, 'p-error'), POSTINGS[kind].final, `primary ${kind}: the escalation tier decides`);
+    assert.deepEqual(called('escalation'), [], `primary ${kind}: an adapter error does not escalate`);
+    assert.deepEqual([reviewOf(db, 'p-error').state, reviewOf(db, 'p-error').decision], ['due', null], `primary ${kind}: the posting stays due`);
     assert.equal(reviewOf(db, 'p-error').hold_owner, null, `primary ${kind}: the error creates no hold`);
-    assert.deepEqual(receipt.counts.secondOpinion, { asked: 1, agreed: 0, escalated: 1, errors: 1 }, `primary ${kind}: receipt second-opinion counts: ${JSON.stringify(receipt.counts)}`);
-    assert.equal(receipt.status, 'ok', `primary ${kind}: a second-opinion error does not degrade the run: ${receipt.status} ${JSON.stringify(receipt.errors)}`);
-    assert.equal(receipt.counts.attempts, 2, `primary ${kind}: primary and escalation are the only paid attempts`);
+    assert.deepEqual(receipt.counts.secondOpinion, { asked: 1, agreed: 0, escalated: 0, errors: 1 }, `primary ${kind}: receipt second-opinion counts: ${JSON.stringify(receipt.counts)}`);
+    assert.equal(receipt.status, 'partial', `primary ${kind}: the waiting posting makes the run partial: ${receipt.status}`);
+    assert.equal(receipt.counts.attempts, 1, `primary ${kind}: only the primary attempt is paid`);
   }
 });
 

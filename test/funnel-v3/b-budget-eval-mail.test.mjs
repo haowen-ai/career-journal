@@ -677,7 +677,7 @@ test('[B] concurrency runs up to N judge calls at once without duplicate leads',
   assert.equal(db.prepare('SELECT COUNT(*) n FROM attempts').get().n, 6);
 });
 
-test('[B] three identical adapter errors fail the run with that message', async () => {
+test('[B] three identical adapter errors stop the run partial with that message (redesign B4)', async () => {
   const { runReview } = await workerModule();
   const db = freshDb();
   const q = queue();
@@ -686,7 +686,7 @@ test('[B] three identical adapter errors fail the run with that message', async 
   const primary = fakeJudge({ tier: 'primary', answers: () => ({ status: 'error', error: message }) });
   const receipt = await runReview(runOptions(db, { pages: q.pages, judges: { primary, escalation: fakeJudge({ tier: 'escalation' }) } }));
   assert.equal(primary.calls.length, 3);
-  assert.equal(receipt.status, 'failed');
+  assert.equal(receipt.status, 'partial');
   assert.equal(receipt.stop_reason, 'adapter_failure');
   assert.ok(JSON.stringify(receipt.errors).includes(message), JSON.stringify(receipt.errors));
   assert.deepEqual(stateCounts(db), { due: 5 }, 'items wait for the next run');
@@ -929,12 +929,16 @@ test('[B] stage runs under one daily id do not collide and the daily receipt tak
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
-test('[B] the receipt warns when evaluation is stale for the current dependencies', async () => {
-  const { runReview } = await workerModule();
+// Redesign B9: a stale evaluation is a release check reported by `doctor` (reviewEvalStatus), no longer a
+// nightly receipt warning.
+test('[B] a stale evaluation is not a nightly receipt warning; reviewEvalStatus reports it (redesign B9)', async () => {
+  const { runReview, reviewEvalStatus } = await workerModule();
   const db = freshDb();
   const stale = { setId: 'old-set', deps: { facts: 'x', rules: 'x', policy: 'x', resume: 'x', schema: 'x', prompt: 'x', model: 'x', decide: 'x' }, passedAt: '2026-10-01T00:00:00Z' };
-  const receipt = await runReview(runOptions(db, { inputs: () => reviewInputs({ evalRecord: stale }) }));
-  assert.ok(JSON.stringify(receipt.warnings ?? []).includes('eval_stale'), JSON.stringify(receipt.warnings));
+  const judges = { primary: fakeJudge({ tier: 'primary' }), escalation: fakeJudge({ tier: 'escalation' }) };
+  const receipt = await runReview(runOptions(db, { judges, inputs: () => reviewInputs({ evalRecord: stale }) }));
+  assert.ok(!JSON.stringify(receipt.warnings ?? []).includes('eval_stale'), JSON.stringify(receipt.warnings));
+  assert.equal((await reviewEvalStatus({ inputs: reviewInputs({ evalRecord: stale }), judges })).current, false);
 });
 
 const MARKERS = ['Marker Kestrel', 'Marker Heron', 'Marker Osprey', 'Marker Plover', 'Marker Avocet'];

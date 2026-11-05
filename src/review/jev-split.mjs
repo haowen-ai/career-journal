@@ -1,4 +1,4 @@
-import { createJevAdapter } from './second-opinion.mjs';
+import { createJevAdapter, jevFailure } from './second-opinion.mjs';
 import { dependencyHash } from './inputs.mjs';
 
 // Public templates only. Candidate details and policy choices belong in the
@@ -59,38 +59,40 @@ export const jevVerdict = ({ decision, code }, probabilities, facts) => ({ decis
 
 // Shared by the worker and evaluation gate. Never decide on partial answers:
 // even an early rejection waits for every dimension to return a valid number.
+// An operational failure (a throw, an invalid number, invalid thresholds) is returned as
+// `failure: { kind, status, message }` with no verdict; it is not an in-between answer, so the
+// worker leaves the posting due instead of escalating. Every dimension request is awaited
+// (allSettled) before returning, so no request outlives the posting's lease.
 export async function reviewJevSplit({ inputs, snapshotText, firstSeen, posting = {}, jev, counts }) {
   counts.postings += 1;
   const probabilities = {};
-  try {
-    const { reject, accept } = inputs.policy.judge.primary.thresholds ?? {};
-    for (const dimension of DIMENSIONS) {
-      for (const thresholds of [reject, accept]) {
-        const value = thresholds?.[dimension];
-        if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error('Invalid Jev thresholds');
-      }
-      if (reject[dimension] > accept[dimension]) throw new Error('Invalid Jev threshold order');
+  const failed = (failure) => { counts.errors += 1; return { probabilities, verdict: null, failure }; };
+  const { reject, accept } = inputs.policy.judge.primary.thresholds ?? {};
+  for (const dimension of DIMENSIONS) {
+    for (const thresholds of [reject, accept]) {
+      const value = thresholds?.[dimension];
+      if (!Number.isFinite(value) || value < 0 || value > 1) return failed({ kind: 'config', status: null, message: 'Invalid Jev thresholds' });
     }
-    if (typeof jev?.ask !== 'function') throw new Error('Jev adapter unavailable');
-    // The six questions are independent, so they are asked concurrently.
-    const answers = await Promise.all(DIMENSIONS.map((dimension) => {
-      counts.calls += 1;
-      const override = questionOverride(inputs.policy, dimension);
-      return jev.ask({ state: stateFor(dimension, inputs, snapshotText, firstSeen, posting, override), question: override?.question ?? JEV_SPLIT_QUESTIONS[dimension] });
-    }));
-    DIMENSIONS.forEach((dimension, index) => {
-      const { probability } = answers[index];
-      if (!Number.isFinite(probability) || probability < 0 || probability > 1) throw new Error('Invalid Jev probability');
-      probabilities[dimension] = probability;
-    });
-    const decided = jevDecision(probabilities, { reject, accept });
-    if (decided) {
-      counts[`decided_${decided.decision}`] += 1;
-      return { probabilities, verdict: jevVerdict(decided, probabilities, inputs.facts) };
-    }
-  } catch {
-    // Adapter errors can contain private transport details; do not persist them.
-    counts.errors += 1;
+    if (reject[dimension] > accept[dimension]) return failed({ kind: 'config', status: null, message: 'Invalid Jev threshold order' });
+  }
+  if (typeof jev?.ask !== 'function') return failed({ kind: 'config', status: null, message: 'Jev adapter unavailable' });
+  // The six questions are independent, so they are asked concurrently.
+  const answers = await Promise.allSettled(DIMENSIONS.map(async (dimension) => {
+    counts.calls += 1;
+    const override = questionOverride(inputs.policy, dimension);
+    return jev.ask({ state: stateFor(dimension, inputs, snapshotText, firstSeen, posting, override), question: override?.question ?? JEV_SPLIT_QUESTIONS[dimension] });
+  }));
+  const rejected = answers.find((answer) => answer.status === 'rejected');
+  if (rejected) return failed(jevFailure(rejected.reason));
+  for (const [index, dimension] of DIMENSIONS.entries()) {
+    const probability = answers[index].value?.probability;
+    if (!Number.isFinite(probability) || probability < 0 || probability > 1) return failed({ kind: 'invalid_response', status: null, message: 'Invalid Jev probability' });
+    probabilities[dimension] = probability;
+  }
+  const decided = jevDecision(probabilities, { reject, accept });
+  if (decided) {
+    counts[`decided_${decided.decision}`] += 1;
+    return { probabilities, verdict: jevVerdict(decided, probabilities, inputs.facts) };
   }
   counts.escalated += 1;
   return { probabilities, verdict: null };

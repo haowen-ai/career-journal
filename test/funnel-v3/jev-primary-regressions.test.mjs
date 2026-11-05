@@ -386,14 +386,15 @@ test('[B] Jev calls are not paid attempts; receipt.jev counts postings, calls, J
   const jev = fakeJev(q.script);
   const receipt = await review(db, { pages: q.pages, judges, jev });
 
-  assert.deepEqual(receipt.jev, { postings: 4, calls: jev.calls.length, decided_eligible: 1, decided_not_eligible: 1, escalated: 2, errors: 1 },
+  // Redesign B3: an errored posting is not escalated (it waits, due); escalated counts in-between answers only.
+  assert.deepEqual(receipt.jev, { postings: 4, calls: jev.calls.length, decided_eligible: 1, decided_not_eligible: 1, escalated: 1, errors: 1 },
     `receipt.jev: ${JSON.stringify(receipt.jev)}`);
   assert.ok(jev.calls.length >= 19, `six calls for each answered posting and at least one for the failed one (got ${jev.calls.length})`);
   assert.deepEqual(attemptsOf(db), [
-    { posting_id: 'p-err', tier: 'primary', runner: 'fake' },
     { posting_id: 'p-mid', tier: 'primary', runner: 'fake' },
-  ], 'only the two fallback judgments are paid attempts');
-  assert.equal(receipt.counts.attempts, 2);
+  ], 'only the in-between fallback judgment is a paid attempt');
+  assert.equal(receipt.counts.attempts, 1);
+  assert.deepEqual(outcome(db, 'p-err'), ['due', null, null]);
   assert.deepEqual(outcome(db, 'p-yes'), ['done', 'eligible', null]);
   assert.deepEqual(outcome(db, 'p-no'), ['done', 'not_eligible', 'outside_area']);
 });
@@ -419,7 +420,8 @@ test('[B] Jev decisions use no attempt budget: with budget 1 every Jev-decidable
   assert.notEqual(receipt.stop_reason, 'budget', 'the attempt budget is not exhausted by Jev');
 });
 
-test('[B] any Jev error for a posting (a throw or a probability outside [0, 1]) sends it to the fallback, even when the other answers would reject or accept (jev-primary J2)', async () => {
+// Redesign B3: any Jev error leaves the posting due (no decision from partial answers, and no Codex fallback).
+test('[B] any Jev error for a posting (a throw or a probability outside [0, 1]) leaves it due without a Codex call, even when the other answers would reject or accept (jev-primary J2, redesign B3)', async () => {
   const db = freshDb();
   const q = queue();
   // degree alone would reject, but auth failed: the fallback decides (eligible).
@@ -432,17 +434,13 @@ test('[B] any Jev error for a posting (a throw or a probability outside [0, 1]) 
   const jev = fakeJev(q.script);
   const receipt = await review(db, { pages: q.pages, judges, jev });
 
-  for (const [id, expected] of [
-    ['p-err-reject', ['done', 'eligible', null]],
-    ['p-err-accept', ['done', 'not_eligible', 'degree']],
-    ['p-err-invalid', ['done', 'not_eligible', 'degree']],
-  ]) {
+  for (const id of ['p-err-reject', 'p-err-accept', 'p-err-invalid']) {
     assert.ok(jevCallsFor(jev, id).length >= 1, `${id}: Jev is asked`);
-    assert.equal(callsFor(judges.primary, id).length, 1, `${id}: the error sends it to the Codex fallback`);
-    assert.deepEqual(outcome(db, id), expected, `${id}: the fallback's verdict, never one from partial Jev answers`);
+    assert.equal(callsFor(judges.primary, id).length, 0, `${id}: the error does not escalate to Codex`);
+    assert.deepEqual(outcome(db, id), ['due', null, null], `${id}: no verdict from partial Jev answers; it waits`);
     assert.equal(flagsOf(db, id).includes('jev_decided'), false, `${id}: not jev_decided`);
   }
-  assert.deepEqual(receipt.jev, { postings: 3, calls: jev.calls.length, decided_eligible: 0, decided_not_eligible: 0, escalated: 3, errors: 3 },
+  assert.deepEqual(receipt.jev, { postings: 3, calls: jev.calls.length, decided_eligible: 0, decided_not_eligible: 0, escalated: 0, errors: 3 },
     `receipt.jev: ${JSON.stringify(receipt.jev)}`);
 });
 

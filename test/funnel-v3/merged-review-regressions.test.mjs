@@ -457,7 +457,7 @@ test('[B] fetch and judge timeouts end the whole process tree within a bounded t
 
 // ===================================================================== #12
 
-test('[B] repeated missing judge output fails the run, and a single adapter failure is not ok (merged #12)', async () => {
+test('[B] repeated missing judge output stops the run partial (redesign B4), and a single adapter failure is not ok (merged #12)', async () => {
   const { runReview } = await workerModule();
   const { codexExecAdapter } = await judgeModule();
   // A CLI that exits 0 without writing its -o output file: every attempt reports the output missing.
@@ -475,7 +475,7 @@ test('[B] repeated missing judge output fails the run, and a single adapter fail
   const judges = { primary: silent('primary'), escalation: silent('escalation') };
   const receipt = await runReview(runOptions(db, { pages: q.pages, judges }));
   assert.equal(judges.primary.calls.length, 3, 'the run stops after three equivalent adapter errors');
-  assert.equal(receipt.status, 'failed');
+  assert.equal(receipt.status, 'partial', 'redesign B4: an adapter outage leaves the work due; the run is partial, not failed');
   assert.equal(receipt.stop_reason, 'adapter_failure');
   assert.ok(receipt.errors.length >= 1, 'the receipt names the adapter error');
 

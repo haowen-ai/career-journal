@@ -4,9 +4,11 @@ import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { JUDGMENT_SCHEMA_PATH, FORCED_DECISION_SCHEMA_PATH } from './prompt.mjs';
+import { redact } from '../runtime/redact.mjs';
 
 export const QUOTA_PATTERNS = Object.freeze([/usage limit|rate limit reached|quota/i]);
 const MAX_BYTES = 2_000_000;
+const STDERR_TAIL = 800;
 const schema = JSON.parse(readFileSync(JUDGMENT_SCHEMA_PATH, 'utf8'));
 const forcedSchema = JSON.parse(readFileSync(FORCED_DECISION_SCHEMA_PATH, 'utf8'));
 
@@ -138,11 +140,21 @@ export function codexExecAdapter({ bin = 'codex', codexHome, model, effort, tier
         if (QUOTA_PATTERNS.some((pattern) => pattern.test(stderr))) quota = true;
       };
       const finish = (status, extra = {}) => ({ status, output: null, rawText: '', usage, transportRetries, ...extra });
+      // Redesign B4: an operational failure keeps its real cause: a stable errorCode (the streak key), the
+      // stop reason, exit status and a redacted stderr tail. A kill we sent is reported as SIGTERM.
+      const failed = (status, { code, error, exitCode = null, signal = null } = {}) => {
+        const stderrTail = redact(stderr.trim().slice(-STDERR_TAIL));
+        const exit = exitCode !== null || signal ? ` (exit ${exitCode ?? 'none'}, signal ${signal ?? 'none'})` : '';
+        return finish(status, { errorCode: code, error: `${error ?? code}${exit}${stderrTail ? `; stderr: ${stderrTail}` : ''}`,
+          diagnostics: { stopReason: stopReason ?? null, exitCode, signal, stderrTail: stderrTail || null } });
+      };
+      const stopped = (result) => failed(stopReason === 'timeout' ? 'timeout' : 'error', { code: stopReason, error: `Judge ${stopReason}`,
+        exitCode: result?.exitCode ?? null, signal: result?.signal ?? (invocation ? 'SIGTERM' : null) });
       try {
         if (!runImpl && !stopReason) {
           await adapter.ready;
         }
-        if (stopReason) return finish(stopReason === 'timeout' ? 'timeout' : 'error', { error: stopReason });
+        if (stopReason) return stopped();
         await rm(outputPath, { force: true });
         invocation = Promise.resolve().then(() => (runImpl ?? runCommand)({ ...spec, cwd: attemptWorkDir, stdin: request.prompt, timeoutMs, signal: controller.signal, maxBytes: MAX_BYTES, onStdout, onStderr, onLimit: () => stop('too_large') }));
         let result = await Promise.race([invocation, cancelled]);
@@ -159,11 +171,11 @@ export function codexExecAdapter({ bin = 'codex', codexHome, model, effort, tier
           event(pending);
           if (result.stderr && result.stderr !== stderr) onStderr(String(result.stderr));
         }
-        if (stopReason) return finish(stopReason === 'timeout' ? 'timeout' : 'error', { error: stopReason });
-        if (result.tooLarge) return finish('error', { error: 'too_large' });
+        if (stopReason) return stopped(result);
+        if (result.tooLarge) return failed('error', { code: 'too_large', exitCode: result.exitCode ?? null, signal: result.signal ?? null });
         if (quota) return finish('quota', { error: stderr || 'Judge quota reached' });
         if (refused) return finish('refused');
-        if (result.exitCode !== 0) return finish('error', { error: stderr || `Judge exited ${result.exitCode}` });
+        if (result.exitCode !== 0) return failed('error', { code: `exit_${result.exitCode}`, error: `Judge exited ${result.exitCode}`, exitCode: result.exitCode, signal: result.signal ?? null });
         const outputStat = await stat(outputPath);
         if (!outputStat.isFile() || outputStat.size > MAX_BYTES) return finish('invalid', { errorCode: 'output_missing_or_too_large', error: 'Judge output is missing or too large' });
         const rawText = await readFile(outputPath, 'utf8');
@@ -173,7 +185,9 @@ export function codexExecAdapter({ bin = 'codex', codexHome, model, effort, tier
         return finish('ok', { output, rawText });
       } catch (error) {
         if (error.code === 'ENOENT' && completed) return finish('invalid', { errorCode: 'output_missing', error: 'Judge output file is missing' });
-        return finish(stopReason === 'timeout' ? 'timeout' : stopReason ? 'error' : error.code === 'ENOENT' && completed ? 'invalid' : 'error', { error: error.message });
+        // A process we stopped rejects with a generic message ("Process cancelled"): report why we stopped it.
+        if (stopReason) return stopped();
+        return failed('error', { code: error.code ?? 'adapter_error', error: redact(String(error.message)) });
       } finally {
         clearTimeout(timer);
         signal?.removeEventListener('abort', onAbort);
