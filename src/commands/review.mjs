@@ -67,7 +67,7 @@ const isBusy = (db, now) => db.prepare("SELECT heartbeat_at FROM runs WHERE kind
 export function reviewSizeResolver(context, inputs, runtime = {}) {
   const parts = runtime.review?.companySize ?? {};
   return createCompanySizeResolver({ profileDir: path.join(context.root, '.career-journal', 'profile'), reviewPolicy: inputs.policy,
-    askJev: parts.askJev, askModel: parts.askModel, runImpl: parts.runImpl, jevAdapter: parts.jev });
+    askJev: parts.askJev, askModel: parts.askModel, runImpl: parts.runImpl, jevAdapter: parts.jev, claudeClient: parts.claudeClient });
 }
 
 export async function reviewWithContext(context, runtime = {}, options = {}) {

@@ -5,6 +5,7 @@ import { executeCareerOpsProcess } from '../integrations/careerops-process.mjs';
 import { redact } from '../runtime/redact.mjs';
 import { buildCodexArgv } from './judge.mjs';
 import { createJevAdapter } from './second-opinion.mjs';
+import { claudeCaller } from './claude-judge.mjs';
 import { ensureCompanySizes, loadCompanySizes, saveSizeDecisions, SIZE_CONCURRENCY, SIZE_JEV_FAILURE_STREAK, SIZE_QUESTION, SIZE_THRESHOLDS } from './company-size.mjs';
 
 // The runtime side of the per-company size decision (src/review/company-size.mjs): one Jev question,
@@ -54,7 +55,19 @@ export function companySizeJev(reviewPolicy = {}, { adapter, thresholds = SIZE_T
 
 // One `codex exec` with the escalation tier's model/config and the size schema. An operational failure
 // throws with the real cause (exit status, stop reason, redacted stderr tail); it decides nothing.
-export function companySizeModel(reviewPolicy = {}, { runImpl, prompt } = {}) {
+// With a Claude primary tier (judge.primary.runner 'claude') the call is one structured Claude API call with the
+// primary tier's model and key instead; its failures throw with the stable Claude error text (e.g. "Claude API HTTP 402").
+export function companySizeModel(reviewPolicy = {}, { runImpl, prompt, claudeClient } = {}) {
+  const primary = reviewPolicy?.judge?.primary;
+  if (primary?.runner === 'claude') {
+    const caller = claudeCaller({ ...primary, ...(claudeClient ? { client: claudeClient } : {}) });
+    const valid = (output) => ['large', 'small'].includes(output?.size) && typeof output?.reason === 'string';
+    return async (company, context = {}) => {
+      const text = prompt ? prompt(company, context) : fill(DEFAULT_MODEL_PROMPT, { company, question: context.question ?? SIZE_QUESTION(company) });
+      const { output } = await caller.call({ prompt: text, system: null, schema: SIZE_SCHEMA, validate: valid });
+      return { size: output.size, reason: output.reason.slice(0, 500) };
+    };
+  }
   const config = reviewPolicy?.judge?.escalation;
   return async (company, context = {}) => {
     if (!config?.model || !config?.codexHome) throw new Error('company size model: review-policy judge.escalation needs model and codexHome');
@@ -83,10 +96,10 @@ export function companySizeModel(reviewPolicy = {}, { runImpl, prompt } = {}) {
 // resolveCompanySizes({ companies, now }) for the worker hook and `queue rescreen --decide-sizes`.
 // Each call reads company-size.json afresh, so decisions made elsewhere are seen; decisions are saved by
 // atomic rename (saveSizeDecisions) and read back by the next inputs refresh.
-export function createCompanySizeResolver({ profileDir, reviewPolicy = {}, askJev, askModel, save, runImpl, jevAdapter } = {}) {
+export function createCompanySizeResolver({ profileDir, reviewPolicy = {}, askJev, askModel, save, runImpl, jevAdapter, claudeClient } = {}) {
   const settings = companySizeSettings(reviewPolicy);
   const jev = askJev ?? companySizeJev(reviewPolicy, { adapter: jevAdapter, thresholds: settings.thresholds });
-  const model = askModel ?? companySizeModel(reviewPolicy, { runImpl, prompt: (company) => settings.modelPrompt(company) });
+  const model = askModel ?? companySizeModel(reviewPolicy, { runImpl, claudeClient, prompt: (company) => settings.modelPrompt(company) });
   const store = save ?? saveSizeDecisions(profileDir);
   return async ({ companies = [], now = new Date().toISOString() } = {}) => {
     const sizes = await loadCompanySizes(profileDir);

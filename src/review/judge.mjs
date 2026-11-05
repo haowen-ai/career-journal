@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { JUDGMENT_SCHEMA_PATH, FORCED_DECISION_SCHEMA_PATH } from './prompt.mjs';
 import { redact } from '../runtime/redact.mjs';
+import { claudeApiAdapter } from './claude-judge.mjs';
 
 export const QUOTA_PATTERNS = Object.freeze([/usage limit|rate limit reached|quota/i]);
 const MAX_BYTES = 2_000_000;
@@ -210,6 +211,8 @@ export function createJudgeAdapters(reviewPolicy) {
     const name = tier === 'primary' && reviewPolicy?.judge?.primary?.runner === 'jev-split' ? 'fallback' : tier;
     const config = reviewPolicy?.judge?.[name];
     required(config?.model, `${tier}.model`);
+    // runner 'claude': one Claude API call per judgment (claude-judge.mjs); its key comes from secretRef.
+    if (config.runner === 'claude') return claudeApiAdapter({ ...config, tier, schemaPath: config.schemaPath ?? JUDGMENT_SCHEMA_PATH });
     required(config?.codexHome, `${tier}.codexHome`);
     if (config.runner !== 'codex') throw new Error(`Unsupported ${tier} judge runner: ${config.runner}`);
     return codexExecAdapter({ ...config, tier, schemaPath: config.schemaPath ?? JUDGMENT_SCHEMA_PATH });

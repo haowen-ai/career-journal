@@ -315,6 +315,24 @@ adapter = { id, runner: 'codex' | 'fake' | …, model, tier: 'primary' | 'escala
   Codex home). Model names and Codex homes come only from `review-policy.json` (no hardcoded defaults in code; missing
   config fails the run with a clear error).
 - Tests use a fake adapter that returns scripted outputs and counts calls.
+- `claudeApiAdapter` (`src/review/claude-judge.mjs`, runner `claude`): the same contract over the Claude API through the
+  official `@anthropic-ai/sdk` (run `npm install`; the SDK is loaded only when a `claude` runner is configured). One
+  `messages.create` per judgment with the same rendered prompt as the Codex runner: rules, facts, resume and policy go to
+  `system` with a cache breakpoint, the delimited posting is the user turn; adaptive thinking, `output_config.effort` and a
+  `json_schema` format; the output is validated again against `judgment.schema.json`. Keys: `model` (required),
+  `effort` (default `low`), `maxTokens` (4096), `timeoutMs` (120000 per call), `maxRetries` (SDK retries, 2) and
+  `secretRef` (`env:VAR` or `keychain:SERVICE:ACCOUNT`; default `env:ANTHROPIC_API_KEY` when set, else
+  `keychain:career-journal-anthropic:$USER`). Failure codes: `auth` (401/403, no key), `billing` (402, `billing_error`),
+  `rate_limited` (429 after retries), `unavailable` (network, timeout, 5xx), `invalid_output`, `refused`; three identical
+  failures stop the run (`adapter_failure`) and leave postings due. Model, effort and SDK version are in the judge
+  dependency hash. With a `claude` primary the company-size model call is one Claude call on the primary tier too.
+  A Claude primary with no Jev (no `secondOpinion`, primary not `jev-split`):
+  ```json
+  "judge": {
+    "primary": { "runner": "claude", "model": "claude-opus-5-5", "effort": "low", "secretRef": "keychain:career-journal-anthropic:<account>" },
+    "escalation": { "runner": "codex", "model": "<escalation model>", "codexHome": "<codex home>", "effort": "high" }
+  }
+  ```
 
 #### 6.3.2 Request and output schema
 Input: facts (`facts.json`), policy text (allowed areas incl. county lists, terms, in-scope functions, exclusions, program
