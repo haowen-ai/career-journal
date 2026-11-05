@@ -5,7 +5,7 @@ import { executeCareerOpsProcess } from '../integrations/careerops-process.mjs';
 import { redact } from '../runtime/redact.mjs';
 import { buildCodexArgv } from './judge.mjs';
 import { createJevAdapter } from './second-opinion.mjs';
-import { ensureCompanySizes, loadCompanySizes, saveSizeDecisions, SIZE_QUESTION, SIZE_THRESHOLDS } from './company-size.mjs';
+import { ensureCompanySizes, loadCompanySizes, saveSizeDecisions, SIZE_CONCURRENCY, SIZE_JEV_FAILURE_STREAK, SIZE_QUESTION, SIZE_THRESHOLDS } from './company-size.mjs';
 
 // The runtime side of the per-company size decision (src/review/company-size.mjs): one Jev question,
 // then, only when Jev is in between, one `codex exec` call with a tiny schema. The question text and the
@@ -13,6 +13,7 @@ import { ensureCompanySizes, loadCompanySizes, saveSizeDecisions, SIZE_QUESTION,
 //   companySize.question     a template; "{company}" is replaced by the company name
 //   companySize.thresholds   { accept, reject } probabilities (default 0.7 / 0.3)
 //   companySize.modelPrompt  a template for the model call; "{company}" and "{question}" are replaced
+//   companySize.concurrency  questions in flight at once (default 4); judge.jevFailureStreak is shared with the worker
 // Credentials stay with the existing clients: the Jev adapter reads its key itself, codex uses its CODEX_HOME.
 
 export const SIZE_SCHEMA = Object.freeze({
@@ -36,7 +37,9 @@ export function companySizeSettings(reviewPolicy = {}) {
   }
   const question = typeof config.question === 'string' ? (company) => fill(config.question, { company }) : SIZE_QUESTION;
   const modelPrompt = (company) => fill(config.modelPrompt ?? DEFAULT_MODEL_PROMPT, { company, question: question(company) });
-  return { thresholds, question, modelPrompt };
+  const concurrency = config.concurrency ?? SIZE_CONCURRENCY;
+  if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error('review-policy companySize.concurrency must be a positive integer');
+  return { thresholds, question, modelPrompt, concurrency };
 }
 
 // The Jev client configured for this home: the split screen's primary, else the second opinion.
@@ -87,6 +90,7 @@ export function createCompanySizeResolver({ profileDir, reviewPolicy = {}, askJe
   const store = save ?? saveSizeDecisions(profileDir);
   return async ({ companies = [], now = new Date().toISOString() } = {}) => {
     const sizes = await loadCompanySizes(profileDir);
-    return ensureCompanySizes({ companies, sizes, askJev: jev, askModel: model, save: store, now, thresholds: settings.thresholds, question: settings.question });
+    return ensureCompanySizes({ companies, sizes, askJev: jev, askModel: model, save: store, now, thresholds: settings.thresholds, question: settings.question,
+      concurrency: settings.concurrency, jevFailureStreak: reviewPolicy?.judge?.jevFailureStreak ?? SIZE_JEV_FAILURE_STREAK });
   };
 }

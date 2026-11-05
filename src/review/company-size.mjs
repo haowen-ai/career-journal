@@ -103,9 +103,16 @@ const probabilityOf = (answer) => (typeof answer === 'number' ? answer : answer?
 // For each distinct unknown company: one Jev question; >= accept → large, <= reject → small; between →
 // askModel(company, context) must return { size: 'large'|'small', reason }. An operational failure of
 // either decides nothing: the company stays unknown and is returned in failed[] with the real error.
+// The questions share the review worker's outage breakers: at most `concurrency` run at once, and dispatch
+// stops after `jevFailureStreak` consecutive Jev failures (stopped 'jev_unavailable') or `modelFailureStreak`
+// identical consecutive model failures (stopped 'adapter_failure'). Companies not asked are failed[] too.
+export const SIZE_CONCURRENCY = 4;
+export const SIZE_JEV_FAILURE_STREAK = 20; // the worker default (JEV_FAILURE_STREAK); judge.jevFailureStreak overrides both
+export const SIZE_MODEL_FAILURE_STREAK = 3; // the worker ADAPTER_FAILURE_STREAK
 const inflight = new Map();
-export async function ensureCompanySizes({ companies = [], sizes, askJev, askModel, save, now = new Date().toISOString(), thresholds = SIZE_THRESHOLDS, question = SIZE_QUESTION } = {}) {
-  const result = { decided: [], failed: [], known: [] };
+export async function ensureCompanySizes({ companies = [], sizes, askJev, askModel, save, now = new Date().toISOString(), thresholds = SIZE_THRESHOLDS, question = SIZE_QUESTION,
+  concurrency = SIZE_CONCURRENCY, jevFailureStreak = SIZE_JEV_FAILURE_STREAK, modelFailureStreak = SIZE_MODEL_FAILURE_STREAK } = {}) {
+  const result = { decided: [], failed: [], known: [], stopped: null };
   if (!sizes || sizes.enabled === false) return result;
   const distinct = new Map();
   for (const name of companies) {
@@ -113,25 +120,40 @@ export async function ensureCompanySizes({ companies = [], sizes, askJev, askMod
     const k = sizes.key(name);
     if (!distinct.has(k)) distinct.set(k, String(name).trim());
   }
+  const streak = { jev: 0, model: null };
+  const stop = (reason) => { result.stopped ??= reason; };
   const decideOne = async (company) => {
     let probability;
     try {
       const answer = await askJev(question(company), { company });
       probability = probabilityOf(answer);
       if (!Number.isFinite(probability)) throw new Error(`Jev returned no probability${answer?.error ? `: ${answer.error}` : ''}`);
-    } catch (error) { return { company, failed: true, stage: 'jev', error: errorText(error) }; }
+    } catch (error) {
+      streak.jev += 1;
+      if (streak.jev >= jevFailureStreak) stop('jev_unavailable');
+      return { company, failed: true, stage: 'jev', error: errorText(error) };
+    }
+    streak.jev = 0;
     if (probability >= thresholds.accept) return { company, size: 'large', by: 'jev', probability, at: now };
     if (probability <= thresholds.reject) return { company, size: 'small', by: 'jev', probability, at: now };
+    if (result.stopped) return { company, failed: true, stage: 'stopped', probability, error: `not asked: ${result.stopped}` };
     try {
       const answer = await askModel(company, { probability, question: question(company) });
       if (!SIZES.has(answer?.size)) throw new Error(`model returned no size${answer?.error ? `: ${answer.error}` : ''}`);
+      streak.model = null;
       return { company, size: answer.size, by: 'model', probability, reason: typeof answer.reason === 'string' ? answer.reason : null, at: now };
-    } catch (error) { return { company, failed: true, stage: 'model', probability, error: errorText(error) }; }
+    } catch (error) {
+      const text = errorText(error);
+      streak.model = streak.model?.error === text ? { error: text, count: streak.model.count + 1 } : { error: text, count: 1 };
+      if (streak.model.count >= modelFailureStreak) stop('adapter_failure');
+      return { company, failed: true, stage: 'model', probability, error: text };
+    }
   };
-  await Promise.all([...distinct].map(async ([k, company]) => {
+  const handle = async ([k, company]) => {
     if (sizes.sizeOf(company)) { result.known.push(company); return; }
     let pending = inflight.get(k);
     const owner = !pending;
+    if (owner && result.stopped) { result.failed.push({ company, stage: 'stopped', error: `not asked: ${result.stopped}` }); return; }
     if (owner) {
       pending = (async () => {
         const outcome = await decideOne(company);
@@ -149,6 +171,9 @@ export async function ensureCompanySizes({ companies = [], sizes, askJev, askMod
     if (outcome.failed) result.failed.push({ company, stage: outcome.stage, error: outcome.error, ...(outcome.probability != null ? { probability: outcome.probability } : {}) });
     else if (owner) result.decided.push(outcome);
     else result.known.push(company);
-  }));
+  };
+  const queue = [...distinct];
+  const width = Math.max(1, Math.min(Number.isFinite(concurrency) ? Math.floor(concurrency) : SIZE_CONCURRENCY, queue.length));
+  await Promise.all(Array.from({ length: width }, async () => { while (queue.length) await handle(queue.shift()); }));
   return result;
 }

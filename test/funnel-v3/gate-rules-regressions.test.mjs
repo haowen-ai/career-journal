@@ -8,6 +8,7 @@ import path from 'node:path';
 import { freshDb, insertPosting, insertReview, reviewOf, eventsOf, seedApplication, T0, at } from '../../test-utils/funnel-v3.mjs';
 import { SCREENING_POLICY } from '../../test-utils/funnel-v3-fixtures.mjs';
 import { companySizes, companySizeGate, ensureCompanySizes, loadCompanySizes, saveSizeDecisions } from '../../src/review/company-size.mjs';
+import { createCompanySizeResolver } from '../../src/review/company-size-runtime.mjs';
 import { evaluateLimits, limitCounts, submissionHistory } from '../../src/review/limits.mjs';
 import { duplicateOfSubmitted, textSimilarity } from '../../src/review/duplicate.mjs';
 import { applyCompanyCap, deliver, requeueSystemFailures, unhide, annotateMail, MAIL_SUPPRESSION } from '../../src/review/deliver.mjs';
@@ -89,6 +90,50 @@ test('[C1] ensureCompanySizes: Jev accept/reject decide, between goes to the mod
     assert.equal(file.decided.find((entry) => entry.company === 'Gamma Example Co').reason, 'listed on an exchange');
     const again = await ensureCompanySizes({ companies: ['Beta Example Co'], sizes: await loadCompanySizes(dir), askJev, askModel, save, now: T0 });
     assert.deepEqual([again.decided, again.known], [[], ['Beta Example Co']], 'a decided company is not asked again');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+// Review finding 2026-11-05: size questions share the worker's outage breakers. They run with bounded concurrency,
+// and dispatch stops after the Jev failure streak or three identical model failures; the rest stay unknown.
+test('[C1] ensureCompanySizes runs with bounded concurrency and stops dispatching at the Jev and model failure thresholds', async () => {
+  const companies = Array.from({ length: 25 }, (_, n) => `Unknown Example ${n} Co`);
+  const save = async () => {};
+  let active = 0; let peak = 0;
+  const jevCalls = [];
+  const downJev = async (question, { company }) => {
+    jevCalls.push(company); active += 1; peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    active -= 1;
+    throw new Error('Jev HTTP 503');
+  };
+  const down = await ensureCompanySizes({ companies, sizes: companySizes(), askJev: downJev, askModel: async () => ({ size: 'large' }), save, now: T0, concurrency: 1, jevFailureStreak: 20 });
+  assert.equal(jevCalls.length, 20, 'no Jev question after 20 consecutive failures');
+  assert.equal(down.stopped, 'jev_unavailable');
+  assert.equal(down.failed.length, 25, 'every unresolved company is reported failed');
+  assert.equal(down.decided.length, 0);
+  assert.equal(peak, 1, 'concurrency is bounded');
+
+  const modelCalls = [];
+  const between = await ensureCompanySizes({ companies, sizes: companySizes(), askJev: async () => ({ probability: 0.5 }),
+    askModel: async (company) => { modelCalls.push(company); throw new Error('codex exited 1'); }, save, now: T0, concurrency: 1 });
+  assert.equal(modelCalls.length, 3, 'the model is not called after three identical failures');
+  assert.equal(between.stopped, 'adapter_failure');
+  assert.equal(between.failed.length, 25);
+
+  let wide = 0; let widePeak = 0;
+  const slowJev = async () => { wide += 1; widePeak = Math.max(widePeak, wide); await new Promise((resolve) => setTimeout(resolve, 2)); wide -= 1; return { probability: 0.9 }; };
+  const ok = await ensureCompanySizes({ companies, sizes: companySizes(), askJev: slowJev, askModel: async () => ({ size: 'large' }), save, now: T0, concurrency: 4 });
+  assert.equal(ok.decided.length, 25);
+  assert.ok(widePeak <= 4, `at most four questions in flight (saw ${widePeak})`);
+
+  const dir = await tempDir('cj-size-breaker-');
+  try {
+    await writeFile(path.join(dir, 'company-size.json'), JSON.stringify({ rule: 'synthetic' }));
+    let asked = 0;
+    const resolve = createCompanySizeResolver({ profileDir: dir, reviewPolicy: { judge: { jevFailureStreak: 2 }, companySize: { concurrency: 1 } },
+      askJev: async () => { asked += 1; throw new Error('Jev HTTP 503'); }, askModel: async () => ({ size: 'large' }), save });
+    const viaPolicy = await resolve({ companies, now: T0 });
+    assert.deepEqual([asked, viaPolicy.stopped, viaPolicy.failed.length], [2, 'jev_unavailable', 25], 'the resolver uses judge.jevFailureStreak');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
