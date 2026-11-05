@@ -65,7 +65,9 @@ export async function reviewWithContext(context, runtime = {}, options = {}) {
     concurrency: numberOption(options.concurrency ?? budgets.concurrency, '--concurrency'),
     deadlineMs: numberOption(options['deadline-min'] ?? budgets.deadlineMin, '--deadline-min', { integer: false }) * 60000,
     deadlineAt: options['deadline-at'], fetcher, judges, secondOpinion, jev, attemptDir: path.join(context.root, '.career-journal', 'attempts'),
-    inputs: () => loadReviewInputs(context.root), hooks: runtime.review?.hooks ?? {} });
+    inputs: () => loadReviewInputs(context.root), hooks: runtime.review?.hooks ?? {},
+    // Integration point for Lane C's company-size decisions (see the hook in worker.mjs); none by default.
+    resolveCompanySizes: runtime.review?.resolveCompanySizes ?? null });
   receipt.run_date = localDate(now, context.config.timezone);
   if (receipt.status !== 'busy') {
     context.db.prepare('UPDATE runs SET receipt_json=? WHERE run_id=?').run(redact(JSON.stringify(receipt)), receipt.run_id);

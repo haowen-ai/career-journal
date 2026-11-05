@@ -61,7 +61,7 @@ test('[B3] a Jev split failure keeps the posting due with the real error, makes 
   assert.deepEqual([logged.kind, logged.status], ['http', 429]);
   assert.equal(receipt.jev.errors, 1);
   assert.equal(receipt.jev.escalated, 0);
-  assert.equal(receipt.status, 'partial');
+  assert.deepEqual([receipt.status, receipt.stop_reason], ['partial', 'external_failure'], 'B10: the waiting posting names an external failure');
   assert.ok(receipt.errors.some((error) => /Jev HTTP 429/.test(error)), JSON.stringify(receipt.errors));
 });
 
@@ -69,9 +69,7 @@ test('[B3] 20 consecutive Jev-failed postings stop Jev for the run: partial, jev
   const db = freshDb();
   const ids = Array.from({ length: 23 }, (_, i) => `p-${String(i).padStart(2, '0')}`);
   const pages = postings(db, ids);
-  const asked = new Set();
-  const jev = { async ask({ state }) {
-    asked.add(ids.find((id) => JSON.stringify(state).includes(id)) ?? JSON.stringify(state).length);
+  const jev = { async ask() {
     throw new JevError('Jev HTTP 503', { kind: 'http', status: 503 });
   } };
   const j = judges();
