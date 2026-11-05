@@ -218,14 +218,13 @@ test('[B] an escalation-tier hold (missing_fact, requirement_unclear, user_revie
   }
 });
 
-test('[B] Jev verifies a forced decision but never overrides it: strong disagreement adds disputed, an adapter error leaves jevProbability null (model-decides H1)', async () => {
+test('[B] Jev verifies a forced decision but never overrides it: strong disagreement adds disputed; an adapter error decides nothing and leaves the item due (model-decides H1, redesign B3)', async () => {
   const question = await holdQuestion('missing_fact');
   for (const [name, decision, answer, disputed, stored] of [
     ['forced eligible, p 0.05 < 0.1', 'eligible', 0.05, true, 0.05],
     ['forced eligible, p exactly 0.1', 'eligible', 0.1, false, 0.1],
     ['forced not_eligible, p exactly 0.7', 'not_eligible', 0.7, true, 0.7],
     ['forced not_eligible, p 0.69', 'not_eligible', 0.69, false, 0.69],
-    ['forced eligible, Jev throws', 'eligible', () => { throw new Error('second opinion unavailable'); }, false, null],
   ]) {
     const db = freshDb();
     const q = queue();
@@ -244,6 +243,14 @@ test('[B] Jev verifies a forced decision but never overrides it: strong disagree
     assert.equal(callsFor(judges.escalation, id).length, 2, `${name}: no further escalation after verification`);
     assert.deepEqual(receipt.awaiting_user, [], `${name}: nothing awaits the user`);
   }
+  // Redesign B3: a failed verification is an operational failure, not an answer: no decision, the item waits.
+  const db = freshDb();
+  const q = queue();
+  const id = q.add(db, 'p-verified', HOLDS.missing_fact);
+  const judges = makeJudges({ answers: q.answers, forced: { [id]: forcedOutput('eligible', 'Assumed trainable') } });
+  await review(db, { pages: q.pages, judges, secondOpinion: fakeSecondOpinion(() => { throw new Error('second opinion unavailable'); }) });
+  const row = reviewOf(db, id);
+  assert.deepEqual([row.state, row.decision, row.hold_owner], ['due', null, null], 'Jev throws: the item stays due');
 });
 
 test('[B] a failed forced-decision call (error, quota, unclear or no assumption) leaves the item due for a later run, never user-held; the later run decides it (model-decides H1)', async () => {
@@ -466,10 +473,11 @@ test('[B] operational policy blocks never re-queue judged reviews; screening pol
   for (const id of settled) assert.deepEqual(outcome(id), judged[id], `${id} keeps its decision`);
   assert.deepEqual(called, ['p-new'], 'a new review simply uses the new judge');
 
-  // A screening change (areas) re-queues the affected negative reviews, as today.
+  // Redesign B1 (decide once): a screening change (areas) no longer re-queues settled negatives either;
+  // `review rejudge --code outside_area` is the explicit path for a rule relaxation.
   const screening = { ...operational, areas: { ...operational.areas, allowedStates: [...operational.areas.allowedStates, 'TX'] } };
   const after = makeJudges({ answers: q.answers, primaryModel: 'codex-auto-review' });
   await review(db, { pages: q.pages, judges: after, policy: screening, secondOpinion: fakeSecondOpinion(0.05), now: at(2), runId: 'review-model-decides-3' });
   const rejudged = after.primary.calls.map((call) => call.request.postingId);
-  for (const id of ['p-degree', 'p-area']) assert.ok(rejudged.includes(id), `${id}: an areas change re-judges a not_eligible review: called ${JSON.stringify(rejudged)}`);
+  for (const id of ['p-degree', 'p-area']) assert.ok(!rejudged.includes(id), `${id}: a settled not_eligible review is not re-judged by a run: called ${JSON.stringify(rejudged)}`);
 });

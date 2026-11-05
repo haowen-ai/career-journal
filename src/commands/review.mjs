@@ -21,10 +21,24 @@ import { claimItem, atomic } from '../review/lease.mjs';
 import { redecideReviews } from '../review/redecide.mjs';
 import { releaseHolds } from '../review/release-holds.mjs';
 import { reclassifyReviews } from '../review/reclassify.mjs';
+import { rejudgeReviews, settleBacklog, holdReview } from '../review/backlog.mjs';
 import { loadScanProfile } from '../scan/profile-input.mjs';
 import { profileOption, scanPolicy } from './scan.mjs';
 
-const usage = 'Usage: career-journal review run|redecide|reclassify|release-holds|bootstrap|list|report|receipt|attach|add|annotate|unhide|resolve|ledger|audit|daily-finalize|eval';
+const usage = 'Usage: career-journal review run|redecide|reclassify|release-holds|rejudge|settle-backlog|hold|bootstrap|list|report|receipt|attach|add|annotate|unhide|resolve|ledger|audit|daily-finalize|eval';
+const listOption = (value, name) => {
+  const items = [value].flat().flatMap((item) => (typeof item === 'string' ? item.split(',') : [])).map((item) => item.trim()).filter(Boolean);
+  if (!items.length) throw new Error(`${name} requires a value`);
+  return items;
+};
+// An item leased by a live run (fresh heartbeat of its owner) must not be written under it (redesign B6).
+const leasedByLiveRun = (db, postingId, now) => {
+  const row = db.prepare('SELECT state,lease_owner,lease_until FROM reviews WHERE posting_id=?').get(postingId);
+  if (row?.state !== 'leased' || !(row.lease_until > now)) return false;
+  return db.prepare("SELECT heartbeat_at FROM runs WHERE owner=? AND status='running'").all(row.lease_owner)
+    .some((run) => Date.parse(now) - Date.parse(run.heartbeat_at) <= 600000);
+};
+const activeRun = (db, now) => db.prepare("SELECT run_id FROM runs WHERE kind IN ('scan','review') AND status='running' AND heartbeat_at>=?").get(new Date(Date.parse(now) - 600000).toISOString());
 const required = (value, name) => { if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required`); return value; };
 function numberOption(value, name, { zero = false, integer = true } = {}) {
   const result = Number(value);
@@ -51,7 +65,9 @@ export async function reviewWithContext(context, runtime = {}, options = {}) {
     concurrency: numberOption(options.concurrency ?? budgets.concurrency, '--concurrency'),
     deadlineMs: numberOption(options['deadline-min'] ?? budgets.deadlineMin, '--deadline-min', { integer: false }) * 60000,
     deadlineAt: options['deadline-at'], fetcher, judges, secondOpinion, jev, attemptDir: path.join(context.root, '.career-journal', 'attempts'),
-    inputs: () => loadReviewInputs(context.root), hooks: runtime.review?.hooks ?? {} });
+    inputs: () => loadReviewInputs(context.root), hooks: runtime.review?.hooks ?? {},
+    // Integration point for Lane C's company-size decisions (see the hook in worker.mjs); none by default.
+    resolveCompanySizes: runtime.review?.resolveCompanySizes ?? null });
   receipt.run_date = localDate(now, context.config.timezone);
   if (receipt.status !== 'busy') {
     context.db.prepare('UPDATE runs SET receipt_json=? WHERE run_id=?').run(redact(JSON.stringify(receipt)), receipt.run_id);
@@ -93,6 +109,31 @@ export async function reviewCommand(parsed, io, runtime = {}) {
         const profile = await loadScanProfile(context.root, { path: profileOption(parsed) });
         emit(reclassifyReviews(context.db, { policy: await scanPolicy(context), profile, now, dryRun, batch }));
         return 0;
+      }
+      case 'rejudge': {
+        const apply = options.apply === true;
+        if (apply && activeRun(context.db, now)) { emit({ status: 'busy', reason: 'a scan or review run is active' }); return 75; }
+        const inputs = await loadReviewInputs(context.root);
+        emit(rejudgeReviews(context.db, { now, apply, companyAliases: deliveryPolicy(inputs).companyAliases ?? {},
+          codes: options.code === undefined ? null : listOption(options.code, '--code'), leads: options.leads === true,
+          postings: options.posting === undefined ? null : listOption(options.posting, '--posting'),
+          company: options.company === undefined ? null : required(options.company, '--company'),
+          since: options.since === undefined ? null : required(options.since, '--since') }));
+        return 0;
+      }
+      case 'settle-backlog': {
+        const apply = options.apply === true;
+        if (apply && activeRun(context.db, now)) { emit({ status: 'busy', reason: 'a scan or review run is active' }); return 75; }
+        const profile = await loadScanProfile(context.root, { path: profileOption(parsed) });
+        emit(settleBacklog(context.db, { policy: await scanPolicy(context), profile, now, apply }));
+        return 0;
+      }
+      case 'hold': {
+        const postingId = required(options.posting, '--posting');
+        if (leasedByLiveRun(context.db, postingId, now)) { emit({ postingId, status: 'busy' }); return 75; }
+        const inputs = await loadReviewInputs(context.root);
+        const result = holdReview(context.db, { postingId, code: required(options.code, '--code'), reason: required(options.reason, '--reason'), now, policy: deliveryPolicy(inputs) });
+        emit(result); return result.status === 'busy' ? 75 : 0;
       }
       case 'bootstrap': { const inputs = await loadReviewInputs(context.root); emit(bootstrapExisting(context.db, { provenance: inputs.provenance, policy: inputs.screeningPolicy, now })); return 0; }
       case 'list': {
@@ -148,11 +189,16 @@ export async function reviewCommand(parsed, io, runtime = {}) {
         let result; try { result = JSON.parse(content); } catch { result = { text: content }; }
         if (result.ok !== undefined && !validateSnapshot(posting, result).identityOk) throw new Error('Attachment identity validation failed');
         if (!result.text?.trim()) throw new Error('Attachment text is empty');
+        if (leasedByLiveRun(context.db, postingId, now)) { emit({ postingId, status: 'busy' }); return 75; }
+        let busy = false;
         atomic(context.db, () => {
+          if (leasedByLiveRun(context.db, postingId, now)) { busy = true; return; }
           context.db.prepare(`INSERT INTO snapshots(id,posting_id,content_hash,fetched_at,final_url,method,identity_ok,fields_json,sections_json,text) VALUES (?,?,?,?,?,'manual',1,?,?,?)`)
             .run(randomUUID(), postingId, dependencyHash({ text: result.text, title: result.title, requisitionId: result.requisitionId, locations: result.locations, jsonLd: result.jsonLd }), now, result.finalUrl ?? posting.canonical_url, JSON.stringify({ ...result, text: undefined }), JSON.stringify(segmentSections(result.text)), result.text);
           context.db.prepare("UPDATE reviews SET state='due',stage='judge',next_due=?,lease_owner=NULL,lease_until=NULL,updated_at=? WHERE posting_id=?").run(now, now, postingId);
-        }); emit({ postingId, method: 'manual' }); return 0;
+        });
+        if (busy) { emit({ postingId, status: 'busy' }); return 75; }
+        emit({ postingId, method: 'manual' }); return 0;
       }
       case 'annotate': {
         if (options.hits) {

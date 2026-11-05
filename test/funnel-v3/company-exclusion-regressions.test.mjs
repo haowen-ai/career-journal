@@ -196,7 +196,7 @@ test('[CE] an eligible verdict at an override-excluded company creates no lead a
 
 // ===================================================================== CE5 — startup pass
 
-test('[B] the startup pass withdraws visible leads and settles due and held reviews at excluded companies without a model call; user decisions are untouched; removing the exclusion restores (exclusion CE5)', async () => {
+test('[B] the startup pass withdraws visible leads and settles due and held reviews at excluded companies without a model call; user decisions are untouched; removing the exclusion does not reopen settled rows (exclusion CE5, redesign B1)', async () => {
   const o = await overrides();
   const db = freshDb();
   const visible = deliveredLead(db, 'p-lead-disliked', { company: DISLIKED_POSTING });
@@ -253,17 +253,16 @@ test('[B] the startup pass withdraws visible leads and settles due and held revi
   assert.deepEqual(refreshed.fetcher.calls, [], 'nor fetched');
   assert.deepEqual(outcome(db, 'p-lead-disliked'), ['done', 'not_eligible', 'company_excluded']);
 
-  // The user removes the exclusions: the judged leads come back without a model call; the unjudged review is re-queued.
+  // Redesign B1 (decide once): removing the exclusions no longer restores settled rows by itself; the user runs
+  // `review rejudge --code company_excluded` for that. Nothing is judged, fetched or restored by the run.
   const later = await review(db, { budget: 0, now: at(3), overrides: await overrides({ rule: 'synthetic' }) });
   assert.deepEqual(judgedIds(later.judges), []);
-  assert.equal(attemptsCount(db), 0, 'restoring makes no paid attempt');
+  assert.equal(attemptsCount(db), 0, 'no paid attempt');
   for (const id of [visible, agencyLead]) {
     const row = db.prepare('SELECT * FROM applications WHERE id = ?').get(id);
-    assert.deepEqual([row.status, row.skip_reason], ['lead', null], `${id} is restored`);
+    assert.equal(row.status, 'withdrawn', `${id} stays withdrawn`);
   }
-  assert.deepEqual(outcome(db, 'p-lead-disliked'), ['done', 'eligible', null]);
-  assert.equal(evidenceOf(db, 'p-lead-disliked').provenance, undefined, 'the automated provenance of the exclusion is dropped on restore');
-  for (const id of ['p-due-disliked', 'p-held-agency', 'p-due-withdrawn']) assert.deepEqual([reviewOf(db, id).state, reviewOf(db, id).stage], ['due', 'fetch'], `${id} goes back to the fetch queue`);
+  for (const id of ['p-lead-disliked', 'p-due-disliked', 'p-held-agency', 'p-due-withdrawn']) assert.deepEqual(outcome(db, id), ['done', 'not_eligible', 'company_excluded'], `${id} stays settled`);
   assert.equal(earlierRow(), earlierBefore, 'restoring does not touch the withdrawn application either');
   assert.equal(userRows(), users, 'user decisions are still untouched');
 });

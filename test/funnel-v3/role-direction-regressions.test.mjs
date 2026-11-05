@@ -219,7 +219,7 @@ test('[B] the worker judges once and keeps blocked and generic software roles ou
 
 // ===================================================================== RD4 — startup pass
 
-test('[B] the startup pass withdraws visible out-of-direction leads without a model call, keeps user decisions, and restores when the rules change (role direction RD4)', async () => {
+test('[B] the startup pass withdraws visible out-of-direction leads without a model call, keeps user decisions, and keeps them settled when the rules change (role direction RD4, redesign B1)', async () => {
   const direction = await rules();
   const db = freshDb();
   const claims = deliveredLead(db, 'p-claims-lead', { title: 'Claims Intern - Property' });
@@ -252,16 +252,12 @@ test('[B] the startup pass withdraws visible out-of-direction leads without a mo
   await review(db, { budget: 0, now: at(1), direction });
   assert.equal(reviewRows(db), settled, 'a settled role_direction review is not touched again');
 
-  // The user drops the rules file: the withdrawn leads come back without a model call.
+  // Redesign B1 (decide once): dropping the rules file no longer reopens settled rows; `review rejudge` does.
   const later = await review(db, { budget: 0, now: at(2), direction: null });
-  assert.equal(attemptsCount(db), 0, 'restoring makes no paid attempt');
+  assert.equal(attemptsCount(db), 0, 'no paid attempt');
   assert.deepEqual(judgedIds(later.judges), []);
-  for (const id of [claims, generic]) {
-    const row = db.prepare('SELECT * FROM applications WHERE id = ?').get(id);
-    assert.equal(row.status, 'lead', `${id} is restored`);
-    assert.equal(row.skip_reason, null);
-  }
-  assert.deepEqual([reviewOf(db, 'p-claims-lead').decision, reviewOf(db, 'p-claims-lead').code], ['eligible', null]);
+  for (const id of [claims, generic]) assert.equal(db.prepare('SELECT status FROM applications WHERE id = ?').get(id).status, 'withdrawn', `${id} stays withdrawn`);
+  assert.deepEqual([reviewOf(db, 'p-claims-lead').decision, reviewOf(db, 'p-claims-lead').code], ['not_eligible', 'role_direction']);
   assert.equal(userRows(), users, 'a user skip is never restored');
 });
 

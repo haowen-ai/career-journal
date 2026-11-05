@@ -32,7 +32,7 @@ test('K1 transient Jev failures are retried, then succeed', async () => {
 test('K1 a 429 that never clears fails after three tries', async () => {
   await withFetch([() => new Response('', { status: 429 })], async (calls) => {
     const jev = createJevAdapter({ model: 'jev-test', retryDelayMs: 1 });
-    await assert.rejects(jev.ask({ state: 's', question: 'q' }), /Jev second opinion request failed/);
+    await assert.rejects(jev.ask({ state: 's', question: 'q' }), /Jev HTTP 429/); // redesign B3: the real status
     assert.equal(calls(), 3);
   });
 });

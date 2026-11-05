@@ -314,7 +314,7 @@ function deliveredLead(db, id, { title, functionLabel, now = at(-1) } = {}) {
   return appId;
 }
 
-test('[B] under neutral "deny" the startup pass withdraws visible neutral-title leads without a model call, keeps user decisions, and restores them under "allow" (FD3)', async () => {
+test('[B] under neutral "deny" the startup pass withdraws visible neutral-title leads without a model call, keeps user decisions, and does not reopen them under "allow" (FD3, redesign B1)', async () => {
   const { directionRules } = await directionModule();
   const { listQueue } = await import('../../src/commands/queue.mjs');
   const queued = (db) => listQueue(db, null).map((row) => row.id);
@@ -350,14 +350,15 @@ test('[B] under neutral "deny" the startup pass withdraws visible neutral-title 
   assert.deepEqual(queued(db), [data], 'only the data lead stays visible');
   assert.equal(userRows(), users, 'prepared, applied and user-skipped leads are untouched');
 
+  // Redesign B1 (decide once): a rules change never reopens settled rows; `review rejudge --code role_direction` does.
   await run(directionRules({ ...NEUTRAL_RAW, neutral: 'allow' }), at(1));
-  assert.deepEqual(queued(db).sort(), [data, evaluation, pricing].sort(), 'under allow the withdrawn neutral leads come back');
+  assert.deepEqual(queued(db), [data], 'under allow the withdrawn neutral leads stay withdrawn');
   assert.equal(userRows(), users);
 });
 
 // ===================================================================== review round 1 (Codex)
 
-test('[B] the startup pass withdraws visible leads labelled pure software engineering, flags them in the queue, leaves exploration settlements alone, and restores them when the rules go (FD2)', async () => {
+test('[B] the startup pass withdraws visible leads labelled pure software engineering, flags them in the queue, leaves exploration settlements alone, and keeps them settled when the rules go (FD2, redesign B1)', async () => {
   const { directionRules } = await directionModule();
   const { listQueue } = await import('../../src/commands/queue.mjs');
   const rules = directionRules({ allow: ['\\bdata\\b'] });
@@ -401,7 +402,7 @@ test('[B] the startup pass withdraws visible leads labelled pure software engine
   await run(rules, at(1));
   assert.equal(JSON.stringify(db.prepare('SELECT posting_id, state, decision, code FROM reviews ORDER BY posting_id').all()), settled);
   await run(null, at(2));
-  assert.deepEqual(listQueue(db, null).map((row) => row.id).sort(), [ml, swe, tools, unlabelled].sort(), 'restored without the rules');
+  assert.deepEqual(listQueue(db, null).map((row) => row.id).sort(), [ml, unlabelled].sort(), 'redesign B1: settled rows are not restored by a run');
   assert.equal(JSON.stringify(reviewOf(db, 'p-explore')), explore);
 });
 
@@ -470,7 +471,7 @@ test('[B] redecide keeps a delivered forced decision and corrects its inflated f
   assert.equal(JSON.stringify(reviewOf(db, 'p-forced-old')), unchanged, 'left as it is');
 });
 
-test('[B] the startup pass re-judges an invalidated software settlement instead of restoring it, and withdraws a lead a freshness refresh re-queued (FD2)', async () => {
+test('[B] the startup pass neither restores nor re-queues a settled invalidated software settlement, and withdraws a lead a freshness refresh re-queued (FD2, redesign B1)', async () => {
   const { applyRoleDirection } = await load('RD', './src/review/direction-pass.mjs', ['applyRoleDirection']);
   const { deliver, claimItem } = await delivery();
   const { directionRules } = await directionModule();
@@ -484,7 +485,7 @@ test('[B] the startup pass re-judges an invalidated software settlement instead 
   db.prepare('UPDATE reviews SET dep_hashes_json = ? WHERE posting_id = ?').run(JSON.stringify({ invalidated: true }), 'p-stale');
   applyRoleDirection(db, { now: at(1), policy: { ...SCREENING_POLICY, direction: null } });
   const stale = reviewOf(db, 'p-stale');
-  assert.deepEqual([stale.state, stale.stage, stale.decision], ['due', 'judge', 'not_eligible'], 'queued for judgment, not restored as eligible');
+  assert.deepEqual([stale.state, stale.stage, stale.decision], ['done', 'deliver', 'not_eligible'], 'settled stays settled: not restored, not re-queued');
   assert.equal(applicationOf(db, 'p-stale'), undefined, 'no lead appears');
 
   // A scan drop later replaces a software settlement but keeps its old evidence marker: the drop wins.

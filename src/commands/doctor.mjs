@@ -10,6 +10,9 @@ import { isCurrentTaskRegistration, listTasks, REQUIRED_TASK_TYPES, taskEmailAcc
 import { probeTaskRegistration } from '../automation/probe.mjs';
 import { secretReferenceState } from '../secrets/reference.mjs';
 import { profileStatus } from '../domain/profile.mjs';
+import { loadReviewInputs } from '../review/inputs.mjs';
+import { createJudgeAdapters } from '../review/judge.mjs';
+import { reviewEvalStatus } from '../review/worker.mjs';
 
 const major = (version) => Number(String(version).replace(/^v/, '').split('.')[0]);
 const DAILY_HEALTH_WINDOW_MS = 36 * 60 * 60 * 1000;
@@ -64,6 +67,22 @@ async function profileChecks(home) {
         : 'all four interview rounds are complete',
     };
   return [profile, { id: 'apply', severity: state.readiness.apply.ready ? 'pass' : 'warn', detail: state.readiness.apply.detail }];
+}
+
+// The judging evaluation gate (moved here from the nightly receipt): warn when the stored evaluation does not
+// match today's judging dependencies. Homes without review inputs have no such check.
+async function reviewEvalCheck(home, capabilities) {
+  let inputs;
+  try { inputs = await loadReviewInputs(home); } catch { return null; }
+  if (!inputs.policy?.judge) return null;
+  try {
+    const judges = capabilities.reviewJudges ?? createJudgeAdapters(inputs.policy);
+    const status = await reviewEvalStatus({ inputs, judges });
+    return { id: 'review-eval', severity: status.current ? 'pass' : 'warn',
+      detail: status.current ? `evaluation current (passed ${status.passedAt})` : `eval_stale: rerun \`review eval\` for ${status.stale.join(', ')}` };
+  } catch (error) {
+    return { id: 'review-eval', severity: 'warn', detail: `cannot check the evaluation: ${error.message}` };
+  }
 }
 
 export async function doctor(home, capabilities = {}) {
@@ -229,6 +248,8 @@ export async function doctor(home, capabilities = {}) {
   } else if (config.jev.accessState === 'waitlisted') jevState.detail = 'waitlisted; no key required until access is granted';
   checks.push({ id: 'jev', severity: jevState.ok ? 'pass' : 'warn', detail: jevState.detail });
   checks.push(...await profileChecks(home));
+  const evalCheck = await reviewEvalCheck(home, capabilities);
+  if (evalCheck) checks.push(evalCheck);
   return { ok: !checks.some((item) => item.severity === 'fail'), checks };
 }
 

@@ -490,7 +490,9 @@ test('[B] a decision-code-only change re-decides from cached judgments with zero
     const called = calledFor(judges);
     assert.deepEqual(called.filter((id) => decisionOnly.includes(id)), [],
       `a decision-code-only change never re-judges (no paid calls); it re-decides from the cached judgment: called ${JSON.stringify(called)}`);
-    for (const id of ['p-prompt', 'p-schema']) assert.ok(called.includes(id), `${id}: a model-input change still re-judges: called ${JSON.stringify(called)}`);
+    // Redesign B1 (decide once): a model-input change no longer re-judges settled not_eligible reviews;
+    // only open work (holds, queued leads) is re-decided. `review rejudge` reopens history explicitly.
+    for (const id of ['p-prompt', 'p-schema']) assert.ok(!called.includes(id), `${id}: settled history is not re-judged by a run: called ${JSON.stringify(called)}`);
     const afterDeploy = { ...expected, 'p-decide-stale-hold': ['held', 'unclear', 'missing_fact'] }; // held-release HR1
     for (const [id, outcome] of Object.entries(afterDeploy)) {
       const row = reviewRow(db, id);
