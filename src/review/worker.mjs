@@ -30,6 +30,7 @@ import { applyRoleDirection } from './direction-pass.mjs';
 import { applyCompanyExclusion } from './exclusion-pass.mjs';
 import { lowerFit } from './fit.mjs';
 import { JevError, jevFailure } from './second-opinion.mjs';
+import { needsConversionProof } from './conversion.mjs';
 import { autoReopenAllowed } from './reopen-policy.mjs';
 export { scheduleRefresh } from './freshness.mjs';
 
@@ -37,6 +38,8 @@ const DAY = 86400000;
 // Run-wide stops (redesign B3/B4): consecutive Jev-failed postings, identical consecutive adapter failures.
 export const JEV_FAILURE_STREAK = 20;
 export const ADAPTER_FAILURE_STREAK = 3;
+// Fetch failures that go to the browser on the first try (redesign B5): 'challenge' is a bot wall.
+export const BROWSER_AT_ONCE = Object.freeze(['http_403', 'challenge', 'wrong_posting', 'too_short']);
 // Decide once: the automatic re-queue passes select only open work (reopen-policy.mjs), never the
 // whole settled history. The SQL narrows the scan; autoReopenAllowed stays the single rule.
 // Expects reviews r and the ownership joins (applications a) in the enclosing query.
@@ -370,8 +373,11 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         const review = db.prepare('SELECT attempts FROM reviews WHERE posting_id=?').get(id);
         const unavailable = validation.reason === 'not_found';
         if (unavailable) db.prepare("UPDATE postings SET availability='unavailable',updated_at=? WHERE id=?").run(now, id);
-        logReview(db, id, { now, stage: 'fetch', kind: 'error', payload: { error: validation.reason } });
-        if (review.attempts >= 3) deliver(db, { postingId: id, fence, now, policy: deliveryPolicy(current), verdict: { decision: 'unclear', code: 'browser_review', question: `Open the official posting: ${url}` } });
+        logReview(db, id, { now, stage: 'fetch', kind: 'error', payload: { error: validation.reason, ...(result.httpStatus ? { httpStatus: result.httpStatus } : {}), wallAt: wallClock() } });
+        // Redesign B5: a page that will not become readable by retrying (forbidden, bot wall, another posting,
+        // a stub) is browser work at once; network errors and 5xx keep the retry path.
+        const failKind = result.httpStatus === 403 ? 'http_403' : validation.reason;
+        if (review.attempts >= 3 || BROWSER_AT_ONCE.includes(failKind)) deliver(db, { postingId: id, fence, now, policy: deliveryPolicy(current), verdict: { decision: 'unclear', code: 'browser_review', question: `Open the official posting: ${url}` } });
         else release(id, fence, { stage: 'fetch', nextDue: new Date(Date.parse(now) + (unavailable ? [1,3,7][Math.min(review.attempts - 1,2)] : 1) * DAY).toISOString() });
         db.prepare('UPDATE reviews SET last_error=? WHERE posting_id=?').run(validation.reason, id);
         markSeen(row); return;
@@ -390,6 +396,8 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     const id = row.posting_id; markSeen(row);
     const fence = claimItem(db, id, { owner, now }); if (!fence) return;
     const posting = db.prepare('SELECT * FROM postings WHERE id=?').get(id);
+    // A posting whose company size could not be decided tonight waits, due (see the company-size hook).
+    if (sizeUnknown.has(posting.company)) { release(id, fence, { stage: row.stage }); return; }
     const snapshot = db.prepare('SELECT * FROM snapshots WHERE posting_id=? AND identity_ok=1 AND text IS NOT NULL ORDER BY fetched_at DESC,rowid DESC LIMIT 1').get(id);
     if (!snapshot) { release(id, fence, { stage: 'fetch' }); return; }
     const stageInputs = await refreshInputs();
@@ -518,6 +526,12 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       if (result.failure) { jevFailed(result.failure, 'split'); return; }
       jevAnswered();
       final = result.verdict; jevProbabilities = result.probabilities; fresh = true;
+      // Redesign B11: a fellowship/residency/research-program title is never accepted by Jev alone; the Codex
+      // tiers decide it against the conversion rule. A Jev-direct not_eligible is unaffected.
+      if (final?.decision === 'eligible' && needsConversionProof(posting.title, stageInputs.policy)) {
+        receipt.counts.conversion_proof = (receipt.counts.conversion_proof ?? 0) + 1;
+        final = null;
+      }
       // A location-exempt brand rejected on place alone needs the quoted offices: the model tiers decide it.
       if (final?.code === 'outside_area' && jevPlaceOnly(jevProbabilities, stageInputs.policy.judge.primary.thresholds)
         && locationExempt(posting.company, stageInputs.overrides, stageInputs.screeningPolicy?.companyAliases)) final = null;
@@ -627,6 +641,26 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     active.add(task);
   }
 
+  // ==== INTEGRATION HOOK: company size (Lane C src/review/company-size.mjs) =========================
+  // The single call site, before the judge loop. The coordinator injects
+  //   resolveCompanySizes({ companies: string[], now }) -> Promise<{ failed: [{ company, error }] }>
+  // wrapping ensureCompanySizes({ companies, sizes, askJev, askModel, save, now }). A company in failed[]
+  // (operational Jev/model failure) stays unknown: its postings stay due and the run names the external
+  // failure (stop_reason company_size_unavailable). Default: no hook, nothing is asked.
+  const sizeUnknown = new Set();
+  if (resolveCompanySizes && !halted) {
+    const companies = db.prepare(`SELECT DISTINCT p.company FROM reviews r JOIN postings p ON p.id=r.posting_id ${reviewOwnershipJoins}
+      WHERE r.state='due' AND (r.next_due IS NULL OR r.next_due<=?) AND p.company IS NOT NULL AND NOT ${userDecisionSql} ORDER BY p.company`).all(now).map((row) => row.company);
+    let failed;
+    try { failed = (await resolveCompanySizes({ companies, now }))?.failed ?? []; }
+    catch (error) { failed = companies.map((company) => ({ company, error: error?.message ?? String(error) })); }
+    for (const { company, error } of failed) {
+      sizeUnknown.add(company);
+      noteError(`company size unknown for ${company}: ${redact(String(error ?? 'no decision'))}`);
+    }
+    if (failed.length) receipt.stop_reason ??= 'company_size_unavailable';
+  }
+  // ==================================================================================================
   try {
     const fetchAhead = Math.max(concurrency * 2, FETCH_BATCH_MIN);
     const needsFetch = (row) => ['scan','fetch'].includes(row.stage);

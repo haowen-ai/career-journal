@@ -3,8 +3,17 @@ import { reviewOwnershipJoins, userDecisionSql } from './ownership.mjs';
 
 // Keep backlog-sized work inside SQLite. Only the bounded admitted buffer crosses
 // into JS; ownership and posting URLs must not require per-candidate lookups.
+// Redesign B7: the exploration share is review policy (exploration.share, 0..1); 0 turns the lanes off.
+export function explorationShare(policy) {
+  const share = policy?.exploration?.share;
+  if (share === undefined || share === null) return EXPLORATION_SHARE;
+  if (typeof share !== 'number' || !Number.isFinite(share) || share < 0 || share > 1) throw new Error('review policy exploration.share must be a number from 0 to 1');
+  return share;
+}
+
 export function createReviewScheduler(db, { now, owner, policy, budget, unlistedOnly }) {
-  const allowance = budget ? Math.max(1, Math.ceil(budget * EXPLORATION_SHARE)) : 0;
+  const share = explorationShare(policy);
+  const allowance = budget && share > 0 ? Math.max(1, Math.ceil(budget * share)) : 0;
   const common = { now, owner, unlisted: JSON.stringify([...unlistedOnly]), allowance };
   const reviewable = `FROM reviews r JOIN postings p ON p.id=r.posting_id
     ${reviewOwnershipJoins}
