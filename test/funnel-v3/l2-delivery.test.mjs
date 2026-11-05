@@ -20,10 +20,10 @@ function posting(db, { id = 'p-1', company = 'Example Corp', applicationId = nul
   return id;
 }
 
-async function deliverAs(db, postingId, verdict, now = T0) {
+async function deliverAs(db, postingId, verdict, now = T0, authorization = null) {
   const { deliver, claimItem } = await modules();
   const fence = claimItem(db, postingId, { owner: 'worker-a', now });
-  return deliver(db, { postingId, verdict, fence, now, policy: SCREENING_POLICY });
+  return deliver(db, { postingId, verdict, fence, now, policy: SCREENING_POLICY, authorization });
 }
 
 test('[L2] eligible with no application creates one visible lead and closes the review in the same transaction', async () => {
@@ -61,8 +61,14 @@ test('[L2] a visible lead goes hidden → withdrawn → restored as verdicts cha
   const withdrawal = eventsOf(db, lead.id).find((event) => event.type === 'review_withdrawn');
   assert.equal(withdrawal.source.actor, 'review-worker');
 
+  // Amended for the redesign (Lane C5, withdrawals stick): an eligible verdict in a normal run keeps the
+  // withdrawal; the explicit rejudge (authorization 'rejudge') restores it.
   db.prepare("UPDATE reviews SET state='due', stage='deliver' WHERE posting_id = ?").run(id);
-  assert.equal((await deliverAs(db, id, ELIGIBLE, at(2))).action, 'restored');
+  assert.equal((await deliverAs(db, id, ELIGIBLE, at(2))).action, 'withdrawal_kept');
+  assert.equal(application(db, lead.id).status, 'withdrawn');
+  assert.deepEqual([reviewOf(db, id).state, reviewOf(db, id).decision], ['done', 'not_eligible'], 'the review keeps its settled decision');
+  db.prepare("UPDATE reviews SET state='due', stage='deliver' WHERE posting_id = ?").run(id);
+  assert.equal((await deliverAs(db, id, ELIGIBLE, at(2), 'rejudge')).action, 'restored');
   app = application(db, lead.id);
   assert.equal(app.status, 'lead');
   assert.equal(app.skip_reason, null);
@@ -99,7 +105,8 @@ test('[L2] restore of a pre-release checker withdrawal is allowed only for regis
   const auto = seedCheckerWithdrawal(db, { company: 'Example Corp', role: 'Auto Intern', jobUrl: 'https://job-boards.greenhouse.io/examplecorp/jobs/1', note: 'AUTO-CHECK low fit: gaps' });
   const id = posting(db, { applicationId: auto.id });
   db.prepare("UPDATE reviews SET evidence_json = ? WHERE posting_id = ?").run(JSON.stringify({ provenance: 'automated' }), id);
-  assert.equal((await deliverAs(db, id, ELIGIBLE)).action, 'restored');
+  // Amended for the redesign (Lane C5): the restore also needs the explicit rejudge authorization.
+  assert.equal((await deliverAs(db, id, ELIGIBLE, T0, 'rejudge')).action, 'restored');
   assert.equal(application(db, auto.id).status, 'lead');
 });
 
@@ -143,8 +150,10 @@ test('[L2] an excluded company never gets a lead', async () => {
   assert.equal(reviewOf(db, id).code, 'company_excluded');
 });
 
-test('[L2] quota rules: full → hold with recheck at window end; reconciliation → hold not released by time; recount → lead with note; program scope without evidence → quota_unclear', async () => {
-  const { recheckHolds } = await load('L2', './src/review/freshness.mjs', ['recheckHolds']);
+// Amended for the redesign (Lane C2/C9): a blocked or full quota rule is a decision (not_eligible company_limit,
+// no application, releasable by the startup pass), never a hold. A scoped rule applies only to a verdict naming its
+// program; a verdict without a program is outside the scoped rule. An unblocked rule's note joins the fit note.
+test('[L2] quota rules: full, reconciliation-pending and blocked scoped rules are decisions, never holds; recount → lead with note; another program → lead', async () => {
   const db = freshDb();
   const full = posting(db, { id: 'p-full', company: 'Quota Full Example' });
   const recon = posting(db, { id: 'p-recon', company: 'Recount Example' });
@@ -155,24 +164,22 @@ test('[L2] quota rules: full → hold with recheck at window end; reconciliation
   await deliverAs(db, full, ELIGIBLE);
   await deliverAs(db, recon, ELIGIBLE);
   const recountResult = await deliverAs(db, recount, ELIGIBLE);
-  await deliverAs(db, program, ELIGIBLE);
+  const programResult = await deliverAs(db, program, ELIGIBLE);
   await deliverAs(db, programMatch, { ...ELIGIBLE, program: { name: '2027 internship USA/Canada', countryScope: 'USA/Canada', quote: 'Our 2027 internship USA/Canada program' } });
   const otherResult = await deliverAs(db, programOther, { ...ELIGIBLE, program: { name: '2027 Early Insight Week', countryScope: 'UK', quote: 'the 2027 Early Insight Week in the UK' } });
-  assert.deepEqual([reviewOf(db, programMatch).state, reviewOf(db, programMatch).code], ['held', 'quota_full'], 'a verdict naming the ruled program is held');
+  for (const id of [full, recon, programMatch]) {
+    const row = reviewOf(db, id);
+    assert.deepEqual([row.state, row.decision, row.code, row.hold_owner], ['done', 'not_eligible', 'company_limit', null], `${id}: a decision, not a hold`);
+    const evidence = JSON.parse(row.evidence_json);
+    assert.equal(evidence.companyCap.judged, true, `${id}: the eligible verdict is kept for a release`);
+    assert.equal(evidence.provenance, 'automated');
+    assert.equal(db.prepare('SELECT application_id FROM postings WHERE id = ?').get(id).application_id, null, `${id}: no application`);
+  }
+  assert.equal(JSON.parse(reviewOf(db, recon).evidence_json).companyCap.reason, 'reconciliation_pending');
   assert.equal(application(db, otherResult.applicationId).skip_reason, null, 'a different program at the same company is a visible lead');
-  assert.deepEqual([reviewOf(db, full).state, reviewOf(db, full).code], ['held', 'quota_full']);
-  assert.equal(reviewOf(db, full).next_due, '2026-12-01T00:00:00Z');
-  assert.deepEqual([reviewOf(db, recon).state, reviewOf(db, recon).code], ['held', 'quota_reconciliation']);
+  assert.equal(application(db, programResult.applicationId).skip_reason, null, 'a verdict without a program is outside the scoped rule');
   assert.equal(application(db, recountResult.applicationId).skip_reason, null);
   assert.match(application(db, recountResult.applicationId).fit_note ?? '', /recount/i);
-  assert.deepEqual([reviewOf(db, program).state, reviewOf(db, program).code], ['held', 'quota_unclear']);
-  for (const id of [full, recon, program]) {
-    const app = db.prepare('SELECT a.skip_reason FROM postings p JOIN applications a ON a.id = p.application_id WHERE p.id = ?').get(id);
-    assert.ok(app?.skip_reason, `${id} is a hidden lead the dashboard can show`);
-  }
-  recheckHolds(db, { now: '2027-03-01T00:00:00Z', screeningPolicy: SCREENING_POLICY });
-  assert.equal(reviewOf(db, recon).state, 'held', 'reconciliation is never released by window expiry');
-  assert.equal(reviewOf(db, full).state, 'due', 'quota_full is rechecked at window end');
 });
 
 test('[L2] mail: exact requisition confirmation hides reversibly; company-only mail is a note and the lead stays visible', async () => {

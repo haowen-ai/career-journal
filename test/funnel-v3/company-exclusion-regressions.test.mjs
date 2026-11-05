@@ -253,16 +253,18 @@ test('[B] the startup pass withdraws visible leads and settles due and held revi
   assert.deepEqual(refreshed.fetcher.calls, [], 'nor fetched');
   assert.deepEqual(outcome(db, 'p-lead-disliked'), ['done', 'not_eligible', 'company_excluded']);
 
-  // The user removes the exclusions: the judged leads come back without a model call; the unjudged review is re-queued.
+  // The user removes the exclusions. Amended for the redesign (Lane C5, withdrawals stick): a normal run never
+  // turns a withdrawn application back into a lead; only `review rejudge` (authorization 'rejudge') may. The
+  // unjudged review is still re-queued, and nothing is judged or paid.
   const later = await review(db, { budget: 0, now: at(3), overrides: await overrides({ rule: 'synthetic' }) });
   assert.deepEqual(judgedIds(later.judges), []);
-  assert.equal(attemptsCount(db), 0, 'restoring makes no paid attempt');
+  assert.equal(attemptsCount(db), 0, 'nothing is paid');
   for (const id of [visible, agencyLead]) {
     const row = db.prepare('SELECT * FROM applications WHERE id = ?').get(id);
-    assert.deepEqual([row.status, row.skip_reason], ['lead', null], `${id} is restored`);
+    assert.deepEqual([row.status, row.skip_reason], ['withdrawn', 'company_excluded (user)'], `${id} stays withdrawn`);
   }
-  assert.deepEqual(outcome(db, 'p-lead-disliked'), ['done', 'eligible', null]);
-  assert.equal(evidenceOf(db, 'p-lead-disliked').provenance, undefined, 'the automated provenance of the exclusion is dropped on restore');
+  assert.deepEqual(outcome(db, 'p-lead-disliked'), ['done', 'not_eligible', 'company_excluded']);
+  assert.equal(evidenceOf(db, 'p-lead-disliked').provenance, 'automated', 'the settlement keeps its automated provenance for an explicit rejudge');
   for (const id of ['p-due-disliked', 'p-held-agency', 'p-due-withdrawn']) assert.deepEqual([reviewOf(db, id).state, reviewOf(db, id).stage], ['due', 'fetch'], `${id} goes back to the fetch queue`);
   assert.equal(earlierRow(), earlierBefore, 'restoring does not touch the withdrawn application either');
   assert.equal(userRows(), users, 'user decisions are still untouched');

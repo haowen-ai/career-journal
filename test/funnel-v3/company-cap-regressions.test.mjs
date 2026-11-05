@@ -2,9 +2,11 @@
 // per company in any rolling 90 days. On the live queue, companies already over that count still had open leads
 // reaching the queue, and the user skipped them by hand.
 // Rulings:
-//   C1  A submission is an application with status applied/assessment/interview/rejected/offer. Its date is
-//       applied_at, else the latest 'submitted' event's occurred_at, else updated_at (live rows recorded today have
-//       applied_at NULL). Submissions are grouped by companyKey with the screening policy's companyAliases.
+//   C1  A submission is an application with submission evidence, whatever its current status. Its date is
+//       applied_at, else the earliest 'submitted' event, else the earliest event whose status_after is a submitted
+//       status, else created_at (flagged). Amended for the redesign (Lane C2): updated_at is never a submission date,
+//       so the fixture's fourth submission is dated by a status event instead. Submissions are grouped by companyKey
+//       with the screening policy's companyAliases.
 //   C2  A company with >= max submissions inside the window gets no new visible lead: an eligible verdict is settled
 //       not visible with code 'company_cap' and automated provenance, never held for the user. A due review of a
 //       capped company is settled by the worker's startup pass without fetching or judging it.
@@ -52,6 +54,10 @@ function submission(db, { company = CAPPED, daysAgo, now = T0, status = 'applied
   const old = at(-400, now);
   db.prepare(`INSERT INTO applications (id, company, role, job_url, status, applied_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(id, company, role ?? `Submitted Role ${seq}`, `https://jobs.example.test/${id}`, status, dated === 'applied_at' ? when : null, old, dated === 'updated_at' ? when : old);
+  if (dated === 'status_event') {
+    db.prepare(`INSERT INTO application_events (id, application_id, event_type, occurred_at, observed_at, recorded_at, title, note, source_json, status_after, content_hash)
+      VALUES (?, ?, 'manual_update', NULL, ?, ?, 'status', '', ?, ?, ?)`).run(`ev-${id}`, id, when, when, JSON.stringify({ kind: 'seed' }), status, `h-${id}`);
+  }
   if (dated === 'event') {
     db.prepare(`INSERT INTO application_events (id, application_id, event_type, occurred_at, observed_at, recorded_at, title, note, source_json, status_after, content_hash)
       VALUES (?, ?, 'submitted', ?, ?, ?, 'submitted', '', ?, 'applied', ?)`).run(`ev-${id}`, id, when, old, old, JSON.stringify({ kind: 'seed' }), `h-${id}`);
@@ -64,7 +70,7 @@ function fiveSubmissions(db, { now = T0, ages = [10, 20, 30, 40, 50] } = {}) {
     submission(db, { daysAgo: ages[0], now }),
     submission(db, { daysAgo: ages[1], now, status: 'rejected' }),
     submission(db, { daysAgo: ages[2], now, dated: 'event' }),
-    submission(db, { daysAgo: ages[3], now, dated: 'updated_at', status: 'assessment' }),
+    submission(db, { daysAgo: ages[3], now, dated: 'status_event', status: 'assessment' }),
     submission(db, { daysAgo: ages[4], now, company: 'Capped Example Holdings', status: 'interview' }),
   ];
 }

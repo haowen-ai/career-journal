@@ -41,6 +41,10 @@ export function countryOf(location) {
   return resolved.size === 1 ? [...resolved][0] : null;
 }
 
+// Drops decided from the record and configuration alone, before any fetch. Ingest may count these
+// instead of storing them (they never need a model or an official page).
+export const CERTAIN_DROP_CODES = Object.freeze(['no_student_signal', 'company_excluded', 'outside_countries', 'company_small']);
+
 export function classifyRole(record, { policy = {}, profile, identity: { submitted = false, userDeclined = false } = {} } = {}) {
   const flags = [];
   let lane = 'new';
@@ -49,6 +53,11 @@ export function classifyRole(record, { policy = {}, profile, identity: { submitt
   if (userDeclined) return outcome('reuse', 'user_declined');
   if (companyExcluded(record.company, policy)) {
     return outcome('drop', 'company_excluded', [record.company]);
+  }
+  // User rule: big companies only. A company known to be small (profile/company-size.json) is dropped
+  // before any fetch; an unknown one is reviewed and its size is decided once per company.
+  if (policy.companySizes?.enabled !== false && policy.companySizes?.sizeOf?.(record.company) === 'small') {
+    return outcome('drop', 'company_small', [record.company]);
   }
   const aliases = new Set(aliasesFor(record, { companyAliases: policy.companyAliases }).map((item) => item.alias));
   for (const entry of policy.userExcludedPostings ?? []) {

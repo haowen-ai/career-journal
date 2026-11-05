@@ -4,6 +4,7 @@ import { companyKey } from '../scan/dedupe.mjs';
 import { countryOf } from '../funnel/classify.mjs';
 import { decide } from './decide.mjs';
 import { companyExcluded } from './excluded.mjs';
+import { companySizes, readSizeFile } from './company-size.mjs';
 
 export { companyExcluded };
 
@@ -25,9 +26,20 @@ export { companyExcluded };
 //     applications in progress per company; liftedSkipReasons are skip-reason
 //     prefixes of a company rule the user has lifted, so a re-allowed company's
 //     lead withdrawn by that rule may be restored by an eligible review.
+//   company-overrides.json also takes (all optional, backward compatible):
+//     aliases { "<name as boards write it>": "<canonical company>" } — one alias map for exclusion,
+//       size, caps and limits, joined with the screening policy's companyAliases.
+//     limits [{ company, max, window: '90d' | '<n>d' | 'active' | 'cycle', cycleStart? }] — per-company
+//       limits (src/review/limits.mjs). A rolling-window entry replaces the default cap for that company;
+//       'active' counts applications in progress; 'cycle' counts submissions since cycleStart. max 0 is an
+//       exclusion: the company joins excludedCompanies.
+//   profile/company-size.json { large[], small[], defenseExcluded[], decided[] } (src/review/company-size.mjs);
+//     defenseExcluded joins the user exclusion like excludedCompanies.
 export const EXEMPT_FILE = 'location-exempt-brands.json';
 export const COMPANY_FILE = 'company-overrides.json';
-export const emptyOverrides = () => ({ locationExempt: { brands: [], windows: null }, reallowedCompanies: [], activeCaps: [], liftedSkipReasons: [], excludedCompanies: [], excludedCompanyPatterns: [] });
+export const emptyOverrides = () => ({ locationExempt: { brands: [], windows: null }, reallowedCompanies: [], activeCaps: [], liftedSkipReasons: [], excludedCompanies: [], excludedCompanyPatterns: [],
+  aliases: {}, limits: [], companySizes: null });
+const WINDOW = /^(?:\d+d|active|cycle)$/;
 
 const US_CODES = new Set('AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC AS GU MP PR VI UM'.split(' '));
 const EXEMPT_AREA = 'exempt_us';
@@ -47,7 +59,26 @@ function names(value, field, file) {
   return value.map((item) => item.trim());
 }
 
-export async function loadUserOverrides(profileDir) {
+function aliasMap(value) {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== 'object' || Array.isArray(value) || !Object.entries(value).every(([alias, canonical]) => alias.trim() && typeof canonical === 'string' && canonical.trim())) {
+    throw new Error(`Cannot load ${COMPANY_FILE}: aliases must map non-empty names to non-empty company names`);
+  }
+  return Object.fromEntries(Object.entries(value).map(([alias, canonical]) => [alias.trim(), canonical.trim()]));
+}
+
+function limitList(value) {
+  if (value === undefined || value === null) return [];
+  const valid = (item) => typeof item?.company === 'string' && item.company.trim() && Number.isInteger(item.max) && item.max >= 0 && WINDOW.test(item.window ?? '')
+    && (item.window !== 'cycle' || !Number.isNaN(Date.parse(item.cycleStart ?? '')));
+  if (!Array.isArray(value) || !value.every(valid)) {
+    throw new Error(`Cannot load ${COMPANY_FILE}: limits must be a list of { company, max, window: "90d" | "<n>d" | "active" | "cycle", cycleStart (for cycle) } with a whole max >= 0`);
+  }
+  return value.map((item) => ({ company: item.company.trim(), max: item.max, window: item.window, ...(item.window === 'cycle' ? { cycleStart: item.cycleStart } : {}),
+    ...(typeof item.note === 'string' ? { note: item.note } : {}) }));
+}
+
+export async function loadUserOverrides(profileDir, { sizes = true } = {}) {
   const result = emptyOverrides();
   const exempt = await readOptional(path.join(profileDir, EXEMPT_FILE));
   if (exempt !== null) {
@@ -69,6 +100,16 @@ export async function loadUserOverrides(profileDir) {
       throw new Error(`Cannot load ${COMPANY_FILE}: activeCaps must be a list of { company, max } with a positive integer max`);
     }
     result.activeCaps = caps.map((cap) => ({ company: cap.company.trim(), max: cap.max }));
+    result.aliases = aliasMap(company.aliases);
+    const limits = limitList(company.limits);
+    // max 0 is an exclusion, not a limit.
+    for (const item of limits.filter((limit) => limit.max === 0)) if (!result.excludedCompanies.includes(item.company)) result.excludedCompanies.push(item.company);
+    result.limits = limits.filter((limit) => limit.max > 0);
+  }
+  if (sizes) {
+    const size = await readSizeFile(profileDir);
+    result.companySizes = size ? companySizes({ ...size, aliases: result.aliases }) : null;
+    for (const name of size?.defenseExcluded ?? []) if (!result.excludedCompanies.includes(name)) result.excludedCompanies.push(name);
   }
   return result;
 }
@@ -79,12 +120,13 @@ export const reallowed = (company, policy = {}) => sameCompany(policy.reallowedC
 // The screening policy as delivery and scanning apply it. The input object is not modified.
 export function withOverrides(screeningPolicy = {}, overrides) {
   const o = overrides ?? emptyOverrides();
-  const aliases = screeningPolicy.companyAliases;
+  const aliases = { ...(screeningPolicy.companyAliases ?? {}), ...(o.aliases ?? {}) };
   const kept = (list) => (list ?? []).filter((company) => !sameCompany(o.reallowedCompanies, company, aliases));
   return { ...screeningPolicy,
     userExcludedCompanies: [...kept(screeningPolicy.userExcludedCompanies), ...kept(o.excludedCompanies)],
     overrideExcludedCompanies: kept(o.excludedCompanies), overrideExcludedPatterns: o.excludedCompanyPatterns ?? [],
-    reallowedCompanies: o.reallowedCompanies ?? [], activeCaps: o.activeCaps ?? [], liftedSkipReasons: o.liftedSkipReasons ?? [] };
+    reallowedCompanies: o.reallowedCompanies ?? [], activeCaps: o.activeCaps ?? [], liftedSkipReasons: o.liftedSkipReasons ?? [],
+    companyAliases: aliases, limits: o.limits ?? [], companySizes: o.companySizes ?? null };
 }
 
 export function locationExempt(company, overrides, aliases = {}) {

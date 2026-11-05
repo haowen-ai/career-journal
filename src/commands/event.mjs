@@ -21,7 +21,7 @@ export async function eventCommand(parsed, io) {
       note: parsed.options.note ?? '',
       source: { kind: parsed.options.source ?? 'user' },
       statusAfter: parsed.options['status-after'] ?? parsed.options.status ?? null,
-    }, { reopenUserWithdrawal: parsed.options['reopen-user-withdrawal'] === true });
+    }, { reopenUserWithdrawal: parsed.options['reopen-user-withdrawal'] === true, force: parsed.options.force === true });
     io.out(JSON.stringify(result));
     return 0;
   } finally { context.db.close(); }

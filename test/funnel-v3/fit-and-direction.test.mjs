@@ -350,8 +350,10 @@ test('[B] under neutral "deny" the startup pass withdraws visible neutral-title 
   assert.deepEqual(queued(db), [data], 'only the data lead stays visible');
   assert.equal(userRows(), users, 'prepared, applied and user-skipped leads are untouched');
 
+  // Amended for the redesign (Lane C5, withdrawals stick): relaxing the rules does not restore withdrawn leads in a
+  // normal run; `review rejudge` does.
   await run(directionRules({ ...NEUTRAL_RAW, neutral: 'allow' }), at(1));
-  assert.deepEqual(queued(db).sort(), [data, evaluation, pricing].sort(), 'under allow the withdrawn neutral leads come back');
+  assert.deepEqual(queued(db), [data], 'under allow the withdrawn neutral leads stay withdrawn until an explicit rejudge');
   assert.equal(userRows(), users);
 });
 
@@ -400,8 +402,9 @@ test('[B] the startup pass withdraws visible leads labelled pure software engine
   const settled = JSON.stringify(db.prepare('SELECT posting_id, state, decision, code FROM reviews ORDER BY posting_id').all());
   await run(rules, at(1));
   assert.equal(JSON.stringify(db.prepare('SELECT posting_id, state, decision, code FROM reviews ORDER BY posting_id').all()), settled);
+  // Amended for the redesign (Lane C5, withdrawals stick): dropping the rules restores nothing in a normal run.
   await run(null, at(2));
-  assert.deepEqual(listQueue(db, null).map((row) => row.id).sort(), [ml, swe, tools, unlabelled].sort(), 'restored without the rules');
+  assert.deepEqual(listQueue(db, null).map((row) => row.id).sort(), [ml, unlabelled].sort(), 'withdrawn leads stay withdrawn without the rules');
   assert.equal(JSON.stringify(reviewOf(db, 'p-explore')), explore);
 });
 
