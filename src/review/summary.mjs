@@ -21,13 +21,14 @@ export function nightlyCounts(receipt) {
   const scans = parts.filter(isScan);
   const reviews = parts.filter(isReview);
   // Fetched comes from the per-batch census (ingest[]), else the scan totals; stored likewise.
+  const scanned = scans.length > 0;
   const fetched = sum(scans, (scan) => (Array.isArray(scan.ingest) && scan.ingest.length ? sum(scan.ingest, (item) => item.fetched) : scan.counts?.raw));
   const stored = sum(scans, (scan) => (Array.isArray(scan.ingest) && scan.ingest.length ? sum(scan.ingest, (item) => item.stored) : scan.counts?.stored ?? scan.counts?.observed));
   const countedOnly = sum(scans, (scan) => scan.counts?.countedOnly);
   const lastReview = reviews.at(-1);
   const stopReasons = [...new Set([receipt?.stop_reason, ...parts.map((item) => item.stop_reason)].filter(Boolean))];
   return {
-    status: receipt?.status ?? 'unknown', fetched, stored, countedOnly,
+    status: receipt?.status ?? 'unknown', fetched: scanned ? fetched : null, stored: scanned ? stored : null, countedOnly: scanned ? countedOnly : null,
     judged: sum(reviews, (item) => item.counts?.judged), eligible: sum(reviews, (item) => item.counts?.eligible),
     dueLeft: lastReview?.backlog?.actionable_due ?? null, holds: lastReview?.backlog?.held ?? null,
     stopReasons, wallStarted: parts.find((item) => item.wallStarted)?.wallStarted ?? null, wallFinished: [...parts].reverse().find((item) => item.wallFinished)?.wallFinished ?? null,
@@ -39,11 +40,11 @@ export function nightlySummary(receipt, { lang = 'en' } = {}) {
   const c = nightlyCounts(receipt);
   const zh = lang === 'zh';
   const reasons = c.stopReasons.length
-    ? c.stopReasons.map((code) => `${code}${STOP_REASONS[code] ? ` (${STOP_REASONS[code][zh ? 'zh' : 'en']})` : ''}`).join(', ')
+    ? c.stopReasons.map((code) => `${code}${STOP_REASONS[code] ? (zh ? `（${STOP_REASONS[code].zh}）` : ` (${STOP_REASONS[code].en})`) : ''}`).join(zh ? '、' : ', ')
     : (zh ? '无' : 'none');
   const id = receipt?.run_id ?? receipt?.runId ?? '';
   if (zh) {
-    return `${id}：状态 ${c.status}；抓取 ${c.fetched}，入库 ${c.stored}（只计数 ${c.countedOnly}）；判定 ${c.judged}，合格 ${c.eligible}；剩余待审 ${known(c.dueLeft)}；挂起 ${known(c.holds)}；停止原因 ${reasons}`;
+    return `${id}：状态 ${c.status}；抓取 ${known(c.fetched)}，入库 ${known(c.stored)}（只计数 ${known(c.countedOnly)}）；判定 ${c.judged}，合格 ${c.eligible}；剩余待审 ${known(c.dueLeft)}；挂起 ${known(c.holds)}；停止原因 ${reasons}`;
   }
-  return `${id}: status ${c.status}; fetched ${c.fetched}, stored ${c.stored} (counted only ${c.countedOnly}); judged ${c.judged}, eligible ${c.eligible}; due left ${known(c.dueLeft)}; holds ${known(c.holds)}; stop reason ${reasons}`;
+  return `${id}: status ${c.status}; fetched ${known(c.fetched)}, stored ${known(c.stored)} (counted only ${known(c.countedOnly)}); judged ${c.judged}, eligible ${c.eligible}; due left ${known(c.dueLeft)}; holds ${known(c.holds)}; stop reason ${reasons}`;
 }

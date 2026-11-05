@@ -284,7 +284,7 @@ test('[INT-h] the nightly summary line and the zh report show the new receipt fi
     'daily-1: status partial; fetched 120, stored 7 (counted only 113); judged 5, eligible 2; due left 3; holds 1; stop reason jev_unavailable (Jev unavailable)');
   assert.match(nightlySummary(daily, { lang: 'zh' }), /状态 partial；抓取 120，入库 7（只计数 113）；判定 5，合格 2；剩余待审 3；挂起 1；停止原因 jev_unavailable（?.*Jev 不可用/);
   for (const code of ['unfinished', 'external_failure', 'adapter_failure', 'company_size_unavailable']) assert.match(nightlySummary({ ...review, stop_reason: code }), new RegExp(code));
-  assert.match(nightlySummary({ run_id: 'old', status: 'ok', counts: { attempts: 1 } }), /old: status ok; fetched 0, stored 0 .* due left \?; holds \?; stop reason none/);
+  assert.match(nightlySummary({ run_id: 'old', status: 'ok', counts: { attempts: 1 } }), /old: status ok; fetched \?, stored \? .* due left \?; holds \?; stop reason none/);
   const db = freshDb();
   const report = reviewReport(db, { receipt: review, sourceReceipts: [scan], lang: 'zh' });
   assert.match(report, /抓取 120，入库 7/);

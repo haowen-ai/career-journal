@@ -27,7 +27,13 @@ import { rejudgeReviews, settleBacklog, holdReview } from '../review/backlog.mjs
 import { loadScanProfile } from '../scan/profile-input.mjs';
 import { profileOption, scanPolicy } from './scan.mjs';
 
-const usage = 'Usage: career-journal review run|redecide|reclassify|release-holds|rejudge|settle-backlog|hold|bootstrap|list|report|receipt|attach|add|annotate|unhide|resolve|ledger|audit|daily-finalize|eval';
+const usage = ['Usage: career-journal review run|redecide|reclassify|release-holds|rejudge|settle-backlog|hold|bootstrap|list|report|receipt|attach|add|annotate|unhide|resolve|ledger|audit|daily-finalize|eval',
+  '  review rejudge (--code <a,b> [--company <name>] [--since <date>] | --leads | --posting <id,...>) [--apply]   dry run unless --apply',
+  '  review settle-backlog [--apply] [--profile <path>]   dry run unless --apply',
+  '  review hold --posting <id> --code <code> --reason <text>',
+  '  review list [--held] [--json]',
+  '  review attach --posting <id> --file <page>   exits 75 (busy) while a live run leases the posting',
+  '  review report [--run-id <id>] [--lang zh]   review receipt [--run-id <id>] [--summary [zh]]'].join('\n');
 const listOption = (value, name) => {
   const items = [value].flat().flatMap((item) => (typeof item === 'string' ? item.split(',') : [])).map((item) => item.trim()).filter(Boolean);
   if (!items.length) throw new Error(`${name} requires a value`);
