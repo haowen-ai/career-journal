@@ -3,7 +3,7 @@
 // outputs; every employer, place, requisition, URL and candidate fact below is invented.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { schemaMigrations } from '../../src/storage/database.mjs';
@@ -279,6 +279,9 @@ async function withHome(run) {
   try {
     await setup(home, { timezone: 'UTC', email: { mode: 'skip' } });
     await writeReviewHome(home);
+    // Changed on purpose 2026-11-05 (review finding 6): a missing company-size.json no longer passes every company,
+    // so the fixture employer is a known large company.
+    await writeFile(path.join(home, '.career-journal', 'profile', 'company-size.json'), JSON.stringify({ rule: 'synthetic', large: ['Example Corp'] }));
     context = await openHomeDatabase(home);
     await run({ home, db: context.db });
   } finally {

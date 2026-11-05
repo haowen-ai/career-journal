@@ -351,6 +351,9 @@ test('[B] createJudgeAdapters builds the Codex fallback from judge.fallback when
   try {
     await setup(home, { timezone: 'UTC', email: { mode: 'skip' } });
     await writeReviewHome(home, { policy: JEV_POLICY, facts: SPLIT_FACTS });
+    // Changed on purpose 2026-11-05 (review finding 6): a missing company-size.json no longer passes every company,
+    // so the fixture employer is a known large company and no size question reaches the network.
+    await writeFile(path.join(home, '.career-journal', 'profile', 'company-size.json'), JSON.stringify({ rule: 'synthetic', large: ['Example Corp'] }));
     context = await openHomeDatabase(home);
     const q = queue();
     const id = q.add(context.db, 'p-cli', { jev: HIGH, fallback: JUDGMENTS.undergradOnly, text: SNAPSHOTS.undergradOnly });

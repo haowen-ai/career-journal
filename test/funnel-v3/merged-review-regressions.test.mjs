@@ -601,7 +601,9 @@ test('[B] the role-scan task exits with the worst of scan and review, and keeps 
     assert.equal(configured.code, 0, configured.stderr);
     const runtime = async () => ({
       fetch: fixtureFetch({ ...(await defaultRoutes()), [ATS_URLS.lever]: 503 }),
-      review: { judges: eligibleJudges(), fetcher: fakeFetcher({}) },
+      // Changed on purpose 2026-11-05 (review finding 6): a missing company-size.json no longer passes every company,
+      // so the scanned employers' sizes are answered by an injected Jev (all large) instead of an unconfigured one.
+      review: { judges: eligibleJudges(), fetcher: fakeFetcher({}), companySize: { askJev: async () => ({ probability: 0.9 }) } },
     });
     const partial = await cli(['automation', 'run', '--home', home, '--task', 'role-scan'], await runtime());
     const result = JSON.parse(partial.stdout);

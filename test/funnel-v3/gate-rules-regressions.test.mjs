@@ -37,10 +37,17 @@ async function tempDir(prefix) { return mkdtemp(path.join(os.tmpdir(), prefix));
 
 // ===================================================================== C1 company size
 
-test('[C1] company size loads from company-size.json with aliases; no file means no rule', async () => {
+// Changed on purpose 2026-11-05 (review finding 6): a missing company-size.json is an empty cache with the gate on.
+// An unknown size never passes silently; it is decided (Jev, then the model) or the posting waits.
+test('[C1] company size loads from company-size.json with aliases; no file means an empty cache, not a pass', async () => {
   const dir = await tempDir('cj-size-');
   try {
-    assert.equal(companySizeGate('Anyone Co', await loadCompanySizes(dir)), 'large', 'no size file: every company passes');
+    assert.equal(companySizeGate('Anyone Co', await loadCompanySizes(dir)), 'unknown', 'no size file: the size is unknown, not large');
+    assert.equal(companySizeGate('Anyone Co', (await loadUserOverrides(dir)).companySizes), 'unknown', 'the delivery overrides agree');
+    const asked = [];
+    const viaMissing = await ensureCompanySizes({ companies: ['Anyone Co'], sizes: await loadCompanySizes(dir), askJev: async (question, { company }) => { asked.push(company); return { probability: 0.9 }; },
+      askModel: async () => ({ size: 'large' }), save: async () => {}, now: T0 });
+    assert.deepEqual([asked, viaMissing.decided.map((entry) => entry.size)], [['Anyone Co'], ['large']], 'an unknown size is asked about');
     await writeFile(path.join(dir, 'company-overrides.json'), JSON.stringify({ aliases: { 'Tiny Example Holdings (Unit)': 'Tiny Example Co' } }));
     await writeFile(path.join(dir, 'company-size.json'), JSON.stringify({ rule: 'synthetic', large: ['Big Example Co'], small: ['Tiny Example Co'], defenseExcluded: ['Armor Example Co'],
       decided: [{ company: 'Learned Example Co', size: 'small', by: 'jev', at: T0 }] }));

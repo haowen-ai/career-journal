@@ -31,6 +31,7 @@ import path from 'node:path';
 import { freshDb, load, insertPosting, insertReview, reviewOf, eventsOf, fakeJudge, fakeFetcher, T0, at } from '../../test-utils/funnel-v3.mjs';
 import { SCREENING_POLICY, SNAPSHOTS, JUDGMENTS, page, snapshotTitle, reviewInputs, writeReviewHome } from '../../test-utils/funnel-v3-fixtures.mjs';
 import { listQueue } from '../../src/commands/queue.mjs';
+import { companySizes } from '../../src/review/company-size.mjs';
 
 const overridesModule = () => load('CE1', './src/review/overrides.mjs', ['loadUserOverrides', 'withOverrides', 'emptyOverrides', 'companyExcluded']);
 const workerModule = () => load('CE5', './src/review/worker.mjs', ['runReview', 'inputState']);
@@ -174,7 +175,9 @@ test('[CE] scan drops a posting at an override-excluded company as company_exclu
 
 test('[CE] an eligible verdict at an override-excluded company creates no lead and is settled company_excluded, automated (exclusion CE4)', async () => {
   const { deliver, deliveryPolicy, claimItem } = await deliveryModule();
-  const o = await overrides();
+  // Changed on purpose 2026-11-05 (review finding 6): a missing company-size.json no longer passes every company,
+  // so the delivered employers are known large companies here.
+  const o = { ...(await overrides()), companySizes: companySizes({ large: [PRIVATE, REALLOWED] }) };
   const db = freshDb();
   const policy = deliveryPolicy(reviewInputs({ screeningPolicy: SCREENING, overrides: o }));
   const delivered = (id, company) => {

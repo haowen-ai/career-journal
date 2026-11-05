@@ -281,9 +281,13 @@ test('[B] the override files are read with the review inputs but are not judge d
     assert.deepEqual(withFiles.overrides.locationExempt.brands, OVERRIDES.locationExempt.brands, 'the brand list is loaded');
     assert.deepEqual(withFiles.overrides.reallowedCompanies, [REALLOWED]);
     assert.deepEqual(withFiles.overrides.activeCaps, OVERRIDES.activeCaps);
-    // Amended for the redesign (Lane C1/C2): the empty overrides also carry an empty alias map, no limits and no size rule.
-    assert.deepEqual(without.overrides, { locationExempt: { brands: [], windows: null }, reallowedCompanies: [], activeCaps: [], liftedSkipReasons: [], excludedCompanies: [], excludedCompanyPatterns: [],
-      aliases: {}, limits: [], companySizes: null }, 'missing files mean no overrides');
+    // Amended for the redesign (Lane C1/C2): the empty overrides also carry an empty alias map and no limits.
+    // Changed on purpose 2026-11-05 (review finding 6): a missing company-size.json no longer passes every company,
+    // it is an empty size cache with the gate on.
+    const { companySizes: emptySizes, ...rest } = without.overrides;
+    assert.deepEqual(rest, { locationExempt: { brands: [], windows: null }, reallowedCompanies: [], activeCaps: [], liftedSkipReasons: [], excludedCompanies: [], excludedCompanyPatterns: [],
+      aliases: {}, limits: [] }, 'missing files mean no overrides');
+    assert.deepEqual([emptySizes.enabled, emptySizes.sizeOf(REALLOWED), emptySizes.decided], [true, null, []], 'missing company-size.json: an empty cache, gate on');
     const adapter = { runner: 'fake', model: 'fake-primary', tier: 'primary', effort: null, cliVersion: 'fake-1' };
     const deps = (inputs) => judgeDependencies({ inputs, adapter, skeletonVersion: 'v', schemaHash: 's', decideVersion: 'd' }).hash;
     assert.equal(deps(withFiles), deps(without), 'the dependency hash is unchanged');

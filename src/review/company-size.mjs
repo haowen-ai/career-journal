@@ -7,7 +7,7 @@ import { companyKey } from '../scan/dedupe.mjs';
 //     large/small: names the user (or an earlier review) settled by hand. decided[]: decisions made by
 //     ensureCompanySizes, each { company, size: 'large'|'small', by, probability?, reason?, at }.
 //   Names are compared through companyKey with the alias map (company-overrides.json `aliases`).
-// No file means no size rule: every company passes.
+// No file means an empty cache with the gate on: every size is unknown until decided (never a silent pass).
 export const SIZE_FILE = 'company-size.json';
 export const SIZE_THRESHOLDS = Object.freeze({ accept: 0.7, reject: 0.3 });
 export const SIZE_QUESTION = (company) => `Is this statement true: "${company}" is a large employer, meaning a well-known brand, or 1,000 or more employees, or a latest valuation or market capitalization of $10 billion or more.`;
@@ -67,11 +67,11 @@ export async function loadCompanySizes(profileDir, { aliases } = {}) {
     aliases = (await loadUserOverrides(profileDir, { sizes: false })).aliases;
   }
   const data = await readSizeFile(profileDir);
-  if (!data) return companySizes({ aliases, enabled: false });
-  return companySizes({ ...data, aliases });
+  return companySizes({ ...(data ?? {}), aliases });
 }
 
-// 'large' | 'small' | 'unknown'. Without a size rule every company passes as 'large'.
+// 'large' | 'small' | 'unknown'. Every loaded home has sizes (an empty cache when the file is missing); only a
+// policy built in memory without sizes (no profile loaded) skips the gate.
 export function companySizeGate(company, sizes) {
   if (!sizes || sizes.enabled === false) return 'large';
   return sizes.sizeOf(company) ?? 'unknown';

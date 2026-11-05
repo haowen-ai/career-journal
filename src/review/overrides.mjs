@@ -108,7 +108,8 @@ export async function loadUserOverrides(profileDir, { sizes = true } = {}) {
   }
   if (sizes) {
     const size = await readSizeFile(profileDir);
-    result.companySizes = size ? companySizes({ ...size, aliases: result.aliases }) : null;
+    // A missing company-size.json is an empty cache with the gate on, so an unknown size is decided, never passed.
+    result.companySizes = companySizes({ ...(size ?? {}), aliases: result.aliases });
     for (const name of size?.defenseExcluded ?? []) if (!result.excludedCompanies.includes(name)) result.excludedCompanies.push(name);
   }
   return result;
