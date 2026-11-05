@@ -1,7 +1,7 @@
 // Redesign B5, B7, B10, B11 and the company-size hook in the review worker. Synthetic data only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { freshDb, insertPosting, insertReview, reviewOf, fakeJudge, fakeFetcher, T0 } from '../../test-utils/funnel-v3.mjs';
+import { freshDb, insertPosting, insertReview, reviewOf, seedApplication, fakeJudge, fakeFetcher, T0 } from '../../test-utils/funnel-v3.mjs';
 import { REVIEW_POLICY, RULES, SNAPSHOTS, JUDGMENTS, page, snapshotTitle, reviewInputs } from '../../test-utils/funnel-v3-fixtures.mjs';
 import { runReview } from '../../src/review/worker.mjs';
 import { JEV_SPLIT_QUESTIONS } from '../../src/review/jev-split.mjs';
@@ -136,4 +136,41 @@ test('[hook] three identical model failures in size resolution halt the run: no 
     for (const id of ['p-known', 'p-1', 'p-2', 'p-3', 'p-4']) assert.equal(reviewOf(db, id).state, 'due', `${breaker}: ${id} stays due`);
     assert.deepEqual([receipt.status, receipt.stop_reason], ['partial', breaker]);
   }
+});
+
+// Field finding 2026-11-05: rows settled superseded_by_user (the application was protected at delivery) and
+// later re-queued by an older run stayed due with their snapshot text pruned. Each run re-marked them for
+// judging, released them to fetch without fetching, and counted them as owed work: partial/unfinished forever.
+const prunedSnapshot = (db, id) => db.prepare(`INSERT INTO snapshots(id,posting_id,content_hash,fetched_at,final_url,http_status,method,identity_ok,fields_json,sections_json,text)
+  VALUES (?,?,?,?,?,200,'html',1,'{}','[]',NULL)`).run(`s-${id}`, id, `h-${id}`, T0, urlOf(id));
+test('[B10] a due superseded_by_user row is user-owned: not scheduled, not replanned, not counted as owed work', async () => {
+  const db = freshDb();
+  const pages = {};
+  add(db, pages, 'p-super');
+  db.prepare("UPDATE reviews SET stage='judge',decision='not_eligible',code='superseded_by_user',lane='refresh',attempts=2 WHERE posting_id='p-super'").run();
+  prunedSnapshot(db, 'p-super');
+  const app = seedApplication(db, { company: 'Example Corp', role: 'Role p-super', status: 'withdrawn', skipOwner: 'review', skipReason: 'company_excluded' });
+  db.prepare("UPDATE postings SET application_id=? WHERE id='p-super'").run(app.id);
+  const j = judges();
+  const fetcher = fakeFetcher(pages);
+  const receipt = await runReview({ db, runId: 'review-super', owner: 'worker-a', now: T0, budget: 50, deadlineMs: 600_000, attemptDir: null, sleep: async () => {},
+    fetcher, judges: j, inputs: () => reviewInputs({ policy: REVIEW_POLICY }), hooks: {} });
+  assert.equal(j.primary.calls.length + j.escalation.calls.length + fetcher.calls.length, 0, 'no fetch and no model call');
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM review_log WHERE posting_id='p-super' AND kind='replan'").get().n, 0, 'never re-marked');
+  assert.deepEqual([receipt.backlog.actionable_due, receipt.stop_reason, reviewOf(db, 'p-super').code], [0, null, 'superseded_by_user']);
+});
+
+test('[B10] a due row whose snapshot text was pruned is fetched and judged in the same run, not left counted', async () => {
+  const db = freshDb();
+  const pages = {};
+  add(db, pages, 'p-pruned');
+  db.prepare("UPDATE reviews SET stage='judge',decision='not_eligible',code='degree' WHERE posting_id='p-pruned'").run();
+  prunedSnapshot(db, 'p-pruned');
+  const fetcher = fakeFetcher(pages);
+  const j = judges();
+  const receipt = await runReview({ db, runId: 'review-pruned', owner: 'worker-a', now: T0, budget: 50, deadlineMs: 600_000, attemptDir: null, sleep: async () => {},
+    fetcher, judges: j, inputs: () => reviewInputs({ policy: REVIEW_POLICY }), hooks: {} });
+  assert.equal(fetcher.calls.length, 1, 'fetched again');
+  assert.equal(reviewOf(db, 'p-pruned').state, 'done');
+  assert.deepEqual([receipt.status, receipt.stop_reason, receipt.backlog.actionable_due], ['ok', null, 0]);
 });

@@ -424,7 +424,9 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     // A posting whose company size could not be decided tonight waits, due (see the company-size hook).
     if (sizeUnknown.has(posting.company)) { release(id, fence, { stage: row.stage }); return; }
     const snapshot = db.prepare('SELECT * FROM snapshots WHERE posting_id=? AND identity_ok=1 AND text IS NOT NULL ORDER BY fetched_at DESC,rowid DESC LIMIT 1').get(id);
-    if (!snapshot) { release(id, fence, { stage: 'fetch' }); return; }
+    // No readable snapshot (never fetched, or its text was pruned): back to fetch, and not yet seen, so this
+    // run can still fetch it. Leaving it seen would count it as owed work that no run ever reaches.
+    if (!snapshot) { release(id, fence, { stage: 'fetch' }); seen.delete(id); return; }
     const stageInputs = await refreshInputs();
     const startState = inputState(stageInputs);
     const stored = parseJson(row.dep_hashes_json);

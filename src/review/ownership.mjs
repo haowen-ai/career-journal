@@ -8,7 +8,11 @@ export const reviewOwnershipJoins = `
 export const explicitUserDecisionSql = `(COALESCE(a.applied_at,'')<>''
   OR COALESCE(a.status,'') IN (${[...SUBMITTED_STATUSES, 'prepared'].map((status) => `'${status}'`).join(',')})
   OR COALESCE(a.skip_owner,'')='user' OR COALESCE(r.code,'')='user_declined' OR u.posting_id IS NOT NULL)`;
-export const userDecisionSql = `(${explicitUserDecisionSql} OR COALESCE(a.skip_owner,'')='legacy')`;
+// superseded_by_user: delivery found the application protected (user-owned or a withdrawal it may not undo), so
+// the verdict changed nothing and never will without an authorization. Such a row is settled even if an older
+// run left it due: no pass replans, schedules or counts it as owed work (`review rejudge` skips it too).
+export const SUPERSEDED_CODE = 'superseded_by_user';
+export const userDecisionSql = `(${explicitUserDecisionSql} OR COALESCE(a.skip_owner,'')='legacy' OR COALESCE(r.code,'')='${SUPERSEDED_CODE}')`;
 
 // A user decision fences recovery, replanning and dispatch alike. review_log has no posting
 // index, so a caller checking many rows can pass the set of user-logged posting ids instead.
@@ -17,7 +21,7 @@ export function userDecided(db, row, { userLogged } = {}) {
   const applicationId = row.application_id ?? db.prepare('SELECT application_id FROM postings WHERE id=?').get(row.posting_id)?.application_id;
   const app = applicationId && db.prepare('SELECT * FROM applications WHERE id=?').get(applicationId);
   return Boolean(app && (app.applied_at || SUBMITTED_STATUSES.includes(app.status) || app.status === 'prepared'
-    || ['user', 'legacy'].includes(app.skip_owner)) || row.code === 'user_declined'
+    || ['user', 'legacy'].includes(app.skip_owner)) || row.code === 'user_declined' || row.code === SUPERSEDED_CODE
     || (userLogged ? userLogged.has(row.posting_id) : db.prepare("SELECT 1 FROM review_log WHERE posting_id=? AND kind='user'").get(row.posting_id)));
 }
 

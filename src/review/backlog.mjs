@@ -30,7 +30,7 @@ export const REJUDGE_AUTHORIZATION = 'rejudge';
 export const reopenAuthorizationOf = (review) => object(review?.evidence_json)?.reopenAuthorization ?? null;
 
 function ownershipClass(row) {
-  if (row.user_decided || row.code === 'superseded_by_user') return 'user_owned';
+  if (row.user_decided) return 'user_owned'; // includes superseded_by_user (ownership.mjs)
   if (row.state === 'leased' && row.lease_until && row.lease_until > row.now_iso) return 'leased';
   if (row.merged_into) return 'merged';
   return null;
@@ -131,7 +131,7 @@ export function settleBacklog(db, { policy, profile, now, apply = false }) {
     report.scanned += 1;
     const evidence = object(row.evidence_json);
     const stay = (reason) => bump(report.stay, reason);
-    if (row.user_decided || row.code === 'superseded_by_user') { stay('user_owned'); continue; }
+    if (row.user_decided) { stay('user_owned'); continue; } // includes superseded_by_user (ownership.mjs)
     if (row.lease_owner && row.lease_until > now) { stay('leased'); continue; }
     if (row.merged_into) { stay('merged'); continue; }
     if (row.conflicted) { stay('conflict'); continue; }
