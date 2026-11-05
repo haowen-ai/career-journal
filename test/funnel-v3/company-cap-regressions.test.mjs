@@ -257,6 +257,32 @@ test('[B] the startup pass withdraws visible leads of a capped company and resto
   assert.equal(submittedState(db, submitted), before, 'the submitted applications are untouched (C7)');
 });
 
+// Review finding 2026-11-05: the cap owns only the withdrawals it made. A due review of an application the review
+// already withdrew for another reason keeps that reason, and the cap release never restores it.
+test('[B] a cap settlement keeps an unrelated withdrawal reason, and the cap release does not restore that withdrawal (company cap C4)', async () => {
+  const db = freshDb();
+  fiveSubmissions(db, { ages: [80, 80, 10, 5, 3] });
+  const app = deliveredLead(db, 'p-cap-degree', { now: at(-1) });
+  db.prepare("UPDATE applications SET status = 'withdrawn', skip_reason = 'degree', skip_owner = 'review' WHERE id = ?").run(app);
+  db.prepare(`INSERT INTO application_events (id, application_id, event_type, observed_at, recorded_at, title, note, source_json, status_after, content_hash)
+    VALUES ('degree-withdrawal', ?, 'review_withdrawn', ?, ?, 'review_withdrawn', 'degree', ?, 'withdrawn', 'h-degree')`).run(app, at(-0.5), at(-0.5), JSON.stringify({ actor: 'review-worker', postingId: 'p-cap-degree' }));
+  db.prepare("UPDATE reviews SET state = 'due', decision = NULL, code = NULL, next_due = ? WHERE posting_id = 'p-cap-degree'").run(at(-0.5));
+  // A row an earlier build already rewrote: reason company_cap, but the withdrawal event says degree.
+  const legacy = deliveredLead(db, 'p-cap-legacy', { now: at(-1) });
+  db.prepare("UPDATE applications SET status = 'withdrawn', skip_reason = 'company_cap', skip_owner = 'review' WHERE id = ?").run(legacy);
+  db.prepare(`INSERT INTO application_events (id, application_id, event_type, observed_at, recorded_at, title, note, source_json, status_after, content_hash)
+    VALUES ('legacy-withdrawal', ?, 'review_withdrawn', ?, ?, 'review_withdrawn', 'degree', ?, 'withdrawn', 'h-legacy')`).run(legacy, at(-0.5), at(-0.5), JSON.stringify({ actor: 'review-worker', postingId: 'p-cap-legacy' }));
+  db.prepare("UPDATE reviews SET state = 'done', decision = 'not_eligible', code = 'company_cap', next_due = NULL, evidence_json = ? WHERE posting_id = 'p-cap-legacy'")
+    .run(JSON.stringify({ ...evidenceOf(db, 'p-cap-legacy'), companyCap: { judged: true, code: 'company_cap', provenance: null }, provenance: 'automated' }));
+  await review(db, { budget: 0, now: T0 });
+  const capped = db.prepare('SELECT status, skip_reason, skip_owner FROM applications WHERE id = ?').get(app);
+  assert.deepEqual({ ...capped }, { status: 'withdrawn', skip_reason: 'degree', skip_owner: 'review' }, 'the cap does not take over the degree withdrawal');
+  await review(db, { budget: 0, now: at(15) });
+  const later = db.prepare('SELECT status, skip_reason FROM applications WHERE id = ?').get(app);
+  assert.deepEqual({ ...later }, { status: 'withdrawn', skip_reason: 'degree' }, 'the cap release does not restore a withdrawal it did not make');
+  assert.equal(db.prepare('SELECT status FROM applications WHERE id = ?').get(legacy).status, 'withdrawn', 'the withdrawal event decides, not a rewritten reason');
+});
+
 // ===================================================================== C5 — below the cap
 
 test('[B] four submissions in 90 days, or a fifth older than the window, leave the company uncapped; leads and prepared applications do not count (company cap C1/C5)', async () => {

@@ -81,9 +81,12 @@ export function storedReopenAuthorization(db, review) { // eslint-disable-line n
   return Array.isArray(flags) && flags.includes(RELIST_FLAG) ? 'relist' : null;
 }
 export const RELIST_REASONS = Object.freeze(['delisted', 'closed_verified', 'unavailable']);
-function restoreAuthorized(app, authorization) {
+// A cap release restores only the cap's own withdrawal: the skip reason is a limit code and so is the note of the
+// withdrawal event that set it.
+function restoreAuthorized(app, authorization, withdrawal = null) {
   if (!REOPEN_AUTHORIZATIONS.includes(authorization)) return false;
-  if (authorization === 'cap_release') return app.skip_owner === 'review' && LIMIT_CODES.includes(app.skip_reason);
+  if (authorization === 'cap_release') return app.skip_owner === 'review' && LIMIT_CODES.includes(app.skip_reason)
+    && (!withdrawal || withdrawal.status_after !== 'withdrawn' || withdrawal.note === app.skip_reason);
   if (authorization === 'relist') return app.skip_owner === 'review' && RELIST_REASONS.includes(app.skip_reason);
   return app.skip_owner !== 'user' && app.skip_owner !== 'legacy';
 }
@@ -197,7 +200,7 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     // P4: a withdrawn application becomes a lead again only with an authorization (rejudge, cap_release, relist).
     // A withdrawal made only because the posting closed is relisted when the posting is listed and open again.
     if (!authorization && app?.status === 'withdrawn' && RELIST_REASONS.includes(app.skip_reason) && posting.listed && posting.availability === 'open') authorization = 'relist';
-    if (!protectedApp && app?.status === 'withdrawn' && value.decision === 'eligible' && !restoreAuthorized(app, authorization)) {
+    if (!protectedApp && app?.status === 'withdrawn' && value.decision === 'eligible' && !restoreAuthorized(app, authorization, lastStatus)) {
       const keptDecision = review.decision && review.decision !== 'eligible' ? review.decision : 'not_eligible';
       const keptCode = review.code ?? 'withdrawal_kept';
       db.prepare(`UPDATE reviews SET state='done',decision=?,code=?,stage='deliver',hold_owner=NULL,hold_since=NULL,next_due=NULL,lease_owner=NULL,lease_until=NULL,updated_at=?
@@ -237,7 +240,8 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
         } else {
           if (app.status !== 'withdrawn') appendEvent(db, app.id, 'review_withdrawn', now, { statusAfter: 'withdrawn', note: value.skipReason ?? value.code ?? '',
             source: { postingId, evidence: value.evidence ?? [], ...(capOwned ? { automatedProvenance: true } : {}) } });
-          db.prepare("UPDATE applications SET skip_reason=?,skip_owner='review' WHERE id=?").run(value.skipReason ?? value.code ?? 'not_eligible', app.id);
+          // An application already withdrawn keeps its own reason: a later settlement (a cap) never takes it over.
+          if (app.status !== 'withdrawn') db.prepare("UPDATE applications SET skip_reason=?,skip_owner='review' WHERE id=?").run(value.skipReason ?? value.code ?? 'not_eligible', app.id);
           action = 'withdrawn';
         }
         const deadline = value.deadline ?? { kind: 'none' };
