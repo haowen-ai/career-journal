@@ -153,11 +153,11 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     }
     // User rule (2026-10-29): an eligible verdict outside the role direction (profile/role-direction.json) is
     // settled automatically, never shown or held. It keeps the verdict's fields so a rules change can restore it.
-    const direction = value.decision === 'eligible' ? roleDirection(posting.title, policy.direction, { functionValue: value.functionValue }) : null;
+    const direction = value.decision === 'eligible' ? roleDirection(posting.title, policy.direction, { functionValue: value.functionValue, company: posting.company, aliases: policy.companyAliases }) : null;
     if (direction && !direction.ok) value = { ...value, decision: 'not_eligible', code: DIRECTION_CODE, direction: directionNote(direction) };
     // User rule (2026-10-31): a role the judge labelled pure software engineering is out of direction unless its
     // title carries an AI/ML/data signal. A missing or blank label changes nothing.
-    if (value.decision === 'eligible' && softwareOnlyRole(posting.title, value.functionValue, policy.direction)) {
+    if (value.decision === 'eligible' && softwareOnlyRole(posting.title, value.functionValue, policy.direction, { company: posting.company, aliases: policy.companyAliases })) {
       value = { ...value, decision: 'not_eligible', code: OUT_OF_DIRECTION_CODE, direction: softwareNote(value.functionValue), softwareDirection: true,
         question: null, holdFactIds: [], nextAction: null };
     }

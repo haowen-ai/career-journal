@@ -29,18 +29,19 @@ export function applicationOwnership(db, app, provenance) {
   const last = statusEvents.at(-1);
   const source = last ? JSON.parse(last.source_json || '{}') : {};
   const markers = provenance.userDeclineMarkers ?? [];
-  if (startsWithAny(app.skip_reason, markers) || startsWithAny(last?.note, markers) || source.actor === 'user') return 'user';
+  // An apply session's skip is the user's (terminal); an audit's is automated.
+  if (startsWithAny(app.skip_reason, markers) || startsWithAny(last?.note, markers) || source.actor === 'user' || source.actor === 'apply') return 'user';
   if (app.status !== 'withdrawn') {
     return startsWithAny(app.skip_reason, provenance.automatedSkipPrefixes ?? []) ? 'review' : 'legacy';
   }
   // Only the final, attributable automated withdrawal permits restoration. Any later user event wins.
   const automated = last && last.status_after === 'withdrawn' && !app.applied_at
-    && (source.actor === 'review-worker' || (last.event_type === 'queue_skipped' && startsWithAny(last.note, provenance.automatedSkipPrefixes ?? [])));
+    && (source.actor === 'review-worker' || source.actor === 'audit' || (last.event_type === 'queue_skipped' && startsWithAny(last.note, provenance.automatedSkipPrefixes ?? [])));
   if (automated) {
     const index = events.indexOf(last);
     const laterUser = events.slice(index + 1).some((event) => {
       const actor = JSON.parse(event.source_json || '{}').actor;
-      return actor === 'user' || (!actor && /^(?:manual_|user_|queue_)/.test(event.event_type));
+      return actor === 'user' || actor === 'apply' || (!actor && /^(?:manual_|user_|queue_)/.test(event.event_type));
     });
     return laterUser ? 'user' : 'review';
   }

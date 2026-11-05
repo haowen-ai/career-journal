@@ -10,10 +10,19 @@ import { rankLocation } from '../scan/filter.mjs';
 import { scoreFit } from '../scan/fit.mjs';
 import { loadScanProfile } from '../scan/profile-input.mjs';
 import { DIRECTION_CODE, OUT_OF_DIRECTION_CODE, directionNote, loadDirectionRules, roleDirection, softwareNote, softwareOnlyRole } from '../review/direction.mjs';
+import { readFile } from 'node:fs/promises';
+import { companyExcluded } from '../review/excluded.mjs';
+import { companySizeGate } from '../review/company-size.mjs';
+import { evaluateLimits, limitCounts } from '../review/limits.mjs';
+import { duplicateOfSubmitted, submittedApplications } from '../review/duplicate.mjs';
+import { loadUserOverrides, withOverrides } from '../review/overrides.mjs';
+import { deliver, restoredVerdict } from '../review/deliver.mjs';
+import { claimItem } from '../review/lease.mjs';
+import { submittedApplicationIndex, submittedDuplicate } from '../funnel/identity.mjs';
 import { configuredDecisionAdapters } from './email.mjs';
 import { profileOption } from './scan.mjs';
 
-const usage = 'Usage: career-journal queue list [--json] [--profile <path>] | queue siblings --id <application> | --url <job link> [--json] [--profile <path>] | queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>] | queue score [--all] [--limit <n>] [--dry-run] [--json] [--profile <path>]';
+const usage = 'Usage: career-journal queue list [--json] [--profile <path>] | queue siblings --id <application> | --url <job link> [--json] [--profile <path>] | queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>] [--actor user|apply|audit] [--code <code> (with --actor audit)] | queue score [--all] [--limit <n>] [--dry-run] [--json] [--profile <path>] | queue rescreen [--apply] [--json]';
 const FIT_ORDER = Object.freeze({ high: 0, medium: 1, low: 2 });
 
 const queueSelect = `SELECT id, company, role, job_url jobUrl, status, source, source_id sourceId, location,
@@ -186,18 +195,20 @@ export function listQueue(db, profile = null, { direction = null } = {}) {
       };
       if (!direction) return item;
       const labelled = Object.hasOwn(evidence, 'function');
-      const result = roleDirection(row.role, direction, { functionValue: evidence.function });
+      const result = roleDirection(row.role, direction, { functionValue: evidence.function, company: row.company });
       // A blocked title, a neutral one under neutral 'deny', or a requireAllow title whose stored label is not allowed
       // (an unlabelled older lead is not flagged, as in the startup pass).
       const out = !result.ok && (['block', 'neutral'].includes(result.reason) || result.reason === 'require_allow' && labelled);
       // A lead the judge labelled pure software engineering (the stored function label).
-      const software = !out && result.ok && softwareOnlyRole(row.role, evidence.function, direction);
+      const software = !out && result.ok && softwareOnlyRole(row.role, evidence.function, direction, { company: row.company });
       return { ...item, directionOk: !out && !software,
         directionReason: out ? `${DIRECTION_CODE}: ${directionNote(result)}` : software ? `${OUT_OF_DIRECTION_CODE}: ${softwareNote(evidence.function)}` : null };
     })
     .sort((left, right) => (left.directionOk === false) - (right.directionOk === false)
       || (left.programOk === false) - (right.programOk === false) || compareInTimezone(left, right, profile?.timezone));
 }
+
+export const VERIFY_ACTORS = Object.freeze(['user', 'review-worker', 'apply', 'audit']);
 
 function required(value, name) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required`);
@@ -214,24 +225,35 @@ export function verifyQueuedRole(db, input, now = new Date().toISOString()) {
     try { deadline = normalizeDueAt(String(input.deadline)); }
     catch { throw new Error('deadline must be an ISO 8601 timestamp with a UTC offset, such as 2026-10-15T23:59:00-04:00'); }
   } else if (input.deadline === true) throw new Error('--deadline requires a timestamp');
+  const skip = result === 'skip';
+  // Who decided: the user (default), the review worker, an apply session (terminal like the user) or an
+  // automated audit (review-owned, code from --code; an explicit rejudge may re-queue it, a normal run never restores it).
+  const actor = input.actor == null ? 'user' : String(input.actor);
+  if (!VERIFY_ACTORS.includes(actor)) throw new Error(`actor must be one of ${VERIFY_ACTORS.join(', ')}`);
+  const code = input.code == null || input.code === true ? null : String(input.code).trim();
+  if (actor === 'audit' && skip && !/^[a-z][a-z0-9_]*$/.test(code ?? '')) throw new Error('--actor audit needs --code <code> (lowercase letters, digits and _)');
+  if (code && actor !== 'audit') throw new Error('--code is only for --actor audit');
+  const userOwned = actor === 'user' || actor === 'apply';
   const application = db.prepare('SELECT id, status FROM applications WHERE id = ?').get(id);
   if (!application) throw new Error('Application not found');
   if (application.status !== 'lead') throw new Error(`Application ${id} is not in the queue (status ${application.status})`);
-  const skip = result === 'skip';
   db.exec('BEGIN IMMEDIATE');
   try {
     db.prepare(`UPDATE applications SET verified_at = ?, deadline_at = COALESCE(?, deadline_at), skip_reason = ?, updated_at = ?
       WHERE id = ?`).run(now, deadline, skip ? reason : null, now, id);
     const funnel = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reviews'").get();
-    const actor = input.actor === 'review-worker' ? 'review-worker' : 'user';
     if (funnel) {
       db.prepare('UPDATE applications SET skip_owner=?,deadline_source=CASE WHEN ? IS NOT NULL THEN ? ELSE deadline_source END,deadline_precision=CASE WHEN ? IS NOT NULL THEN ? ELSE deadline_precision END WHERE id=?')
-        .run(skip ? (actor === 'user' ? 'user' : 'review') : null, deadline, actor === 'user' ? 'user' : 'review', deadline, 'datetime', id);
+        .run(skip ? (userOwned ? 'user' : 'review') : null, deadline, userOwned ? 'user' : 'review', deadline, 'datetime', id);
       for (const posting of db.prepare('SELECT id FROM postings WHERE application_id=?').all(id)) {
         db.prepare("UPDATE reviews SET state='done',decision=?,code=?,hold_owner=NULL,hold_since=NULL,next_due=NULL,lease_owner=NULL,lease_until=NULL,updated_at=? WHERE posting_id=?")
-          .run(skip ? 'not_eligible' : 'eligible', skip ? 'user_declined' : null, now, posting.id);
+          .run(skip ? 'not_eligible' : 'eligible', skip ? (actor === 'audit' ? code : 'user_declined') : null, now, posting.id);
+        if (skip && actor === 'audit') {
+          db.prepare("UPDATE reviews SET evidence_json=json_set(COALESCE(NULLIF(evidence_json,''),'{}'),'$.provenance','automated','$.audit',json(?)) WHERE posting_id=?")
+            .run(JSON.stringify({ code, reason, at: now }), posting.id);
+        }
         db.prepare("INSERT INTO review_log(posting_id,at,stage,kind,payload_json) VALUES (?,?,'deliver',?,?)")
-          .run(posting.id, now, actor === 'user' ? 'user' : 'delivery', JSON.stringify({ actor, result, reason }));
+          .run(posting.id, now, userOwned ? 'user' : 'delivery', JSON.stringify({ actor, result, reason, ...(code ? { code } : {}) }));
       }
     }
     recordEvent(db, {
@@ -243,7 +265,7 @@ export function verifyQueuedRole(db, input, now = new Date().toISOString()) {
       recordedAt: now,
       title: skip ? 'Skipped after posting check' : 'Posting checked',
       note: reason,
-      source: { kind: 'queue-verify', actor, result, reason, ...(deadline ? { deadline } : {}) },
+      source: { kind: 'queue-verify', actor, result, reason, ...(code ? { code } : {}), ...(deadline ? { deadline } : {}) },
       statusAfter: skip ? 'withdrawn' : null,
     }, { withinTransaction: true });
     db.exec('COMMIT');
@@ -310,6 +332,75 @@ export async function scoreQueuedRoles(db, profile, adapters = {}, { all = false
   return { dryRun, remaining: rows.length - selected.length, scored: results.length, results };
 }
 
+// ------------------------------------------------------------- rescreen
+// The deterministic gate rules applied to current leads: exclusions, company size, company limits/cap and
+// duplicates of a submitted application. A dry run (default) lists violators; --apply withdraws them through
+// delivery (review-owned, automated, releasable like any gate settlement). An unknown company size is listed,
+// never withdrawn: its size is decided by the review run.
+async function readJson(file) {
+  try { return JSON.parse(await readFile(file, 'utf8')); } catch (error) { if (error.code === 'ENOENT') return {}; throw error; }
+}
+export async function gatePolicy(home) {
+  const profileDir = path.join(path.resolve(home), '.career-journal', 'profile');
+  const [screening, reviewPolicy, overrides, direction] = await Promise.all([readJson(path.join(profileDir, 'screening-policy.json')),
+    readJson(path.join(profileDir, 'review-policy.json')), loadUserOverrides(profileDir), loadDirectionRules(profileDir)]);
+  return withOverrides({ ...screening, companyCap: reviewPolicy.companyCap ?? null, direction }, overrides);
+}
+
+export function rescreenLeads(db, { policy = {}, now = new Date().toISOString(), apply = false, owner = 'queue-rescreen' } = {}) {
+  const counts = limitCounts(db);
+  const index = submittedApplicationIndex(db, { companyAliases: policy.companyAliases });
+  const submitted = submittedApplications(db);
+  const results = [];
+  const leads = db.prepare("SELECT * FROM applications WHERE status='lead' AND COALESCE(skip_owner,'review')='review' ORDER BY company,id").all();
+  for (const app of leads) {
+    const posting = db.prepare('SELECT p.*,r.state review_state,r.evidence_json,r.flags_json,r.decision review_decision FROM postings p LEFT JOIN reviews r ON r.posting_id=p.id WHERE p.application_id=? AND p.merged_into IS NULL ORDER BY (r.posting_id IS NULL),p.created_at LIMIT 1').get(app.id);
+    const evidence = (() => { try { return JSON.parse(posting?.evidence_json ?? '{}'); } catch { return {}; } })();
+    let violation = null;
+    const excluded = companyExcluded(app.company, policy);
+    const size = companySizeGate(app.company, policy.companySizes);
+    if (excluded) violation = { code: 'company_excluded', detail: excluded.match };
+    else if (size === 'small') violation = { code: 'company_small', detail: app.company };
+    if (!violation) {
+      const limit = evaluateLimits(app.company, { policy, now, counts, program: evidence.program, exclude: app.id });
+      if (limit) violation = { code: limit.code, detail: `${limit.count}/${limit.max ?? '-'} ${limit.kind}${limit.windowDays ? ` ${limit.windowDays}d` : ''}${limit.cycleStart ? ` since ${limit.cycleStart}` : ''}${limit.reason ? ` ${limit.reason}` : ''}`,
+        applicationIds: limit.applicationIds, ...(limit.flaggedDates?.length ? { flaggedDates: limit.flaggedDates } : {}) };
+    }
+    if (!violation) {
+      const record = posting ?? { id: null, company: app.company, title: app.role, url: app.job_url, application_id: app.id };
+      const same = submittedDuplicate(db, posting ?? { company: app.company, title: app.role, url: app.job_url }, { companyAliases: policy.companyAliases, index });
+      const repost = !same && posting ? duplicateOfSubmitted(db, record, { companyAliases: policy.companyAliases, candidates: submitted }) : null;
+      if (same && same.applicationId !== app.id) violation = { code: 'already_submitted', detail: same.match, applicationIds: [same.applicationId] };
+      else if (repost) violation = { code: 'duplicate_submitted', detail: `${repost.match} ${repost.similarity}`, applicationIds: [repost.applicationId] };
+    }
+    if (!violation && size === 'unknown') { results.push({ applicationId: app.id, company: app.company, role: app.role, code: 'company_size_unknown', action: 'listed' }); continue; }
+    if (!violation) continue;
+    let action = 'would_withdraw';
+    if (apply) {
+      if (posting?.review_state) {
+        const fence = claimItem(db, posting.id, { owner, now });
+        if (!fence) action = 'busy';
+        else {
+          const row = { ...posting, flags_json: posting.flags_json ?? '[]' };
+          const verdict = posting.review_decision === 'eligible' || evidence.fit ? restoredVerdict(row, evidence) : { decision: 'not_eligible', code: violation.code };
+          action = deliver(db, { postingId: posting.id, fence, now, policy, verdict }).action;
+        }
+      } else {
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          recordEvent(db, { id: randomUUID(), applicationId: app.id, type: 'review_withdrawn', observedAt: now, recordedAt: now, title: 'review_withdrawn', note: violation.code,
+            source: { actor: 'review-worker', kind: 'queue-rescreen', code: violation.code, automatedProvenance: true }, statusAfter: 'withdrawn' }, { withinTransaction: true });
+          db.prepare("UPDATE applications SET skip_reason=?,skip_owner='review',updated_at=? WHERE id=?").run(violation.code, now, app.id);
+          db.exec('COMMIT');
+          action = 'withdrawn';
+        } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error; }
+      }
+    }
+    results.push({ applicationId: app.id, company: app.company, role: app.role, ...violation, action });
+  }
+  return { dryRun: !apply, leads: leads.length, violations: results.filter((item) => item.code !== 'company_size_unknown').length, results };
+}
+
 async function queueProfile(home, parsed) {
   const explicit = profileOption(parsed);
   try { return await loadScanProfile(home, { path: explicit }); }
@@ -320,13 +411,22 @@ async function queueProfile(home, parsed) {
 }
 
 export async function queueCommand(parsed, io, runtime = {}) {
-  if (!['list', 'siblings', 'verify', 'score'].includes(parsed.subcommand)) throw new Error(usage);
+  if (!['list', 'siblings', 'verify', 'score', 'rescreen'].includes(parsed.subcommand)) throw new Error(usage);
   const home = parsed.options.home ?? process.cwd();
-  const profile = parsed.subcommand === 'verify' ? null : await queueProfile(home, parsed);
+  const profile = ['verify', 'rescreen'].includes(parsed.subcommand) ? null : await queueProfile(home, parsed);
   if (parsed.subcommand === 'score' && !profile) throw new Error('queue score needs the search profile; complete the profile interview first, or pass --profile <path>.');
   const limit = parsed.subcommand === 'score' ? positiveLimit(parsed.options.limit) : null;
   const context = await openHomeDatabase(home);
   try {
+    if (parsed.subcommand === 'rescreen') {
+      const summary = rescreenLeads(context.db, { policy: await gatePolicy(home), apply: parsed.options.apply === true });
+      if (parsed.options.json) io.out(JSON.stringify(summary, null, 2));
+      else {
+        for (const item of summary.results) io.out([item.action, item.code, item.company, item.role, item.applicationId, item.detail ?? ''].join('\t'));
+        io.out(`${summary.violations} of ${summary.leads} leads violate a gate rule${summary.dryRun ? ' (dry run, nothing written; --apply withdraws them)' : ''}`);
+      }
+      return 0;
+    }
     if (parsed.subcommand === 'score') {
       const dryRun = Boolean(parsed.options['dry-run']);
       const adapters = dryRun ? {} : configuredDecisionAdapters(context.config, runtime.fetch ?? globalThis.fetch);
@@ -369,6 +469,8 @@ export async function queueCommand(parsed, io, runtime = {}) {
       result: parsed.options.result,
       reason: parsed.options.reason,
       deadline: parsed.options.deadline,
+      actor: parsed.options.actor,
+      code: parsed.options.code,
     });
     io.out(JSON.stringify(record));
     return 0;

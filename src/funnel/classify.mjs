@@ -1,6 +1,7 @@
 import countries from './data/countries.json' with { type: 'json' };
 import { companyExcluded } from '../review/excluded.mjs';
 import { aliasesFor, canonicalUrl } from './identity.mjs';
+import { anyFunctionCompany } from '../review/direction.mjs';
 
 const STUDENT = /\b(?:intern(?:s|ship|ships)?|winternships?|co[- ]?ops?|apprentice(?:s|ship|ships)?|placements?|working students?|students?|fellow(?:s|ship|ships)?|residen(?:t|ts|cy)|graduate program(?:me)?|early career|university program(?:me)?|campus program(?:me)?|summer (?:analysts?|associates?|20\d\d program(?:me)?)|currently enrolled|class of 20\d\d)\b/i;
 // Descriptions often mention students in company-wide boilerplate. Only explicit
@@ -83,7 +84,8 @@ export function classifyRole(record, { policy = {}, profile, identity: { submitt
     flags.push('no_student_signal'); lane = 'no_student_signal'; drop = 'no_student_signal';
   } else if (studentSearch && record.source === 'simplify' && record.categories?.length
       && record.categories.every((category) => /^hardware(?: engineering)?$/i.test(String(category).trim()))
-      && !DIRECTION.test(record.title ?? '') && !(policy.direction?.allow ?? []).some((pattern) => pattern.test(record.title ?? ''))) {
+      && !DIRECTION.test(record.title ?? '') && !(policy.direction?.allow ?? []).some((pattern) => pattern.test(record.title ?? ''))
+      && !anyFunctionCompany(record.company, policy.direction, policy.companyAliases)) {
     lane = 'out_of_direction'; drop = 'out_of_direction';
   }
   if (record.terms?.length) flags.push('term_tag_conflict');
