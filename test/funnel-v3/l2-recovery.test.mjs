@@ -237,7 +237,7 @@ test('[L2] same content hash costs nothing on refresh; a changed JD is re-judged
   assert.equal(changed.judges.primary.calls.length, 1);
 });
 
-test('[L2] replan after a facts change re-queues only R3-dependent held/not_eligible items; a second replan is a no-op', async () => {
+test('[L2] replan after a facts change re-queues only open R3-dependent held/not_eligible items; a second replan is a no-op', async () => {
   const { runReview, replan } = await worker();
   const db = freshDb();
   const neg = item(db, 'p-neg', { snapshot: 'undergradOnly' });
@@ -247,6 +247,11 @@ test('[L2] replan after a facts change re-queues only R3-dependent held/not_elig
   assert.equal(reviewOf(db, 'p-neg').decision, 'not_eligible');
   const facts2 = [...FACTS, { id: 'extra', statement: 'Took an operations research course', polarity: 'has' }];
   const inputs = () => reviewInputs({ facts: facts2 });
+  // Redesign B1 (decide once): the settled negative is no longer re-queued by a facts change; a still-open
+  // (due) negative is. `review rejudge` reopens settled history explicitly.
+  assert.equal(replan(db, { inputs, now: at(1) }).requeued, 0);
+  assert.equal(reviewOf(db, 'p-neg').state, 'done');
+  db.prepare("UPDATE reviews SET state='due' WHERE posting_id='p-neg'").run();
   const first = replan(db, { inputs, now: at(1) });
   assert.equal(first.requeued, 1);
   assert.equal(reviewOf(db, 'p-neg').state, 'due');

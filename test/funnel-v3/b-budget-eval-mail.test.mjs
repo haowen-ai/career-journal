@@ -792,7 +792,7 @@ test('[B] a material constraint fact change rechecks an eligible lead without hi
   assert.equal(applicationsCount(db), 1);
 });
 
-test('[B] adding the missing fact re-queues a missing_fact hold', async () => {
+test('[B] adding the missing fact does not re-queue a settled missing_fact decision (redesign B1)', async () => {
   const { runReview, replan } = await workerModule();
   const db = freshDb();
   const q = queue();
@@ -808,9 +808,11 @@ test('[B] adding the missing fact re-queues a missing_fact hold', async () => {
   const held = reviewOf(db, id);
   assert.deepEqual([held.state, held.decision, held.code, held.hold_owner], ['done', 'not_eligible', 'missing_fact', null]);
   const facts = [...FACTS, { id: 'kubernetes', statement: 'Operates Kubernetes clusters at work', polarity: 'has' }];
+  // Redesign B1 (decide once): the settled forced decision is not re-queued by the facts edit; the explicit
+  // `review rejudge --code missing_fact` reopens it.
   const result = replan(db, { inputs: () => reviewInputs({ facts }), now: at(1) });
-  assert.ok(result.requeued >= 1);
-  assert.equal(reviewOf(db, id).state, 'due');
+  assert.equal(result.requeued, 0);
+  assert.equal(reviewOf(db, id).state, 'done');
 });
 
 test('[B] active leads are refreshed automatically and unchanged pages cost nothing', async () => {
@@ -831,7 +833,7 @@ test('[B] active leads are refreshed automatically and unchanged pages cost noth
   assert.equal(changed.judges.primary.calls.length, 1);
 });
 
-test('[B] a closed posting that reappears with the same requisition is reopened on the same posting', async () => {
+test('[B] a closed posting is not reopened by a review run alone (redesign B1; relisting reopens it at ingest)', async () => {
   const { runReview } = await workerModule();
   const { claimItem } = await leaseModule();
   const { deliver } = await deliverModule();
@@ -846,9 +848,11 @@ test('[B] a closed posting that reappears with the same requisition is reopened 
   deliver(db, { postingId: id, verdict: { decision: 'not_eligible', code: 'closed_verified' }, fence, now: at(0.5), policy: reviewInputs().screeningPolicy });
   db.prepare("UPDATE postings SET availability = 'closed_verified' WHERE id = ?").run(id);
   assert.equal(applicationOf(db, id).status, 'withdrawn');
+  // Redesign B1 (decide once): a review run no longer refreshes a settled closure. Reopening a relisted
+  // posting is the scan's job (ingest relist, authorization 'relist'); the run leaves it settled.
   await runReview(runOptions(db, { now: at(15), runId: 'review-15', pages: q.pages }));
-  assert.equal(db.prepare('SELECT availability FROM postings WHERE id = ?').get(id).availability, 'open');
-  assert.equal(applicationOf(db, id).status, 'lead');
+  assert.equal(db.prepare('SELECT availability FROM postings WHERE id = ?').get(id).availability, 'closed_verified');
+  assert.equal(applicationOf(db, id).status, 'withdrawn');
   assert.equal(applicationOf(db, id).id, lead.id);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM postings').get().n, 1);
   assert.equal(applicationsCount(db), 1);

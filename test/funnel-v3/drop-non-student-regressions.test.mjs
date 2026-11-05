@@ -218,7 +218,8 @@ test('[A] a delisted drop waits while unlisted and reopens on relisting', async 
 
 // ===================================================================== no paid path
 
-test('[B] refresh leaves drops and judged exploration negatives alone; other negatives still refresh', async () => {
+// Redesign B1 (decide once): settled negatives are no longer refreshed at all; only queued leads are.
+test('[B] refresh leaves drops, judged exploration negatives and every other settled negative alone', async () => {
   const { scheduleRefresh } = await worker();
   const db = freshDb();
   const insert = (id, row) => { insertPosting(db, { id }); insertReview(db, { postingId: id, state: 'done', nextDue: null, ...row }); };
@@ -226,9 +227,9 @@ test('[B] refresh leaves drops and judged exploration negatives alone; other neg
   insert('p-judged', { decision: 'not_eligible', code: 'no_student_signal', lane: 'no_student_signal' });
   insert('p-control', { decision: 'not_eligible', code: 'degree' });
   const { requeued } = scheduleRefresh(db, { now: at(30), policy: reviewInputs().policy });
-  assert.equal(requeued, 1);
-  assert.equal(reviewOf(db, 'p-control').state, 'due');
-  assert.equal(db.prepare("SELECT COUNT(*) n FROM reviews WHERE state = 'done'").get().n, 7);
+  assert.equal(requeued, 0);
+  assert.equal(reviewOf(db, 'p-control').state, 'done');
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM reviews WHERE state = 'done'").get().n, 8);
 });
 
 test('[B] replan does not reopen a drop when judgment dependencies change', async () => {
@@ -241,9 +242,10 @@ test('[B] replan does not reopen a drop when judgment dependencies change', asyn
     insertReview(db, { postingId: id, state: 'done', nextDue: null, decision, code });
     db.prepare('UPDATE reviews SET dep_hashes_json = ? WHERE posting_id = ?').run(stale, id);
   }
-  assert.equal(replan(db, { inputs, now: at(1) }).requeued, 1);
+  // Redesign B1: a settled not_eligible review is not re-queued either (only `review rejudge` reopens it).
+  assert.equal(replan(db, { inputs, now: at(1) }).requeued, 0);
   assert.deepEqual(outcome(db, 'p-dropped'), DROPPED);
-  assert.equal(reviewOf(db, 'p-control').state, 'due');
+  assert.equal(reviewOf(db, 'p-control').state, 'done');
 });
 
 test('[B] redecide --done does not replay a drop', async () => {

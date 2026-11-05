@@ -466,10 +466,11 @@ test('[B] operational policy blocks never re-queue judged reviews; screening pol
   for (const id of settled) assert.deepEqual(outcome(id), judged[id], `${id} keeps its decision`);
   assert.deepEqual(called, ['p-new'], 'a new review simply uses the new judge');
 
-  // A screening change (areas) re-queues the affected negative reviews, as today.
+  // Redesign B1 (decide once): a screening change (areas) no longer re-queues settled negatives either;
+  // `review rejudge --code outside_area` is the explicit path for a rule relaxation.
   const screening = { ...operational, areas: { ...operational.areas, allowedStates: [...operational.areas.allowedStates, 'TX'] } };
   const after = makeJudges({ answers: q.answers, primaryModel: 'codex-auto-review' });
   await review(db, { pages: q.pages, judges: after, policy: screening, secondOpinion: fakeSecondOpinion(0.05), now: at(2), runId: 'review-model-decides-3' });
   const rejudged = after.primary.calls.map((call) => call.request.postingId);
-  for (const id of ['p-degree', 'p-area']) assert.ok(rejudged.includes(id), `${id}: an areas change re-judges a not_eligible review: called ${JSON.stringify(rejudged)}`);
+  for (const id of ['p-degree', 'p-area']) assert.ok(!rejudged.includes(id), `${id}: a settled not_eligible review is not re-judged by a run: called ${JSON.stringify(rejudged)}`);
 });
