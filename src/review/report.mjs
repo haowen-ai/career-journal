@@ -16,6 +16,7 @@ export function reviewReport(db, { receipt = null, sourceReceipts = [], lang = '
     if (receipt.stop_reason) lines.push(`${zh ? '停止原因' : 'Stop reason'}: ${receipt.stop_reason}${STOP_REASONS[receipt.stop_reason] ? ` — ${STOP_REASONS[receipt.stop_reason][zh ? 'zh' : 'en']}` : ''}`);
     if (receipt.wallStarted || receipt.wallFinished) lines.push(`${zh ? '实际时间' : 'Wall clock'}: ${receipt.wallStarted ?? '?'} → ${receipt.wallFinished ?? '?'}`);
     for (const item of receipt.external_failures ?? []) lines.push(`${zh ? '外部故障' : 'External failure'}: ${item.postingId} ${item.error ?? ''}`);
+    for (const item of receipt.external_holds ?? []) lines.push(`${zh ? '外部项' : 'External item'}: ${item.postingId} ${item.code ?? ''}`);
   }
   // Per-source intake: fetched = stored + counted only (+ quarantined).
   const ingest = sourceReceipts.flatMap((scan) => scan?.ingest ?? []);

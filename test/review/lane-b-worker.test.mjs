@@ -1,7 +1,7 @@
 // Redesign B5, B7, B10, B11 and the company-size hook in the review worker. Synthetic data only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { freshDb, insertPosting, insertReview, reviewOf, seedApplication, fakeJudge, fakeFetcher, T0 } from '../../test-utils/funnel-v3.mjs';
+import { freshDb, insertPosting, insertReview, reviewOf, seedApplication, fakeJudge, fakeFetcher, T0, at } from '../../test-utils/funnel-v3.mjs';
 import { REVIEW_POLICY, RULES, SNAPSHOTS, JUDGMENTS, page, snapshotTitle, reviewInputs } from '../../test-utils/funnel-v3-fixtures.mjs';
 import { runReview } from '../../src/review/worker.mjs';
 import { JEV_SPLIT_QUESTIONS } from '../../src/review/jev-split.mjs';
@@ -172,5 +172,32 @@ test('[B10] a due row whose snapshot text was pruned is fetched and judged in th
     fetcher, judges: j, inputs: () => reviewInputs({ policy: REVIEW_POLICY }), hooks: {} });
   assert.equal(fetcher.calls.length, 1, 'fetched again');
   assert.equal(reviewOf(db, 'p-pruned').state, 'done');
+  assert.deepEqual([receipt.status, receipt.stop_reason, receipt.backlog.actionable_due], ['ok', null, 0]);
+});
+
+// Coordinator decision 2026-11-05: a night with nothing owed ends ok. Rows the user owns (applied, superseded_by_user)
+// are never breaches; a sign-in-wall hold waits for `review attach` and is reported as an external item instead.
+test('[B10] user-owned rows are not breaches and a sign-in-wall hold is an external item: nothing owed ends ok', async () => {
+  const db = freshDb();
+  const old = at(-10);
+  const link = (id, status, extra = {}) => {
+    const app = seedApplication(db, { company: 'Example Corp', role: `Role ${id}`, status, ...extra });
+    db.prepare('UPDATE postings SET application_id=? WHERE id=?').run(app.id, id);
+  };
+  insertPosting(db, { id: 'p-super', url: urlOf('p-super'), firstSeen: old });
+  insertReview(db, { postingId: 'p-super', stage: 'fetch', lane: 'refresh', decision: 'not_eligible', code: 'superseded_by_user', firstSeen: old });
+  link('p-super', 'withdrawn', { skipOwner: 'review', skipReason: 'company_excluded' });
+  insertPosting(db, { id: 'p-applied', url: urlOf('p-applied'), firstSeen: old });
+  insertReview(db, { postingId: 'p-applied', stage: 'fetch', lane: 'refresh', firstSeen: old });
+  link('p-applied', 'applied', { appliedAt: old });
+  insertPosting(db, { id: 'p-wall', url: urlOf('p-wall'), firstSeen: old });
+  insertReview(db, { postingId: 'p-wall', stage: 'deliver', state: 'held', code: 'external_signin_wall', holdOwner: 'system', firstSeen: old });
+  const fetcher = fakeFetcher({});
+  const j = judges();
+  const receipt = await runReview({ db, runId: 'review-owed', owner: 'worker-a', now: T0, budget: 50, deadlineMs: 600_000, attemptDir: null, sleep: async () => {},
+    fetcher, judges: j, inputs: () => reviewInputs({ policy: REVIEW_POLICY }), hooks: {} });
+  assert.equal(j.primary.calls.length + fetcher.calls.length, 0);
+  assert.deepEqual(receipt.breaches, []);
+  assert.deepEqual(receipt.external_holds.map((item) => [item.postingId, item.code]), [['p-wall', 'external_signin_wall']]);
   assert.deepEqual([receipt.status, receipt.stop_reason, receipt.backlog.actionable_due], ['ok', null, 0]);
 });

@@ -32,6 +32,7 @@ import { lowerFit } from './fit.mjs';
 import { JevError, jevFailure } from './second-opinion.mjs';
 import { needsConversionProof } from './conversion.mjs';
 import { autoReopenAllowed } from './reopen-policy.mjs';
+import { MANUAL_HOLD_CODES } from './backlog.mjs';
 export { scheduleRefresh } from './freshness.mjs';
 
 const DAY = 86400000;
@@ -221,7 +222,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   // `now` is the frozen run time used for ordering and leases; wallStarted/wallFinished are the real clock.
   const receipt = { schema: 1, kind: 'review', run_id: runId, parent_run_id: parentRunId, started: now, finished: null, wallStarted: wallClock(), wallFinished: null, status: 'ok', stop_reason: null,
     previous_run_interrupted: false, counts: { attempts: 0, attempts_lost: 0, escalations: 0, fetched: 0, judged: 0, eligible: 0 }, sampling: { judged: 0, found: 0 },
-    breaches: [], awaiting_user: [], awaiting_user_summary: [], model_decided: [], backlog: {}, warnings: [], errors: [] };
+    breaches: [], external_holds: [], awaiting_user: [], awaiting_user_summary: [], model_decided: [], backlog: {}, warnings: [], errors: [] };
   const lease = acquireRunLease(db, { kind: 'review', owner, runId, parentRunId, now });
   if (!lease) return { ...receipt, status: 'busy' };
   receipt.previous_run_interrupted = lease.previousRunInterrupted;
@@ -782,9 +783,15 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     receipt.counts.escalations = db.prepare("SELECT COUNT(*) n FROM attempts WHERE run_id=? AND tier='escalation'").get(runId).n;
     const pending = db.prepare("SELECT * FROM reviews WHERE state IN ('due','held','failed')").all().filter(reviewable);
     const maxWaitNights = current.policy.serviceTargets?.maxWaitNights ?? 7;
+    // Breaches are owed work only: rows the user owns (the single ownership rule) are never breaches, and a
+    // manual external hold (sign-in wall, waiting for `review attach`) is an external item, reported apart.
+    const userOwned = new Set(db.prepare(`SELECT r.posting_id FROM reviews r JOIN postings p ON p.id=r.posting_id ${reviewOwnershipJoins}
+      WHERE r.state IN ('due','held','failed') AND ${userDecisionSql}`).all().map((row) => row.posting_id));
     for (const row of pending) {
       const age = (Date.parse(now) - Date.parse(row.first_seen)) / DAY;
       if (row.hold_owner === 'user') receipt.awaiting_user.push({ postingId: row.posting_id, age_days: age, code: row.code, question: parseJson(row.evidence_json).question });
+      else if (userOwned.has(row.posting_id)) continue;
+      else if (row.state === 'held' && MANUAL_HOLD_CODES.includes(row.code)) receipt.external_holds.push({ postingId: row.posting_id, age_days: age, code: row.code });
       else if (row.code === 'system_failure' || age >= maxWaitNights) receipt.breaches.push({ postingId: row.posting_id, age_days: age, code: row.code });
     }
     receipt.awaiting_user_summary = awaitingUserSummary(pending);
