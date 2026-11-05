@@ -137,21 +137,28 @@ function withEntryTimeout(ctx, entry) {
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Fixed per-fetch ceilings of CareerOps providers (career-ops providers/*.mjs). A list that ends
-// exactly there was cut off silently, so it is reported as `cap`, never as a complete census.
-// SuccessFactors MAX_JOBS=1000; Oracle Cloud 25 pages x 200; SmartRecruiters 50 pages x 100.
+// Default per-fetch ceilings of CareerOps providers (career-ops providers/*.mjs). A list that ends
+// exactly at its effective ceiling was cut off silently, so it is reported as `cap`, never as a
+// complete census. Entries can raise them: SuccessFactors `max_jobs` (default 1,000), Oracle Cloud
+// `max_pages` x 200 (default 25 pages), SmartRecruiters `max_pages` x 100 (default 50 pages),
+// Workday `max_pages` x 20, Radancy `max_jobs` (default 2,000).
 export const PROVIDER_CEILINGS = Object.freeze({ successfactors: 1_000, oraclecloud: 5_000, smartrecruiters: 5_000 });
+const PAGE_SIZES = Object.freeze({ oraclecloud: 200, smartrecruiters: 100 });
 
-// The number of jobs at which a provider stops on its own, or null when it has no known ceiling.
+const positive = (value) => Number.isInteger(Number(value)) && Number(value) > 0 ? Number(value) : null;
+
+// The number of jobs at which a provider stops on its own for this entry, or null when unknown.
 export function providerCeiling(providerId, entry = {}, portals = {}) {
   if (providerId === 'workday') {
-    const maxPages = Number(entry.max_pages ?? entry.maxPages ?? entry.workday?.max_pages ?? portals.workday?.max_pages ?? 100);
-    return Number.isFinite(maxPages) && maxPages > 0 ? maxPages * 20 : null;
+    const maxPages = positive(entry.max_pages ?? entry.maxPages ?? entry.workday?.max_pages ?? portals.workday?.max_pages) ?? 100;
+    return maxPages * 20;
   }
-  if (providerId === 'radancy') {
-    // Radancy stops at max_jobs (default 2,000); entry.max_jobs can raise it.
-    const maxJobs = Number(entry.max_jobs ?? entry.maxJobs ?? 2_000);
-    return Number.isFinite(maxJobs) && maxJobs > 0 ? maxJobs : null;
+  if (providerId === 'radancy' || providerId === 'successfactors') {
+    return positive(entry.max_jobs ?? entry.maxJobs) ?? (providerId === 'radancy' ? 2_000 : PROVIDER_CEILINGS.successfactors);
+  }
+  if (PAGE_SIZES[providerId]) {
+    const maxPages = positive(entry.max_pages ?? entry.maxPages);
+    return maxPages ? maxPages * PAGE_SIZES[providerId] : PROVIDER_CEILINGS[providerId];
   }
   return PROVIDER_CEILINGS[providerId] ?? null;
 }

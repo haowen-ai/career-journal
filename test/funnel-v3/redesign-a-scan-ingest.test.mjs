@@ -187,12 +187,23 @@ test('[A2] a content change resets open work only; settled not_eligible and uncl
 // ===================================================================== A3 provider ceilings
 
 test('[A3] a CareerOps partition that returns exactly a known provider ceiling is flagged cap', async () => {
+  const jobs = (n) => Array.from({ length: n }, (_, i) => ({ id: `j-${i}`, title: `Role ${i}`, url: `https://example.test/jobs/${i}` }));
   assert.deepEqual(PROVIDER_CEILINGS, { successfactors: 1000, oraclecloud: 5000, smartrecruiters: 5000 });
   assert.equal(providerCeiling('workday', { max_pages: 1500 }), 30000);
   assert.equal(providerCeiling('radancy', {}), 2000);
   assert.equal(providerCeiling('radancy', { max_jobs: 5000 }), 5000);
   assert.equal(providerCeiling('greenhouse', {}), null);
-  const jobs = (n) => Array.from({ length: n }, (_, i) => ({ id: `j-${i}`, title: `Role ${i}`, url: `https://example.test/jobs/${i}` }));
+  // A raised limit moves the ceiling, so `cap` stays truthful after the entry is configured.
+  assert.equal(providerCeiling('successfactors', { max_jobs: 5000 }), 5000);
+  assert.equal(providerCeiling('oraclecloud', { max_pages: 150 }), 30000);
+  assert.equal(providerCeiling('smartrecruiters', { max_pages: 1000 }), 100000);
+  assert.equal(providerCeiling('smartrecruiters', {}), 5000);
+  const raised = await collectCareerOpsRaw({
+    portals: { tracked_companies: [{ name: 'SF Raised', max_jobs: 5000 }, { name: 'SF Raised Full', max_jobs: 1200 }] },
+    providers: {}, makeHttpCtx: async () => ({}), sleep: async () => {},
+    resolveProvider: async () => ({ provider: { id: 'successfactors', fetch: async () => jobs(1200) } }),
+  });
+  assert.deepEqual(raised.partitions.map((item) => item.capDetected), [false, true], 'capped only at the effective ceiling');
   const sizes = { 'SF Exact': ['successfactors', 1000], 'SF Under': ['successfactors', 998], 'Oracle Exact': ['oraclecloud', 5000], 'SR Exact': ['smartrecruiters', 5000], 'GH Big': ['greenhouse', 5000] };
   const result = await collectCareerOpsRaw({
     portals: { tracked_companies: Object.keys(sizes).map((name) => ({ name })) },
