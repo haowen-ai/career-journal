@@ -174,10 +174,9 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
       else counts.review += 1;
       for (const linked of resolved.links) result.flags.push(`maybe_same:${linked.postingId}`);
       const reappeared = Date.parse(now) - Date.parse(posting.last_seen) >= (policy.freshness?.reappearAfterDays ?? 14) * 86_400_000;
-      // Every sighting reclassifies for free, so a drop reopens as soon as its record classifies
-      // for review (a re-allowed company, a new source's signal). A partial location list cannot
-      // overrule outside_countries: it may just omit the offices that decided it. A classifier
-      // drop was never judged, so this is first work, not a re-judgment.
+      // A settled drop whose record now classifies for review. It reopens only with a stored
+      // authorization (decide once): a relaxed rule needs an explicit `review rejudge`. A partial
+      // location list cannot overrule outside_countries: it may omit the offices that decided it.
       const reopened = old?.state === 'done' && old.decision === 'dropped' && result.kind === 'review' && record.listed !== false
         && (old.code !== 'outside_countries' || record.completeness?.locations === 'complete');
       const stillDelisted = old?.code === 'delisted' && record.listed === false;
@@ -186,9 +185,9 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
       const relist = Boolean(old && DELIST_CODES.has(old.code) && record.listed !== false && (!posting.listed || reappeared));
       const resetAllowed = autoReopenAllowed({ review: old, application, authorization: relist ? 'relist' : null });
       const renew = old && old.state !== 'leased' && old.hold_owner !== 'user' && !stillDelisted
-        && (reopened || (resetAllowed && (changed || (!posting.listed && record.listed !== false) || reappeared)))
+        && resetAllowed && (reopened || changed || (!posting.listed && record.listed !== false) || reappeared)
         && !userDecided(db, { ...old, application_id: posting.application_id }, { userLogged });
-      if (renew && relist && !reopened) result.flags.push('authorization:relist');
+      if (renew && relist) result.flags.push('authorization:relist');
       // Keep unlisted observations in conservation, without creating work for a
       // posting that has never had a review. A later listing can open it normally.
       const canOpen = record.listed !== false || result.kind !== 'review';
@@ -201,7 +200,7 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
           evidence_json=CASE WHEN excluded.code='already_submitted' THEN excluded.evidence_json ELSE reviews.evidence_json END,
           lease_owner=NULL,lease_until=NULL,hold_owner=NULL,hold_since=NULL,updated_at=excluded.updated_at`)
           .run(id, state, decision, result.code, result.lane, JSON.stringify(result.flags), JSON.stringify(result.evidence), state === 'due' ? now : null, posting.first_seen, now);
-        if (renew && relist && !reopened) {
+        if (renew && relist) {
           db.prepare("INSERT INTO review_log (posting_id,at,stage,kind,payload_json) VALUES (?,?,'scan','outcome',?)")
             .run(id, now, JSON.stringify({ action: 'relisted', authorization: 'relist', previousCode: old.code }));
         }

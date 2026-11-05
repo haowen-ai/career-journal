@@ -1,7 +1,7 @@
 // User decision 2026-10-30: under a student search a role with no student signal is dropped at scan, and queued
 // rows are settled by `review reclassify`. 691 such roles had been judged and none was eligible. Drops stay in
-// postings for identity and dedupe, are never sent to the judge, and reopen only when a sighting classifies for
-// review or the posting is relisted. Synthetic data only: every employer, place and URL is invented.
+// postings for identity and dedupe, are never sent to the judge, and reopen only by `review rejudge` or when the
+// posting is relisted. Synthetic data only: every employer, place and URL is invented.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
@@ -118,17 +118,34 @@ test('[A] a no-signal record is dropped at ingest: an unknown one is only counte
   assert.equal(reviewOf(db, id).updated_at, updated, 'an identical sighting does not touch it');
 });
 
-test('[A] a dropped row reopens as due when its content gains a student signal', async () => {
+// Review finding 2026-11-05: an ingest reopen is a re-judgment like any other. A rule that is relaxed later (an
+// exclusion removed) reopens a settled drop only through an explicit `review rejudge`, never at the next sighting.
+test('[A] a settled company_excluded drop stays settled when the exclusion is removed and the same record is seen again', async () => {
+  const { ingestBatch } = await ingest();
+  const db = freshDb();
+  const scan = scanner(ingestBatch, db);
+  const id = settledDrop(scan, db, 9, roleRecord(9), 'company_excluded');
+  const before = reviewOf(db, id).updated_at;
+  scan([roleRecord(9)], { policy: QUEUED_POLICY, now: at(1) });
+  assert.deepEqual(outcome(db, id), ['done', 'dropped', 'company_excluded']);
+  assert.equal(reviewOf(db, id).updated_at, before, 'no write reopens it');
+});
+
+// Changed on purpose 2026-11-05 (review finding 1, decide once): a settled drop is not reopened by a sighting;
+// `review rejudge` is the explicit way back.
+test('[A] a dropped row stays settled when its content gains a student signal', async () => {
   const { ingestBatch } = await ingest();
   const db = freshDb();
   const scan = scanner(ingestBatch, db);
   const id = settledDrop(scan, db, 1, roleRecord(1, NO_SIGNAL), 'no_student_signal');
   scan([roleRecord(1, { ...NO_SIGNAL, description: LONG('Build pipelines. This is a paid internship.') })], { now: at(1) });
-  assert.deepEqual([...outcome(db, id), reviewOf(db, id).lane], ['due', null, null, 'new']);
-  assert.equal(reviewOf(db, id).next_due, at(1));
+  assert.deepEqual(outcome(db, id), DROPPED);
+  assert.equal(reviewOf(db, id).next_due, null);
 });
 
-test('[A] a signal in another source reopens a drop, and one source\'s bare listing does not close a student role', async () => {
+// Changed on purpose 2026-11-05 (review finding 1, decide once): a settled drop is not reopened by a sighting;
+// `review rejudge` is the explicit way back.
+test('[A] a signal in another source does not reopen a settled drop, and one source\'s bare listing does not close a student role', async () => {
   const { ingestBatch } = await ingest();
   const bare = (id) => roleRecord(id, { source: 'careerops', sourceId: `co-${id}`, ...NO_SIGNAL, description: '', completeness: { locations: 'partial', arrangement: 'unknown', description: 'none', employment_type: 'absent' } });
   const db = freshDb();
@@ -136,7 +153,7 @@ test('[A] a signal in another source reopens a drop, and one source\'s bare list
   const dropped = settledDrop(scan, db, 1, bare(1), 'no_student_signal', { source: 'careerops', partition: 'all' });
   assert.deepEqual(outcome(db, dropped), DROPPED);
   scan([roleRecord(1, { title: 'Senior Data Engineer Intern' })], { now: at(1) });
-  assert.deepEqual([...outcome(db, dropped), reviewOf(db, dropped).lane], ['due', null, null, 'new'], 'an unchanged-source rule must not hide the new source');
+  assert.deepEqual(outcome(db, dropped), DROPPED, 'a settled drop waits for an explicit rejudge');
 
   scan([roleRecord(2, { title: 'Senior Data Engineer Intern' })]);
   const open = postingOf(db, 2);
@@ -162,7 +179,9 @@ test('[A] a no-signal record never drops a posting with an application or one th
   assert.deepEqual(outcome(db, manual), ['due', null, null]);
 });
 
-test('[A] a partial location list does not reopen outside_countries; a complete list that adds a US office does', async () => {
+// Changed on purpose 2026-11-05 (review finding 1, decide once): a settled drop is not reopened by a sighting;
+// `review rejudge` is the explicit way back.
+test('[A] neither a partial location list nor a complete list that adds a US office reopens a settled outside_countries drop', async () => {
   const { ingestBatch } = await ingest();
   const db = freshDb();
   const scan = scanner(ingestBatch, db);
@@ -173,10 +192,12 @@ test('[A] a partial location list does not reopen outside_countries; a complete 
   scan([roleRecord(1, { source: 'careerops', sourceId: 'co-1', locations: [], completeness: { ...known, locations: 'partial', arrangement: 'unknown' } })], { source: 'careerops', partition: 'all', now: at(1) });
   assert.deepEqual(outcome(db, id), ['done', 'dropped', 'outside_countries']);
   scan([roleRecord(1, { locations: ['Berlin, Germany', 'Chicago, IL'], remote: false, completeness: known })], { now: at(2) });
-  assert.deepEqual(outcome(db, id), ['due', null, null]);
+  assert.deepEqual(outcome(db, id), ['done', 'dropped', 'outside_countries']);
 });
 
-test('[A] a re-allowed company reopens at its next sighting without a content change', async () => {
+// Changed on purpose 2026-11-05 (review finding 1, decide once): a settled drop is not reopened by a sighting;
+// `review rejudge` is the explicit way back.
+test('[A] a re-allowed company does not reopen a settled drop at its next sighting', async () => {
   const { ingestBatch } = await ingest();
   const db = freshDb();
   const scan = scanner(ingestBatch, db);
@@ -184,7 +205,7 @@ test('[A] a re-allowed company reopens at its next sighting without a content ch
   const id = settledDrop(scan, db, 1, excluded, 'company_excluded');
   assert.deepEqual(outcome(db, id), ['done', 'dropped', 'company_excluded']);
   scan([excluded], { now: at(1), policy: { ...SCREENING_POLICY, reallowedCompanies: ['Excluded Example Co'] } });
-  assert.deepEqual(outcome(db, id), ['due', null, null]);
+  assert.deepEqual(outcome(db, id), ['done', 'dropped', 'company_excluded']);
 });
 
 test('[A] renewal never overwrites a user decision', async () => {
@@ -515,7 +536,8 @@ test('[A] R3 an older student-signal observation does not reopen a drop when eve
   scan([bare('Changed.')], { source: 'careerops', partition: 'all', now: at(3) });
   assert.deepEqual(outcome(db, id), DROPPED, 'the stored Intern observation is not what greenhouse shows now');
   scan([roleRecord(1, { title: 'Data Analyst Intern', description: '' })], { now: at(4) });
-  assert.deepEqual(outcome(db, id), ['due', null, null], 'control: a current signal reopens it');
+  // Changed on purpose 2026-11-05 (review finding 1): a settled drop waits for `review rejudge`, even on a current signal.
+  assert.deepEqual(outcome(db, id), DROPPED, 'a current signal does not reopen it either');
 });
 
 test('[A] R4 ingest and reclassify follow a merge chain A to B to C and keep the internship a member shows', async () => {
