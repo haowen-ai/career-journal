@@ -29,9 +29,15 @@ import { exemptVerdict, jevPlaceOnly, locationExempt } from './overrides.mjs';
 import { applyRoleDirection } from './direction-pass.mjs';
 import { applyCompanyExclusion } from './exclusion-pass.mjs';
 import { lowerFit } from './fit.mjs';
+import { autoReopenAllowed } from './reopen-policy.mjs';
 export { scheduleRefresh } from './freshness.mjs';
 
 const DAY = 86400000;
+// Decide once: the automatic re-queue passes select only open work (reopen-policy.mjs), never the
+// whole settled history. The SQL narrows the scan; autoReopenAllowed stays the single rule.
+// Expects reviews r and the ownership joins (applications a) in the enclosing query.
+export const OPEN_REVIEW_SQL = "(r.state IN ('due','held','leased','failed') OR r.decision='eligible' AND a.status='lead')";
+const reopenable = (row) => autoReopenAllowed({ review: row, application: row.application_status == null ? null : { status: row.application_status } });
 const explorationLane = (row) => ['no_student_signal', 'out_of_direction'].includes(row.lane);
 const postingUrl = (posting) => /^https?:/.test(posting.canonical_url) ? posting.canonical_url : `https://${posting.canonical_url}`;
 const factsMap = (facts) => Object.fromEntries(facts.map((fact) => [fact.id, dependencyHash(fact)]));
@@ -104,8 +110,9 @@ export function replan(db, { inputs, now, runtimeDeps, comparison }) {
   const state = inputState(current);
   let requeued = 0;
   atomic(db, () => {
-    for (const row of db.prepare(`SELECT r.*,p.application_id FROM reviews r JOIN postings p ON p.id=r.posting_id
-      ${reviewOwnershipJoins} WHERE NOT ${userDecisionSql}`).all()) {
+    for (const row of db.prepare(`SELECT r.*,p.application_id,a.status application_status FROM reviews r JOIN postings p ON p.id=r.posting_id
+      ${reviewOwnershipJoins} WHERE ${OPEN_REVIEW_SQL} AND NOT ${userDecisionSql}`).all()) {
+      if (!reopenable(row)) continue;
       const stored = parseJson(row.dep_hashes_json);
       let migrated = false;
       // Persist exact legacy-policy witnesses separately from the immutable
@@ -227,8 +234,9 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   const currentState = inputState(current);
   // Actual adapter/CLI dependencies are available only after adapter.ready.
   atomic(db, () => {
-    for (const row of db.prepare(`SELECT r.* FROM reviews r JOIN postings p ON p.id=r.posting_id
-      ${reviewOwnershipJoins} WHERE NOT ${userDecisionSql}`).all()) {
+    for (const row of db.prepare(`SELECT r.*,a.status application_status FROM reviews r JOIN postings p ON p.id=r.posting_id
+      ${reviewOwnershipJoins} WHERE ${OPEN_REVIEW_SQL} AND NOT ${userDecisionSql}`).all()) {
+      if (!reopenable(row)) continue;
       if (row.decision === 'eligible' || row.decision === 'reused' || row.decision === 'dropped') continue;
       const old = parseJson(row.dep_hashes_json);
       const lastDecision = old.decisionRuntime ?? old.runtime;

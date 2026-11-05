@@ -7,7 +7,9 @@ import { userDecided } from './ownership.mjs';
 //  - withdraws visible review-delivered leads (done, or due for a freshness refresh) whose title is out of direction (a requireAllow title only when the
 //    judge's function label is stored and not allowed: older leads without a label were audited by hand),
 //  - settles a role_direction review a refresh re-queued while it is still out of direction,
-//  - restores a role_direction verdict once the rules let it through, unless a replan invalidated it (re-judged).
+//  - restores a due role_direction verdict once the rules let it through, unless a replan invalidated it (re-judged).
+// Decide once: only open work is selected (due reviews and queued leads). A settled direction rejection
+// stays settled when the rules change; `review rejudge --code role_direction` reopens it explicitly.
 // The same holds for a role the judge labelled pure software engineering (2026-10-31): settled out_of_direction with
 // evidence.roleDirection.software, withdrawn when visible, restored once the rules or its title let it through.
 // Exploration-lane out_of_direction settlements carry no such marker and are left alone, and a scan drop (decision
@@ -18,8 +20,9 @@ export function applyRoleDirection(db, { now, policy = {}, owner = 'review-role-
     let withdrawn = 0; let restored = 0;
     for (const row of db.prepare(`SELECT p.*,r.posting_id,r.state,r.decision,r.code,r.flags_json,r.evidence_json,r.dep_hashes_json,a.status application_status,a.skip_reason application_skip
       FROM postings p JOIN reviews r ON r.posting_id=p.id LEFT JOIN applications a ON a.id=p.application_id
-      WHERE p.merged_into IS NULL AND (r.code=? AND r.state IN ('due','done') AND COALESCE(r.decision,'')<>'dropped' OR r.state IN ('due','done') AND r.decision='eligible'
-        OR r.code=? AND r.state IN ('due','done') AND r.decision='not_eligible' AND CASE WHEN json_valid(r.evidence_json) THEN json_extract(r.evidence_json,'$.roleDirection.software') END=1)`).all(DIRECTION_CODE, OUT_OF_DIRECTION_CODE)) {
+      WHERE p.merged_into IS NULL AND (r.code=? AND r.state='due' AND COALESCE(r.decision,'')<>'dropped' OR r.state='due' AND r.decision='eligible'
+        OR r.state='done' AND r.decision='eligible' AND a.status='lead'
+        OR r.code=? AND r.state='due' AND r.decision='not_eligible' AND CASE WHEN json_valid(r.evidence_json) THEN json_extract(r.evidence_json,'$.roleDirection.software') END=1)`).all(DIRECTION_CODE, OUT_OF_DIRECTION_CODE)) {
       if (userDecided(db, row)) continue;
       const evidence = parseJson(row.evidence_json);
       const software = row.code === OUT_OF_DIRECTION_CODE;
@@ -37,14 +40,8 @@ export function applyRoleDirection(db, { now, policy = {}, owner = 'review-role-
           }
           continue;
         }
-        // A replan invalidated the kept verdict (screening inputs changed): it must be re-judged, never restored.
-        if (parseJson(row.dep_hashes_json).invalidated) {
-          if (row.state !== 'due') {
-            db.prepare(`UPDATE reviews SET state='due',stage='judge',next_due=?,updated_at=? WHERE posting_id=? AND state='done' AND code=?`).run(now, now, row.id, row.code);
-            logReview(db, row.id, { now, stage: 'judge', payload: { action: 'role_direction_rejudge' } });
-          }
-          continue;
-        }
+        // A replan invalidated the kept verdict (screening inputs changed): it stays due to be re-judged, never restored.
+        if (parseJson(row.dep_hashes_json).invalidated) continue;
         const fence = claimItem(db, row.id, { owner, now });
         if (!fence) continue;
         deliver(db, { postingId: row.id, fence, now, policy, verdict: verdict() });

@@ -1,4 +1,4 @@
-import { SIGNAL_DROP_CODES } from '../funnel/contract.mjs';
+import { autoReopenAllowed } from './reopen-policy.mjs';
 import { parseJson } from './deliver.mjs';
 import { reviewOwnershipJoins, userDecisionSql } from './ownership.mjs';
 export function recheckHolds(db, { now, screeningPolicy }) {
@@ -11,19 +11,19 @@ export function recheckHolds(db, { now, screeningPolicy }) {
   return { requeued };
 }
 
+// Decide once: only a queued lead (open by autoReopenAllowed) is re-checked on a schedule. Settled
+// negatives and eligible reviews whose application left the queue are never re-queued by a run;
+// `review rejudge` is the explicit path for those.
 export function scheduleRefresh(db, { now, policy }) {
   let requeued = 0;
   const days = 86400000;
-  for (const row of db.prepare(`SELECT r.* FROM reviews r JOIN postings p ON p.id=r.posting_id
-    ${reviewOwnershipJoins} WHERE r.state='done' AND COALESCE(r.decision,'')<>'dropped' AND NOT ${userDecisionSql}`).all()) {
-    // A drop reopens only through ingest, where its record classifies for free.
-    if (row.decision !== 'eligible' && SIGNAL_DROP_CODES.includes(row.lane)) continue;
+  for (const row of db.prepare(`SELECT r.*,a.status application_status FROM reviews r JOIN postings p ON p.id=r.posting_id
+    ${reviewOwnershipJoins} WHERE r.state='done' AND r.decision='eligible' AND a.status='lead' AND NOT ${userDecisionSql}`).all()) {
+    if (!autoReopenAllowed({ review: row, application: { status: row.application_status } })) continue;
     const age = (Date.parse(now) - Date.parse(row.updated_at)) / days;
     const deadline = parseJson(row.deadline_json);
     const near = deadline.kind === 'cutoff' && Date.parse(deadline.date) - Date.parse(now) <= 3 * days;
-    const every = row.decision === 'eligible' ? (near ? 1 : policy.freshness?.activeDays ?? 7) : policy.freshness?.negativeRecheckDays ?? 14;
-    if (row.decision !== 'eligible' && (Date.parse(now) - Date.parse(row.first_seen)) / days > (policy.freshness?.negativeHorizonDays ?? 60)) continue;
-    if (age < every) continue;
+    if (age < (near ? 1 : policy.freshness?.activeDays ?? 7)) continue;
     db.prepare("UPDATE reviews SET state='due',stage='fetch',lane='refresh',next_due=?,updated_at=? WHERE posting_id=?").run(now, now, row.posting_id);
     requeued += 1;
   }
