@@ -676,7 +676,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
 
   // ==== INTEGRATION HOOK: company size (Lane C src/review/company-size.mjs) =========================
   // The single call site, before the judge loop. The coordinator injects
-  //   resolveCompanySizes({ companies: string[], now }) -> Promise<{ failed: [{ company, error }] }>
+  //   resolveCompanySizes({ companies: string[], now }) -> Promise<{ failed: [{ company, error }], stopped? }>
   // wrapping ensureCompanySizes({ companies, sizes, askJev, askModel, save, now }). A company in failed[]
   // (operational Jev/model failure) stays unknown: its postings stay due and the run names the external
   // failure (stop_reason company_size_unavailable). Default: no hook, nothing is asked.
@@ -684,13 +684,16 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   if (resolveCompanySizes && !halted) {
     const companies = db.prepare(`SELECT DISTINCT p.company FROM reviews r JOIN postings p ON p.id=r.posting_id ${reviewOwnershipJoins}
       WHERE r.state='due' AND (r.next_due IS NULL OR r.next_due<=?) AND p.company IS NOT NULL AND NOT ${userDecisionSql} ORDER BY p.company`).all(now).map((row) => row.company);
-    let failed;
-    try { failed = (await resolveCompanySizes({ companies, now }))?.failed ?? []; }
+    let failed; let stopped = null;
+    try { ({ failed = [], stopped = null } = (await resolveCompanySizes({ companies, now })) ?? {}); }
     catch (error) { failed = companies.map((company) => ({ company, error: error?.message ?? String(error) })); }
     for (const { company, error } of failed) {
       sizeUnknown.add(company);
       noteError(`company size unknown for ${company}: ${redact(String(error ?? 'no decision'))}`);
     }
+    // A size-resolution breaker (jev_unavailable, adapter_failure) is the run's outage too: nothing more is dispatched
+    // and every posting stays due.
+    if (['jev_unavailable', 'adapter_failure'].includes(stopped)) halt(stopped, `company size resolution stopped: ${stopped}`);
     if (failed.length) receipt.stop_reason ??= 'company_size_unavailable';
     // Decisions were saved to company-size.json: reload the inputs so deliver() sees the new sizes.
     await refreshInputs();

@@ -112,3 +112,28 @@ test('[hook] company sizes are resolved once before judging; a company left unkn
   assert.deepEqual([receipt.status, receipt.stop_reason], ['partial', 'company_size_unavailable']);
   assert.ok(receipt.errors.some((error) => /Unknown Example Co: Jev HTTP 503/.test(error)));
 });
+
+// Review finding 4 (2026-11-05): a breaker that trips during size resolution halts the whole run before any posting
+// judgment is dispatched; every posting stays due and the run names the breaker.
+test('[hook] three identical model failures in size resolution halt the run: no posting judgment, every posting due', async () => {
+  const { companySizes, ensureCompanySizes } = await import('../../src/review/company-size.mjs');
+  for (const [breaker, askJev, askModel] of [
+    ['adapter_failure', async () => ({ probability: 0.5 }), async () => { throw new Error('codex exited 1'); }],
+    ['jev_unavailable', async () => { throw new Error('Jev HTTP 503'); }, async () => ({ size: 'large' })],
+  ]) {
+    const db = freshDb();
+    const pages = {};
+    add(db, pages, 'p-known', { company: 'Known Example Co' });
+    for (const n of [1, 2, 3, 4]) add(db, pages, `p-${n}`, { company: `Unknown Example Co ${n}`, title: `Data Science Intern ${n}` });
+    let modelCalls = 0;
+    const sizes = companySizes({ large: ['Known Example Co'] });
+    const resolveCompanySizes = ({ companies, now }) => ensureCompanySizes({ companies, sizes, now, concurrency: 1, jevFailureStreak: 3,
+      askJev, askModel: async (...args) => { modelCalls += 1; return askModel(...args); }, save: async () => {} });
+    const j = judges();
+    const receipt = await run(db, pages, { j, resolveCompanySizes });
+    if (breaker === 'adapter_failure') assert.equal(modelCalls, 3, 'fixture: three identical model failures trip the breaker');
+    assert.equal(j.primary.calls.length + j.escalation.calls.length, 0, `${breaker}: no further adapter call`);
+    for (const id of ['p-known', 'p-1', 'p-2', 'p-3', 'p-4']) assert.equal(reviewOf(db, id).state, 'due', `${breaker}: ${id} stays due`);
+    assert.deepEqual([receipt.status, receipt.stop_reason], ['partial', breaker]);
+  }
+});
