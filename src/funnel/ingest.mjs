@@ -18,6 +18,8 @@ const stable = (value) => Array.isArray(value) ? value.map(stable) : value && ty
 export const DEFAULT_CERTAIN_DROP_CODES = CERTAIN_DROP_CODES;
 // Settlements that only say the posting left the board. A later listing is a relist.
 const DELIST_CODES = new Set(['delisted', 'closed_verified']);
+// Drops the posting's own content decides; only these reopen on new evidence (evidence_changed).
+const EVIDENCE_DROP_CODES = new Set([...SIGNAL_DROP_CODES, 'outside_countries']);
 
 function quarantine(db, record, reason, now) {
   const payload = redact(JSON.stringify({ reason, record }));
@@ -183,11 +185,20 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
       // Decide once: a content change, relisting or reappearance resets only open work. A
       // posting settled only because it left the board is authorized to reopen when it is back.
       const relist = Boolean(old && DELIST_CODES.has(old.code) && record.listed !== false && (!posting.listed || reappeared));
-      const resetAllowed = autoReopenAllowed({ review: old, application, authorization: relist ? 'relist' : null });
+      // Decide once is about rule edits, not new evidence about the posting itself. A system drop decided by the
+      // posting's own content (no signal, out of direction, outside the countries) reopens with authorization
+      // evidence_changed when this source's content changed or another source shows the posting, once per
+      // evidence hash. A relaxed rule (re-allowed company, removed exclusion) changes no evidence: `review rejudge`.
+      const evidence = reopened && EVIDENCE_DROP_CODES.has(old.code) && (changed || !previous)
+        && !(application && (application.status === 'withdrawn' && application.skip_owner !== 'review' || ['user', 'legacy'].includes(application.skip_owner)))
+        && !db.prepare(`SELECT 1 FROM review_log WHERE posting_id=? AND kind='outcome' AND json_extract(payload_json,'$.authorization')='evidence_changed'
+          AND json_extract(payload_json,'$.evidenceHash')=?`).get(id, contentHash);
+      const authorization = relist ? 'relist' : evidence ? 'evidence_changed' : null;
+      const resetAllowed = autoReopenAllowed({ review: old, application, authorization });
       const renew = old && old.state !== 'leased' && old.hold_owner !== 'user' && !stillDelisted
         && resetAllowed && (reopened || changed || (!posting.listed && record.listed !== false) || reappeared)
         && !userDecided(db, { ...old, application_id: posting.application_id }, { userLogged });
-      if (renew && relist) result.flags.push('authorization:relist');
+      if (renew && authorization) result.flags.push(`authorization:${authorization}`);
       // Keep unlisted observations in conservation, without creating work for a
       // posting that has never had a review. A later listing can open it normally.
       const canOpen = record.listed !== false || result.kind !== 'review';
@@ -200,9 +211,10 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
           evidence_json=CASE WHEN excluded.code='already_submitted' THEN excluded.evidence_json ELSE reviews.evidence_json END,
           lease_owner=NULL,lease_until=NULL,hold_owner=NULL,hold_since=NULL,updated_at=excluded.updated_at`)
           .run(id, state, decision, result.code, result.lane, JSON.stringify(result.flags), JSON.stringify(result.evidence), state === 'due' ? now : null, posting.first_seen, now);
-        if (renew && relist) {
+        if (renew && authorization) {
           db.prepare("INSERT INTO review_log (posting_id,at,stage,kind,payload_json) VALUES (?,?,'scan','outcome',?)")
-            .run(id, now, JSON.stringify({ action: 'relisted', authorization: 'relist', previousCode: old.code }));
+            .run(id, now, JSON.stringify(relist ? { action: 'relisted', authorization: 'relist', previousCode: old.code }
+              : { action: 'evidence_reopened', authorization: 'evidence_changed', previousCode: old.code, evidenceHash: contentHash, source: record.source }));
         }
       }
       db.prepare('UPDATE postings SET last_seen=?,listed=?,updated_at=? WHERE id=?').run(now, record.listed === false ? 0 : 1, now, id);

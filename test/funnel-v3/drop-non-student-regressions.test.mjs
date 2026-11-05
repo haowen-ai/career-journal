@@ -131,21 +131,24 @@ test('[A] a settled company_excluded drop stays settled when the exclusion is re
   assert.equal(reviewOf(db, id).updated_at, before, 'no write reopens it');
 });
 
-// Changed on purpose 2026-11-05 (review finding 1, decide once): a settled drop is not reopened by a sighting;
-// `review rejudge` is the explicit way back.
-test('[A] a dropped row stays settled when its content gains a student signal', async () => {
+// Decide once is about rule edits, not new posting evidence (review finding 1 follow-up): a system drop reopens with
+// the stored authorization evidence_changed when the posting's own evidence changes.
+test('[A] a dropped row reopens as due when its content gains a student signal', async () => {
   const { ingestBatch } = await ingest();
   const db = freshDb();
   const scan = scanner(ingestBatch, db);
   const id = settledDrop(scan, db, 1, roleRecord(1, NO_SIGNAL), 'no_student_signal');
   scan([roleRecord(1, { ...NO_SIGNAL, description: LONG('Build pipelines. This is a paid internship.') })], { now: at(1) });
-  assert.deepEqual(outcome(db, id), DROPPED);
-  assert.equal(reviewOf(db, id).next_due, null);
+  assert.deepEqual([...outcome(db, id), reviewOf(db, id).lane], ['due', null, null, 'new']);
+  assert.equal(reviewOf(db, id).next_due, at(1));
+  assert.ok(JSON.parse(reviewOf(db, id).flags_json).includes('authorization:evidence_changed'), 'the authorization is stored');
+  const logged = db.prepare("SELECT payload_json FROM review_log WHERE posting_id=? AND kind='outcome'").all(id).map((row) => JSON.parse(row.payload_json));
+  assert.ok(logged.some((payload) => payload.authorization === 'evidence_changed' && payload.evidenceHash), 'and logged with its evidence hash');
 });
 
-// Changed on purpose 2026-11-05 (review finding 1, decide once): a settled drop is not reopened by a sighting;
-// `review rejudge` is the explicit way back.
-test('[A] a signal in another source does not reopen a settled drop, and one source\'s bare listing does not close a student role', async () => {
+// Decide once is about rule edits, not new posting evidence (review finding 1 follow-up): a system drop reopens with
+// the stored authorization evidence_changed when the posting's own evidence changes.
+test('[A] a signal in another source reopens a drop, and one source\'s bare listing does not close a student role', async () => {
   const { ingestBatch } = await ingest();
   const bare = (id) => roleRecord(id, { source: 'careerops', sourceId: `co-${id}`, ...NO_SIGNAL, description: '', completeness: { locations: 'partial', arrangement: 'unknown', description: 'none', employment_type: 'absent' } });
   const db = freshDb();
@@ -153,7 +156,7 @@ test('[A] a signal in another source does not reopen a settled drop, and one sou
   const dropped = settledDrop(scan, db, 1, bare(1), 'no_student_signal', { source: 'careerops', partition: 'all' });
   assert.deepEqual(outcome(db, dropped), DROPPED);
   scan([roleRecord(1, { title: 'Senior Data Engineer Intern' })], { now: at(1) });
-  assert.deepEqual(outcome(db, dropped), DROPPED, 'a settled drop waits for an explicit rejudge');
+  assert.deepEqual([...outcome(db, dropped), reviewOf(db, dropped).lane], ['due', null, null, 'new'], 'an unchanged-source rule must not hide the new source');
 
   scan([roleRecord(2, { title: 'Senior Data Engineer Intern' })]);
   const open = postingOf(db, 2);
@@ -179,9 +182,9 @@ test('[A] a no-signal record never drops a posting with an application or one th
   assert.deepEqual(outcome(db, manual), ['due', null, null]);
 });
 
-// Changed on purpose 2026-11-05 (review finding 1, decide once): a settled drop is not reopened by a sighting;
-// `review rejudge` is the explicit way back.
-test('[A] neither a partial location list nor a complete list that adds a US office reopens a settled outside_countries drop', async () => {
+// Decide once is about rule edits, not new posting evidence (review finding 1 follow-up): a system drop reopens with
+// the stored authorization evidence_changed when the posting's own evidence changes.
+test('[A] a partial location list does not reopen outside_countries; a complete list that adds a US office does', async () => {
   const { ingestBatch } = await ingest();
   const db = freshDb();
   const scan = scanner(ingestBatch, db);
@@ -192,7 +195,7 @@ test('[A] neither a partial location list nor a complete list that adds a US off
   scan([roleRecord(1, { source: 'careerops', sourceId: 'co-1', locations: [], completeness: { ...known, locations: 'partial', arrangement: 'unknown' } })], { source: 'careerops', partition: 'all', now: at(1) });
   assert.deepEqual(outcome(db, id), ['done', 'dropped', 'outside_countries']);
   scan([roleRecord(1, { locations: ['Berlin, Germany', 'Chicago, IL'], remote: false, completeness: known })], { now: at(2) });
-  assert.deepEqual(outcome(db, id), ['done', 'dropped', 'outside_countries']);
+  assert.deepEqual(outcome(db, id), ['due', null, null]);
 });
 
 // Changed on purpose 2026-11-05 (review finding 1, decide once): a settled drop is not reopened by a sighting;
@@ -206,6 +209,36 @@ test('[A] a re-allowed company does not reopen a settled drop at its next sighti
   assert.deepEqual(outcome(db, id), ['done', 'dropped', 'company_excluded']);
   scan([excluded], { now: at(1), policy: { ...SCREENING_POLICY, reallowedCompanies: ['Excluded Example Co'] } });
   assert.deepEqual(outcome(db, id), ['done', 'dropped', 'company_excluded']);
+});
+
+// Review finding 1 follow-up: an evidence reopen happens at most once per distinct evidence hash, and never for a
+// user-owned row.
+test('[A] an evidence reopen happens once per evidence hash and never for a user-owned row', async () => {
+  const { ingestBatch } = await ingest();
+  const db = freshDb();
+  const scan = scanner(ingestBatch, db);
+  const gained = roleRecord(1, { ...NO_SIGNAL, description: LONG('Build pipelines. This is a paid internship.') });
+  const id = settledDrop(scan, db, 1, roleRecord(1, NO_SIGNAL), 'no_student_signal');
+  scan([gained], { now: at(1) });
+  assert.deepEqual(outcome(db, id), ['due', null, null], 'fixture: the first evidence change reopens it');
+  // The system settles it again (as a judge would); the source flips back and forth between the same two texts.
+  db.prepare("UPDATE reviews SET state='done', decision='dropped', code='no_student_signal', next_due=NULL WHERE posting_id=?").run(id);
+  scan([roleRecord(1, NO_SIGNAL)], { now: at(2) });
+  scan([gained], { now: at(3) });
+  assert.deepEqual(outcome(db, id), DROPPED, 'the same evidence hash does not reopen it a second time');
+
+  const user = settledDrop(scan, db, 2, roleRecord(2, NO_SIGNAL), 'no_student_signal');
+  const app = seedApplication(db, { company: 'Example Corp', role: 'Senior Data Engineer', jobUrl: urlOf(2), status: 'withdrawn', skipOwner: 'user', skipReason: 'not interested' });
+  db.prepare('UPDATE postings SET application_id = ? WHERE id = ?').run(app.id, user);
+  scan([roleRecord(2, { ...NO_SIGNAL, description: LONG('Build pipelines. This is a paid internship.') })], { now: at(1) });
+  assert.equal(reviewOf(db, user).state, 'done', 'a user-owned row is never reopened by evidence');
+  assert.notEqual(reviewOf(db, user).decision, 'eligible');
+  const legacy = settledDrop(scan, db, 3, roleRecord(3, NO_SIGNAL), 'no_student_signal');
+  const old = seedApplication(db, { company: 'Example Corp', role: 'Senior Data Engineer', jobUrl: urlOf(3), status: 'withdrawn', skipOwner: 'legacy', skipReason: 'skipped long ago' });
+  db.prepare('UPDATE postings SET application_id = ? WHERE id = ?').run(old.id, legacy);
+  scan([roleRecord(3, { ...NO_SIGNAL, description: LONG('Build pipelines. This is a paid internship.') })], { now: at(1) });
+  assert.equal(reviewOf(db, legacy).state, 'done', 'a legacy (user) skip is never reopened by evidence');
+  assert.equal(db.prepare('SELECT status FROM applications WHERE id = ?').get(app.id).status, 'withdrawn');
 });
 
 test('[A] renewal never overwrites a user decision', async () => {
@@ -536,8 +569,7 @@ test('[A] R3 an older student-signal observation does not reopen a drop when eve
   scan([bare('Changed.')], { source: 'careerops', partition: 'all', now: at(3) });
   assert.deepEqual(outcome(db, id), DROPPED, 'the stored Intern observation is not what greenhouse shows now');
   scan([roleRecord(1, { title: 'Data Analyst Intern', description: '' })], { now: at(4) });
-  // Changed on purpose 2026-11-05 (review finding 1): a settled drop waits for `review rejudge`, even on a current signal.
-  assert.deepEqual(outcome(db, id), DROPPED, 'a current signal does not reopen it either');
+  assert.deepEqual(outcome(db, id), ['due', null, null], 'control: a current signal reopens it');
 });
 
 test('[A] R4 ingest and reclassify follow a merge chain A to B to C and keep the internship a member shows', async () => {

@@ -84,7 +84,7 @@ export const RELIST_REASONS = Object.freeze(['delisted', 'closed_verified', 'una
 // A cap release restores only the cap's own withdrawal: the skip reason is a limit code and so is the note of the
 // withdrawal event that set it.
 function restoreAuthorized(app, authorization, withdrawal = null) {
-  if (!REOPEN_AUTHORIZATIONS.includes(authorization)) return false;
+  if (!REOPEN_AUTHORIZATIONS.includes(authorization) || authorization === 'evidence_changed') return false;
   if (authorization === 'cap_release') return app.skip_owner === 'review' && LIMIT_CODES.includes(app.skip_reason)
     && (!withdrawal || withdrawal.status_after !== 'withdrawn' || withdrawal.note === app.skip_reason);
   if (authorization === 'relist') return app.skip_owner === 'review' && RELIST_REASONS.includes(app.skip_reason);
