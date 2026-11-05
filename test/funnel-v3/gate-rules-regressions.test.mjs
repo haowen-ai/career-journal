@@ -127,6 +127,14 @@ test('[C1] ensureCompanySizes runs with bounded concurrency and stops dispatchin
   assert.equal(between.stopped, 'adapter_failure');
   assert.equal(between.failed.length, 25);
 
+  // Review round 3: failures of one class with varying text (Claude 500 vs 529, bad JSON vs wrong schema) still trip the breaker.
+  const classCalls = [];
+  const byClass = await ensureCompanySizes({ companies, sizes: companySizes(), askJev: async () => ({ probability: 0.5 }),
+    askModel: async (company) => { classCalls.push(company); throw Object.assign(new Error(`Claude API HTTP ${classCalls.length % 2 ? 500 : 529}`), { code: 'unavailable' }); },
+    save, now: T0, concurrency: 1 });
+  assert.equal(classCalls.length, 3, 'three failures of one class stop the model calls');
+  assert.equal(byClass.stopped, 'adapter_failure');
+
   let wide = 0; let widePeak = 0;
   const slowJev = async () => { wide += 1; widePeak = Math.max(widePeak, wide); await new Promise((resolve) => setTimeout(resolve, 2)); wide -= 1; return { probability: 0.9 }; };
   const ok = await ensureCompanySizes({ companies, sizes: companySizes(), askJev: slowJev, askModel: async () => ({ size: 'large' }), save, now: T0, concurrency: 4 });

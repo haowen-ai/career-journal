@@ -144,7 +144,10 @@ export async function ensureCompanySizes({ companies = [], sizes, askJev, askMod
       return { company, size: answer.size, by: 'model', probability, reason: typeof answer.reason === 'string' ? answer.reason : null, at: now };
     } catch (error) {
       const text = errorText(error);
-      streak.model = streak.model?.error === text ? { error: text, count: streak.model.count + 1 } : { error: text, count: 1 };
+      // Count by the stable failure class when the adapter gives one (e.g. Claude 500 and 529 are both
+      // `unavailable`); the full text stays in the failure record for diagnosis.
+      const key = typeof error?.code === 'string' && error.code ? `code:${error.code}` : text;
+      streak.model = streak.model?.key === key ? { key, count: streak.model.count + 1 } : { key, count: 1 };
       if (streak.model.count >= modelFailureStreak) stop('adapter_failure');
       return { company, failed: true, stage: 'model', probability, error: text };
     }
