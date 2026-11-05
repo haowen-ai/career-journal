@@ -137,6 +137,25 @@ function withEntryTimeout(ctx, entry) {
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Fixed per-fetch ceilings of CareerOps providers (career-ops providers/*.mjs). A list that ends
+// exactly there was cut off silently, so it is reported as `cap`, never as a complete census.
+// SuccessFactors MAX_JOBS=1000; Oracle Cloud 25 pages x 200; SmartRecruiters 50 pages x 100.
+export const PROVIDER_CEILINGS = Object.freeze({ successfactors: 1_000, oraclecloud: 5_000, smartrecruiters: 5_000 });
+
+// The number of jobs at which a provider stops on its own, or null when it has no known ceiling.
+export function providerCeiling(providerId, entry = {}, portals = {}) {
+  if (providerId === 'workday') {
+    const maxPages = Number(entry.max_pages ?? entry.maxPages ?? entry.workday?.max_pages ?? portals.workday?.max_pages ?? 100);
+    return Number.isFinite(maxPages) && maxPages > 0 ? maxPages * 20 : null;
+  }
+  if (providerId === 'radancy') {
+    // Radancy stops at max_jobs (default 2,000); entry.max_jobs can raise it.
+    const maxJobs = Number(entry.max_jobs ?? entry.maxJobs ?? 2_000);
+    return Number.isFinite(maxJobs) && maxJobs > 0 ? maxJobs : null;
+  }
+  return PROVIDER_CEILINGS[providerId] ?? null;
+}
+
 // Each fetch is sequential: stderr cap messages belong only to the current entry.
 export async function collectCareerOpsRaw({ portals, providers, resolveProvider, makeHttpCtx, sleep = defaultSleep, retryDelaysMs = RETRY_DELAYS_MS }) {
   const roles = [];
@@ -151,6 +170,8 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
     const originalError = console.error;
     let capDetected = false;
     let attempts = 0;
+    const startedAt = performance.now();
+    const elapsed = () => Math.round(performance.now() - startedAt);
     try {
       const resolved = await resolveProvider(entry, providers);
       provider = resolved?.provider ?? resolved;
@@ -176,8 +197,8 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
         }
       }
       if (!Array.isArray(jobs)) throw new Error('Provider returned no job array');
-      const maxPages = Number(entry.max_pages ?? entry.maxPages ?? entry.workday?.max_pages ?? portals.workday?.max_pages ?? 100);
-      if (provider.id === 'workday' && Number.isFinite(maxPages) && maxPages > 0 && jobs.length >= maxPages * 20) capDetected = true;
+      const ceiling = providerCeiling(provider.id, entry, portals);
+      if (ceiling != null && jobs.length >= ceiling) capDetected = true;
       const truncated = capDetected || Object.entries(jobs).some(([key, value]) => /(?:truncated|partial|capDetected)$/i.test(key) && value === true);
       for (const job of jobs) {
         const role = { ...job, company: job?.company ?? entry.name, partition,
@@ -190,9 +211,10 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
         }
         roles.push(role);
       }
-      partitions.push({ partition, status: truncated ? 'partial' : 'ok', count: jobs.length, rawCount: jobs.length, truncated, capDetected, attempts });
+      partitions.push({ partition, status: truncated ? 'partial' : 'ok', count: jobs.length, rawCount: jobs.length, truncated, capDetected, attempts, elapsedMs: elapsed(),
+        ...(capDetected && ceiling != null && jobs.length >= ceiling ? { ceiling } : {}) });
     } catch (error) {
-      partitions.push({ partition, status: 'error', count: 0, rawCount: 0, error: error.message, truncated: capDetected, capDetected, attempts });
+      partitions.push({ partition, status: 'error', count: 0, rawCount: 0, error: error.message, truncated: capDetected, capDetected, attempts, elapsedMs: elapsed() });
     } finally { configuredPartitions.push(partition); console.error = originalError; }
   }
   return { roles, partitions, configuredPartitions };
