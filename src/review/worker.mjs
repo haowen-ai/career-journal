@@ -457,7 +457,8 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       release(id, fence, { stage: 'judge' });
       if (jevStreak.postings >= jevStreak.limit) halt('jev_unavailable', `Jev unavailable: ${jevStreak.postings} consecutive postings failed; last error: ${failure.message}`);
     };
-    const jevAnswered = () => { jevStreak.postings = 0; };
+    // The streak resets only when the posting completes (every Jev stage answered); an intermediate answer inside a
+    // posting whose later Jev stage fails is not a recovery.
     if (halted) { release(id, fence, { stage: 'judge' }); return; }
     async function dispatchJudge(tier, request, { forced = false, question = null } = {}) {
       const adapter = judges[tier];
@@ -552,7 +553,6 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       const result = await reviewJevSplit({ inputs: stageInputs, snapshotText: snapshot.text, firstSeen: posting.first_seen, posting,
         jev, counts: receipt.jev });
       if (result.failure) { jevFailed(result.failure, 'split'); return; }
-      jevAnswered();
       final = result.verdict; jevProbabilities = result.probabilities; fresh = true;
       // Redesign B11: a fellowship/residency/research-program title is never accepted by Jev alone; the Codex
       // tiers decide it against the conversion rule. A Jev-direct not_eligible is unaffected.
@@ -609,7 +609,6 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         const result = await reviewPrimaryVerdict({ verdict: final, inputs: stageInputs, snapshotText: snapshot.text,
           firstSeen: posting.first_seen, secondOpinion, counts: receipt.counts.secondOpinion });
         if (result.failure) { jevFailed(result.failure, 'second_opinion'); return; }
-        if (result.asked) jevAnswered();
         final = result.verdict; opinionAsked = result.asked;
       }
       if (tier === 'primary' && final.escalate) { primaryFit = final.fit ?? null; final = null; continue; }
@@ -623,7 +622,6 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         final = forced ? await verifyForcedVerdict({ verdict: final, output: forced, inputs: stageInputs, snapshotText: snapshot.text,
           firstSeen: posting.first_seen, secondOpinion, counts: receipt.counts.secondOpinion }) : null;
         if (final?.failure) { jevFailed(final.failure, 'forced_verification'); return; }
-        if (forced && stageInputs.policy.judge?.secondOpinion && secondOpinion) jevAnswered();
         if (forced) fresh = true;
       }
       break;
@@ -645,6 +643,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       const committedDependencies = { ...dependencies, decisionRuntime };
       delete committedDependencies.releasedHold;
       await commitVerdict(id, fence, final, committedDependencies, { fresh });
+      jevStreak.postings = 0;
       const committed = db.prepare('SELECT state,decision,code,flags_json,evidence_json FROM reviews WHERE posting_id=?').get(id);
       // Nightly summary counts: a delivered verdict is a judged posting; an eligible one that is a visible lead counts as eligible.
       if (committed.state !== 'due') {

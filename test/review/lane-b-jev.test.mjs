@@ -83,6 +83,23 @@ test('[B3] 20 consecutive Jev-failed postings stop Jev for the run: partial, jev
   assert.equal(db.prepare("SELECT COUNT(*) n FROM reviews WHERE state='leased'").get().n, 0, 'no lease is left');
 });
 
+// Review finding 2026-11-05: a successful but uncertain split screen inside a posting is not a recovered Jev. The
+// streak resets only when a posting's Jev stages all succeed, so 20 postings whose second opinion fails stop the run.
+test('[B3] 20 consecutive second-opinion failures stop the run even when each split screen answered', async () => {
+  const db = freshDb();
+  const ids = Array.from({ length: 25 }, (_, i) => `p-so-${String(i).padStart(2, '0')}`);
+  const pages = postings(db, ids);
+  const uncertain = { async ask() { return { probability: 0.5 }; } };
+  let asked = 0;
+  const failing = { async ask() { asked += 1; throw new JevError('Jev HTTP 503', { kind: 'http', status: 503 }); } };
+  const receipt = await run(db, { pages, judges: judges(), jev: uncertain, secondOpinion: failing,
+    policy: { ...JEV_POLICY, judge: { ...JEV_POLICY.judge, secondOpinion: SECOND_OPINION } } });
+  assert.ok(asked > 0, 'fixture: the second opinion was asked');
+  assert.ok(asked <= 20, `the second opinion is asked for at most 20 postings (asked ${asked})`);
+  assert.deepEqual([receipt.status, receipt.stop_reason], ['partial', 'jev_unavailable']);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM reviews WHERE state='due' AND decision IS NULL").get().n, 25);
+});
+
 test('[B3] a failed second opinion leaves the posting due without escalating; the next run replays the cached primary judgment', async () => {
   const db = freshDb();
   const pages = postings(db, ['p-so']);
