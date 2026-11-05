@@ -493,7 +493,8 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       await hooks.afterDispatch?.({ attempt, outputPath });
       const controller = new AbortController();
       const timeLeft = duration - (clock() - start);
-      const timer = Number.isFinite(timeLeft) ? setTimeout(() => controller.abort(), Math.max(1, timeLeft + (adapter.timeoutMs ?? 120000))) : null;
+      // Without a run deadline the adapter's own timeout still guards a single hung call.
+      const timer = setTimeout(() => controller.abort(), Number.isFinite(timeLeft) ? Math.max(1, timeLeft + (adapter.timeoutMs ?? 120000)) : (adapter.timeoutMs ?? 120000));
       let result;
       try { result = await adapter.judge(request, { attemptId: attempt.id, outputPath, signal: controller.signal }); }
       catch (error) { result = { status: 'error', error: error.message, transportRetries: 0 }; }
@@ -787,7 +788,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     receipt.backlog = { due: pending.filter((r) => r.state === 'due').length,
       no_student_signal: { due: noSignal.length, oldest_days: Math.max(0, ...noSignal.map((r) => (Date.parse(now) - Date.parse(r.first_seen)) / DAY)) },
       out_of_direction: { due: outOfDirection.length, oldest_days: Math.max(0, ...outOfDirection.map((r) => (Date.parse(now) - Date.parse(r.first_seen)) / DAY)) },
-      recommendation: receipt.breaches.length ? `raise budget to ${Math.max(budget + 1, Math.ceil(pending.length / Math.max(1, maxWaitNights)))}` : null };
+      recommendation: receipt.breaches.length && Number.isFinite(budget) ? `raise budget to ${Math.max(budget + 1, Math.ceil(pending.length / Math.max(1, maxWaitNights)))}` : null };
     // Redesign B10: due actionable work left at the end is never silently ok. Exploration lanes are sampling,
     // not owed work; rows waiting for a later retry (next_due in the future) are not due yet.
     const actionable = db.prepare(`SELECT COUNT(*) n FROM reviews r JOIN postings p ON p.id=r.posting_id ${reviewOwnershipJoins}

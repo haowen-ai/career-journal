@@ -7,7 +7,8 @@ import { userDecided } from './ownership.mjs';
 import { judgmentEnvelope, rememberJudgment } from './judgment-cache.mjs';
 
 export function createBudget(db, { runId, limit, concurrency = 1, maxTransportRetries = 2 }) {
-  if (!Number.isInteger(limit) || limit < 0 || !Number.isInteger(concurrency) || concurrency < 1 || !Number.isInteger(maxTransportRetries) || maxTransportRetries < 0) throw new Error('Invalid attempt budget');
+  // limit Infinity: no attempt cap (goal 5); concurrency still bounds what is in flight.
+  if (!(Number.isInteger(limit) || limit === Infinity) || limit < 0 || !Number.isInteger(concurrency) || concurrency < 1 || !Number.isInteger(maxTransportRetries) || maxTransportRetries < 0) throw new Error('Invalid attempt budget');
   const used = () => db.prepare('SELECT COALESCE(SUM(1+transport_retries),0) n FROM attempts WHERE run_id=?').get(runId).n;
   const remaining = () => Math.max(0, limit - used());
   return {

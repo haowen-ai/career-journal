@@ -13,7 +13,9 @@ export function explorationShare(policy) {
 
 export function createReviewScheduler(db, { now, owner, policy, budget, unlistedOnly }) {
   const share = explorationShare(policy);
-  const allowance = budget && share > 0 ? Math.max(1, Math.ceil(budget * share)) : 0;
+  // SQLite LIMIT and comparisons need finite integers; an unbounded budget samples every exploration row.
+  const finite = (value) => (Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER);
+  const allowance = budget && share > 0 ? finite(Math.max(1, Math.ceil(budget * share))) : 0;
   const common = { now, owner, unlisted: JSON.stringify([...unlistedOnly]), allowance };
   const reviewable = `FROM reviews r JOIN postings p ON p.id=r.posting_id
     ${reviewOwnershipJoins}
@@ -72,7 +74,7 @@ export function createReviewScheduler(db, { now, owner, policy, budget, unlisted
       const rows = select.all({ now, unlisted: common.unlisted, seen: JSON.stringify([...seen]), fetching: JSON.stringify([...fetching]),
         queued: JSON.stringify(queued), explorationLeft, limit, fetchAllowed: Number(fetchAllowed),
         agedDays: refillPolicy.serviceTargets?.agedAfterDays ?? 2,
-        agedReserve: Math.max(1, Math.ceil(budget * (refillPolicy.serviceTargets?.agedReserveShare ?? .25))) });
+        agedReserve: finite(Math.max(1, Math.ceil(budget * (refillPolicy.serviceTargets?.agedReserveShare ?? .25)))) });
       return { pending: Boolean(rows[0].has_pending), rows: rows.filter((row) => row.posting_id) };
     },
   };

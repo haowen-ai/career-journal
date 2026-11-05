@@ -187,3 +187,46 @@ test('[B6][B12] the CLI: attach refuses a posting leased by a live run, hold and
     assert.equal(blocked.code, 75, 'a live run blocks --apply');
   } finally { await rm(home, { recursive: true, force: true }); }
 });
+
+// Review finding 2026-11-05 (goal 5): no quantity or time caps on a normal review run. The attempt, fetch and
+// stage-deadline limits are optional; omitted (or 0) means unbounded, so `review run` finishes every due review.
+// An explicit value is still kept.
+test('[B] review run without attempt, fetch or deadline limits finishes every due review; an explicit limit is kept', async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'cj-lane-b-uncapped-'));
+  try {
+    const { setup } = await import('../../src/commands/setup.mjs');
+    await setup(home, { timezone: 'UTC', email: { mode: 'skip' } });
+    const { attempts: _a, fetches: _f, deadlineMin: _d, ...rest } = REVIEW_POLICY.budgets;
+    await writeReviewHome(home, { policy: { ...REVIEW_POLICY, budgets: rest } });
+    await writeFile(path.join(home, '.career-journal', 'profile', 'company-size.json'), JSON.stringify({ rule: 'synthetic', large: ['Example Corp'] }));
+    const { openHomeDatabase } = await import('../../src/runtime/home.mjs');
+    const { createRuntime } = await import('../../src/runtime/create-runtime.mjs');
+    const { runCli } = await import('../../src/cli/main.mjs');
+    const ids = ['p-u1', 'p-u2', 'p-u3', 'p-u4'];
+    const pages = Object.fromEntries(ids.map((id) => [urlOf(id), page(urlOf(id), SNAPSHOTS.eligible)]));
+    const context = await openHomeDatabase(home);
+    for (const id of ids) { insertPosting(context.db, { id, url: urlOf(id), title: snapshotTitle(SNAPSHOTS.eligible) }); insertReview(context.db, { postingId: id, stage: 'fetch' }); }
+    const due = () => context.db.prepare("SELECT COUNT(*) n FROM reviews WHERE state='due'").get().n;
+    const judges = () => ({ primary: fakeJudge({ tier: 'primary', answers: () => ({ output: JUDGMENTS.eligible }) }), escalation: fakeJudge({ tier: 'escalation', answers: () => ({ output: JUDGMENTS.eligible }) }) });
+    let n = 0;
+    const cli = async (args) => {
+      const io = memoryIO();
+      const code = await runCli(['review', 'run', '--home', home, '--run-id', `review-uncapped-${n += 1}`, ...args], io,
+        { ...createRuntime({ root: process.cwd(), version: 'test' }), now: () => at(n), review: { judges: judges(), fetcher: fakeFetcher(pages) } });
+      return { code, receipt: JSON.parse(io.stdout || '{}'), err: io.stderr };
+    };
+    const capped = await cli(['--budget', '2']);
+    assert.deepEqual([capped.receipt.status, capped.receipt.stop_reason, due()], ['partial', 'budget', 2], `an explicit budget is kept: ${capped.err}`);
+    const open = await cli([]);
+    assert.equal(open.code, 0, open.err);
+    assert.deepEqual([open.receipt.status, open.receipt.stop_reason, due()], ['ok', null, 0], 'omitted limits: every due review is finished');
+    context.db.close();
+    await writeReviewHome(home, { policy: { ...REVIEW_POLICY, budgets: { ...REVIEW_POLICY.budgets, attempts: 0, fetches: 0, deadlineMin: 0 } } });
+    const reopened = await openHomeDatabase(home);
+    insertPosting(reopened.db, { id: 'p-u5', url: urlOf('p-u5'), title: snapshotTitle(SNAPSHOTS.eligible) }); insertReview(reopened.db, { postingId: 'p-u5', stage: 'fetch' });
+    reopened.db.close();
+    pages[urlOf('p-u5')] = page(urlOf('p-u5'), SNAPSHOTS.eligible);
+    const zero = await cli(['--budget', '0', '--max-fetches', '0', '--deadline-min', '0']);
+    assert.deepEqual([zero.code, zero.receipt.status, zero.receipt.counts?.judged], [0, 'ok', 1], `0 means unbounded: ${zero.err}`);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});

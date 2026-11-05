@@ -28,6 +28,7 @@ import { loadScanProfile } from '../scan/profile-input.mjs';
 import { profileOption, scanPolicy } from './scan.mjs';
 
 const usage = ['Usage: career-journal review run|redecide|reclassify|release-holds|rejudge|settle-backlog|hold|bootstrap|list|report|receipt|attach|add|annotate|unhide|resolve|ledger|audit|daily-finalize|eval',
+  '  review run [--budget <n>] [--max-fetches <n>] [--deadline-min <m>] [--deadline-at <time>] [--concurrency <n>]   limits optional; omitted or 0 = unbounded',
   '  review rejudge (--code <a,b> [--company <name>] [--since <date>] | --leads | --posting <id,...>) [--apply]   dry run unless --apply',
   '  review settle-backlog [--apply] [--profile <path>]   dry run unless --apply',
   '  review hold --posting <id> --code <code> --reason <text>',
@@ -53,6 +54,14 @@ function numberOption(value, name, { zero = false, integer = true } = {}) {
   if (value === undefined || value === true || Array.isArray(value) || !Number.isFinite(result) || (integer && !Number.isInteger(result)) || result < (zero ? 0 : Number.EPSILON)) throw new Error(`${name} requires a ${zero ? 'nonnegative' : 'positive'} ${integer ? 'integer' : 'number'}`);
   return result;
 }
+// Goal 5: a normal review run has no quantity or time caps. The attempt, fetch and stage-deadline limits are
+// optional: omitted (flag and review-policy budgets) or 0 means unbounded, so `review run` finishes all due work.
+// An explicit positive value is kept. Per-call adapter timeouts still guard a single hung call.
+function limitOption(value, name, { integer = true } = {}) {
+  if (value === undefined || value === null) return Infinity;
+  const result = numberOption(value, name, { zero: true, integer });
+  return result === 0 ? Infinity : result;
+}
 const isBusy = (db, now) => db.prepare("SELECT heartbeat_at FROM runs WHERE kind='review' AND status='running'").all().some((row) => Date.parse(now) - Date.parse(row.heartbeat_at) <= 600000);
 
 export function reviewSizeResolver(context, inputs, runtime = {}) {
@@ -66,18 +75,17 @@ export async function reviewWithContext(context, runtime = {}, options = {}) {
   const runId = options['run-id'] ?? `review-${randomUUID()}`;
   if (isBusy(context.db, now)) return { schema: 1, kind: 'review', run_id: runId, status: 'busy', run_date: localDate(now, context.config.timezone), finished: null };
   const inputs = await loadReviewInputs(context.root);
-  const budgets = inputs.policy.budgets;
-  if (!budgets) throw new Error('Review policy requires budgets');
+  const budgets = inputs.policy.budgets ?? {};
   const judges = runtime.review?.judges ?? createJudgeAdapters(inputs.policy);
   const secondOpinion = runtime.review?.secondOpinion ?? createSecondOpinion(inputs.policy);
   const jev = runtime.review?.jev ?? createJevSplit(inputs.policy);
   const fetcher = runtime.review?.fetcher ?? politeFetcher(inputs.policy.fetcher?.argv
     ? commandFetcher(inputs.policy.fetcher) : builtinFetcher({ fetchImpl: runtime.fetch ?? globalThis.fetch, timeoutMs: inputs.policy.fetcher?.timeoutMs ?? 30000 }));
   const receipt = await runReview({ db: context.db, runId, parentRunId: options['parent-run-id'], owner: `review-${process.pid}`,
-    now, budget: numberOption(options.budget ?? budgets.attempts, '--budget', { zero: true }),
-    maxFetches: numberOption(options['max-fetches'] ?? budgets.fetches, '--max-fetches', { zero: true }),
-    concurrency: numberOption(options.concurrency ?? budgets.concurrency, '--concurrency'),
-    deadlineMs: numberOption(options['deadline-min'] ?? budgets.deadlineMin, '--deadline-min', { integer: false }) * 60000,
+    now, budget: limitOption(options.budget ?? budgets.attempts, '--budget'),
+    maxFetches: limitOption(options['max-fetches'] ?? budgets.fetches, '--max-fetches'),
+    concurrency: numberOption(options.concurrency ?? budgets.concurrency ?? 1, '--concurrency'),
+    deadlineMs: limitOption(options['deadline-min'] ?? budgets.deadlineMin, '--deadline-min', { integer: false }) * 60000,
     deadlineAt: options['deadline-at'], fetcher, judges, secondOpinion, jev, attemptDir: path.join(context.root, '.career-journal', 'attempts'),
     inputs: () => loadReviewInputs(context.root), hooks: runtime.review?.hooks ?? {},
     // Company size is decided once per company before the judge loop (hook in worker.mjs): one Jev question,
