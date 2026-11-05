@@ -12,6 +12,8 @@ import { record, PROFILE, SCREENING_POLICY, SNAPSHOTS, JUDGMENTS, page, snapshot
 import { memoryIO } from '../../test-utils/helpers.mjs';
 import { runCli } from '../../src/cli/main.mjs';
 import { createRuntime } from '../../src/runtime/create-runtime.mjs';
+import { recordEvent } from '../../src/domain/events.mjs';
+import * as membership from '../../src/funnel/membership.mjs';
 
 const classify = () => load('DNS', './src/funnel/classify.mjs', ['classifyRole']);
 const ingest = () => load('DNS', './src/funnel/ingest.mjs', ['ingestBatch']);
@@ -45,8 +47,21 @@ function settledDrop(scan, db, n, rec, code, options = {}) {
   const id = postingOf(db, n);
   db.prepare(`UPDATE reviews SET state = 'done', decision = 'dropped', code = ?, lane = ?, next_due = NULL WHERE posting_id = ?`)
     .run(code, ['no_student_signal', 'out_of_direction'].includes(code) ? code : 'new', id);
+  // A real settlement stores the evidence it was decided on (settledEvidenceHash); a row settled before that has none.
+  if (!options.legacy) membership.storeSettledEvidence?.(db, id, membership.postingEvidenceHash(db, id));
   return id;
 }
+// An application the review withdrew itself (a review-worker event), as delivery does when a posting goes unavailable.
+function reviewWithdrawn(db, postingId, { url, skipReason = 'unavailable', now = T0 } = {}) {
+  const app = seedApplication(db, { company: 'Example Corp', role: 'Data Science Intern', jobUrl: url });
+  recordEvent(db, { id: `withdrawn-${postingId}`, applicationId: app.id, type: 'review_withdrawn', observedAt: now, recordedAt: now, title: 'review_withdrawn',
+    note: skipReason, source: { actor: 'review-worker', postingId }, statusAfter: 'withdrawn' });
+  db.prepare("UPDATE applications SET skip_reason = ?, skip_owner = 'review' WHERE id = ?").run(skipReason, app.id);
+  db.prepare('UPDATE postings SET application_id = ? WHERE id = ?').run(app.id, postingId);
+  return app.id;
+}
+const statusOf = (db, appId) => db.prepare('SELECT status FROM applications WHERE id = ?').get(appId).status;
+const retainLog = (db) => db.prepare("DELETE FROM review_log WHERE kind IN ('outcome','error','replan')").run(); // the prune predicate, cutoff passed
 const reclassify = (reclassifyReviews, db, options = {}) => reclassifyReviews(db, { policy: SCREENING_POLICY, profile: PROFILE, now: at(1), ...options });
 const eligibleJudges = () => ({
   primary: fakeJudge({ tier: 'primary', answers: () => ({ output: JUDGMENTS.eligible }) }),
@@ -211,9 +226,9 @@ test('[A] a re-allowed company does not reopen a settled drop at its next sighti
   assert.deepEqual(outcome(db, id), ['done', 'dropped', 'company_excluded']);
 });
 
-// Review finding 1 follow-up: an evidence reopen happens at most once per distinct evidence hash, and never for a
-// user-owned row.
-test('[A] an evidence reopen happens once per evidence hash and never for a user-owned row', async () => {
+// Changed on purpose 2026-11-05 (review 2, findings 2 and 3): an evidence reopen happens once per evidence state. The
+// row keeps the evidence it settled on; seeing it again, under any rule, does nothing. Never for a user-owned row.
+test('[A] an evidence reopen happens once per evidence state and never for a user-owned row', async () => {
   const { ingestBatch } = await ingest();
   const db = freshDb();
   const scan = scanner(ingestBatch, db);
@@ -221,11 +236,11 @@ test('[A] an evidence reopen happens once per evidence hash and never for a user
   const id = settledDrop(scan, db, 1, roleRecord(1, NO_SIGNAL), 'no_student_signal');
   scan([gained], { now: at(1) });
   assert.deepEqual(outcome(db, id), ['due', null, null], 'fixture: the first evidence change reopens it');
-  // The system settles it again (as a judge would); the source flips back and forth between the same two texts.
-  db.prepare("UPDATE reviews SET state='done', decision='dropped', code='no_student_signal', next_due=NULL WHERE posting_id=?").run(id);
+  // The source flips back: the open row settles again, on that evidence.
   scan([roleRecord(1, NO_SIGNAL)], { now: at(2) });
-  scan([gained], { now: at(3) });
-  assert.deepEqual(outcome(db, id), DROPPED, 'the same evidence hash does not reopen it a second time');
+  assert.deepEqual(outcome(db, id), DROPPED);
+  scan([roleRecord(1, NO_SIGNAL)], { now: at(3), profile: FULL_TIME, policy: QUEUED_POLICY });
+  assert.deepEqual(outcome(db, id), DROPPED, 'the evidence it settled on does not reopen it, even under a relaxed rule');
 
   const user = settledDrop(scan, db, 2, roleRecord(2, NO_SIGNAL), 'no_student_signal');
   const app = seedApplication(db, { company: 'Example Corp', role: 'Senior Data Engineer', jobUrl: urlOf(2), status: 'withdrawn', skipOwner: 'user', skipReason: 'not interested' });
@@ -710,4 +725,96 @@ test('[A] review reclassify runs from the CLI with the scan policy and profile',
     assert.notEqual(await runCli(['review', 'reclassify', '--home', home, '--batch', '0'], invalid, createRuntime({ root: process.cwd() })), 0);
     assert.match(invalid.stderr, /--batch requires a positive integer/);
   } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+// ===================================================================== review 2 (2026-11-05), findings 1-3
+
+// Finding 1: evidence never reopens a posting whose application is withdrawn, whoever withdrew it and why.
+test('[A] new evidence does not reopen a drop whose application the review withdrew, and the run keeps it withdrawn', async () => {
+  const { ingestBatch } = await ingest();
+  const db = freshDb();
+  const scan = scanner(ingestBatch, db);
+  const known = { locations: 'complete', arrangement: 'known', description: 'full', employment_type: 'absent' };
+  const id = settledDrop(scan, db, 1, roleRecord(1, { locations: ['Berlin, Germany'], remote: false, completeness: known }), 'outside_countries');
+  const appId = reviewWithdrawn(db, id, { url: urlOf(1) });
+  scan([roleRecord(1, { locations: ['Berlin, Germany', 'Chicago, IL'], remote: false, completeness: known })], { now: at(1) });
+  assert.deepEqual(outcome(db, id), ['done', 'dropped', 'outside_countries'], 'a withdrawn application blocks the evidence reopen');
+  assert.ok(!JSON.parse(reviewOf(db, id).flags_json).includes('authorization:evidence_changed'));
+  await review(db, { now: at(1), runId: 'review-f1', pages: { [urlOf(1)]: page(urlOf(1), SNAPSHOTS.eligible) } });
+  assert.equal(statusOf(db, appId), 'withdrawn');
+});
+
+// Finding 1: delivery keeps an evidence_changed authorization; it never infers relist in its place, so a withdrawn
+// application is not restored, and the kept withdrawal is logged with evidence_changed.
+test('[B] delivery of an evidence_changed reopen keeps a withdrawn application withdrawn and logs that authorization', async () => {
+  const db = freshDb();
+  const url = urlOf(7);
+  insertPosting(db, { id: 'p-7', url, title: snapshotTitle(SNAPSHOTS.eligible) });
+  insertReview(db, { postingId: 'p-7', stage: 'fetch', firstSeen: T0, nextDue: T0, flags: ['authorization:evidence_changed'] });
+  const appId = reviewWithdrawn(db, 'p-7', { url });
+  await review(db, { now: at(1), runId: 'review-f1b', pages: { [url]: page(url, SNAPSHOTS.eligible) } });
+  assert.equal(statusOf(db, appId), 'withdrawn', 'not restored as a relist');
+  const kept = db.prepare("SELECT payload_json FROM review_log WHERE posting_id = 'p-7' AND kind = 'delivery'").all().map((row) => JSON.parse(row.payload_json))
+    .find((payload) => payload.action === 'withdrawal_kept');
+  assert.equal(kept?.authorization, 'evidence_changed');
+});
+
+// Finding 2: A, B, A. The drop settles on the latest sighting A; a rule edit while A is seen again changes no evidence.
+test('[A] after A, B, A a rule edit with unchanged A does not reopen the drop reclassify settled', async () => {
+  const { ingestBatch } = await ingest();
+  const { reclassifyReviews } = await reclassifyModule();
+  const db = freshDb();
+  const scan = scanner(ingestBatch, db);
+  const a = roleRecord(1, NO_SIGNAL);
+  const b = roleRecord(1, { ...NO_SIGNAL, description: LONG('Maintain dashboards for the platform.') });
+  queued(scan, [a]);
+  const id = postingOf(db, 1);
+  queued(scan, [b], { now: at(1) });
+  queued(scan, [a], { now: at(2) });
+  reclassify(reclassifyReviews, db, { now: at(3) });
+  assert.deepEqual(outcome(db, id), DROPPED, 'fixture: reclassify settles it on A');
+  queued(scan, [a], { now: at(4) });
+  assert.deepEqual(outcome(db, id), DROPPED, 'the configuration changed, the evidence did not');
+});
+
+// Finding 3: the evidence a drop settled on is stored on the review row, so log retention cannot make it new again.
+test('[A] the settled evidence survives review_log retention: the same evidence never reopens the drop again', async () => {
+  const { ingestBatch } = await ingest();
+  const { reclassifyReviews } = await reclassifyModule();
+  const db = freshDb();
+  const scan = scanner(ingestBatch, db);
+  const x = roleRecord(1, { ...NO_SIGNAL, description: LONG('Maintain dashboards for the platform.') });
+  const y = roleRecord(1, { ...NO_SIGNAL, description: LONG('Run reports for the finance team.') });
+  const id = settledDrop(scan, db, 1, roleRecord(1, NO_SIGNAL), 'no_student_signal');
+  queued(scan, [x], { now: at(1) });
+  assert.deepEqual(outcome(db, id), ['due', null, null], 'fixture: evidence X reopens it');
+  queued(scan, [y], { now: at(2) });
+  queued(scan, [x], { now: at(3) });
+  reclassify(reclassifyReviews, db, { now: at(4) });
+  assert.deepEqual(outcome(db, id), DROPPED, 'fixture: it settles again, on X');
+  queued(scan, [x], { now: at(5) });
+  assert.deepEqual(outcome(db, id), DROPPED);
+  retainLog(db);
+  queued(scan, [x], { now: at(6) });
+  assert.deepEqual(outcome(db, id), DROPPED, 'X is still the settled evidence after retention');
+  assert.ok(membership.settledEvidenceHash?.(reviewOf(db, id)), 'stored on the review row');
+});
+
+// Rows settled before settledEvidenceHash existed: the first sighting records a baseline and reopens nothing, so the
+// live database does not mass-reopen; a later change of evidence does reopen.
+test('[A] a drop settled before evidence hashes records its baseline on first sight and reopens only on a later change', async () => {
+  const { ingestBatch } = await ingest();
+  const db = freshDb();
+  const scan = scanner(ingestBatch, db);
+  const id = settledDrop(scan, db, 1, roleRecord(1, NO_SIGNAL), 'no_student_signal', { legacy: true });
+  assert.equal(membership.settledEvidenceHash?.(reviewOf(db, id)) ?? null, null, 'fixture: no stored hash');
+  const gained = roleRecord(1, { ...NO_SIGNAL, description: LONG('Build pipelines. This is a paid internship.') });
+  scan([gained], { now: at(1) });
+  assert.deepEqual(outcome(db, id), DROPPED, 'first sight: baseline only');
+  assert.ok(membership.settledEvidenceHash?.(reviewOf(db, id)), 'the baseline is stored');
+  scan([gained], { now: at(2) });
+  assert.deepEqual(outcome(db, id), DROPPED, 'the baseline evidence again: nothing');
+  scan([roleRecord(1, { ...NO_SIGNAL, description: LONG('Build pipelines. This is a summer internship.') })], { now: at(3) });
+  assert.deepEqual(outcome(db, id), ['due', null, null], 'new evidence after the baseline reopens it');
+  assert.ok(JSON.parse(reviewOf(db, id).flags_json).includes('authorization:evidence_changed'));
 });

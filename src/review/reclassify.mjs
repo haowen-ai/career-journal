@@ -1,6 +1,6 @@
 import { classifyRole } from '../funnel/classify.mjs';
-import { SIGNAL_DROP_CODES } from '../funnel/contract.mjs';
-import { currentRecordReader, latestSightings } from '../funnel/membership.mjs';
+import { EVIDENCE_DROP_CODES, SIGNAL_DROP_CODES } from '../funnel/contract.mjs';
+import { currentRecordReader, latestSightings, postingEvidenceHash, storeSettledEvidence } from '../funnel/membership.mjs';
 import { logReview, parseJson } from './deliver.mjs';
 import { atomic } from './lease.mjs';
 import { reviewOwnershipJoins, userDecisionSql } from './ownership.mjs';
@@ -77,6 +77,8 @@ export function reclassifyReviews(db, { policy, profile, now, dryRun = false, ba
           bump(report.skipped, 'changed'); continue;
         }
         settle.run(code, now, id);
+        // No sighting since the read: the evidence it was settled on is the latest one.
+        if (EVIDENCE_DROP_CODES.includes(code)) storeSettledEvidence(db, id, postingEvidenceHash(db, id, { latest, reader }));
         logReview(db, id, { now, stage: 'scan', payload: { action: 'reclassified', code, evidence } });
         bump(report.dropped, code);
       }

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 // Membership is durable even after individual sightings and source runs expire.
 export function preservePartitions(db) {
   db.exec(`INSERT INTO posting_partitions(posting_id,source,partition,last_seen)
@@ -41,8 +43,8 @@ export function currentRecordReader(db) {
   const membersOf = db.prepare(`WITH RECURSIVE members(id) AS (SELECT ? UNION SELECT p.id FROM postings p JOIN members m ON p.merged_into=m.id)
     SELECT id FROM members ORDER BY id`);
   const partitionsOf = db.prepare('SELECT source,partition FROM posting_partitions WHERE posting_id=?');
-  const observation = db.prepare('SELECT id,fields_json,completeness_json,listed FROM observations WHERE id=?');
-  const bySource = db.prepare('SELECT id,fields_json,completeness_json,listed FROM observations WHERE posting_id=? AND source=?');
+  const observation = db.prepare('SELECT id,fields_json,completeness_json,listed,content_hash FROM observations WHERE id=?');
+  const bySource = db.prepare('SELECT id,fields_json,completeness_json,listed,content_hash FROM observations WHERE posting_id=? AND source=?');
   return {
     members: (postingId) => membersOf.all(postingId).map((row) => row.id),
     // skip: the [postingId, source, partition] being ingested now, which is read from the record itself.
@@ -66,4 +68,38 @@ export function currentRecordReader(db) {
     hasOther: (members, [postingId, source, partition]) => members.some((member) => partitionsOf.all(member)
       .some((row) => member !== postingId || row.source !== source || row.partition !== partition)),
   };
+}
+
+// The evidence a system drop was decided on: the content of every current source record of the posting (merge members
+// included, latest actual sighting per source and partition) and their location list. Rules and config are not part of
+// it, so a rule edit never changes it. Null when the posting has no current record.
+export function postingEvidenceHash(db, postingId, { latest, reader = currentRecordReader(db) } = {}) {
+  latest ??= latestSightings(db).latest;
+  const records = reader.records(reader.members(postingId), latest);
+  if (!records.length) return null;
+  const contents = new Set(); const locations = new Set();
+  for (const row of records) {
+    contents.add(row.content_hash);
+    let fields = {};
+    try { fields = JSON.parse(row.fields_json); } catch { /* unreadable fields carry no locations */ }
+    for (const location of Array.isArray(fields?.locations) ? fields.locations : []) {
+      locations.add(typeof location === 'string' ? location.trim() : JSON.stringify(location));
+    }
+  }
+  return createHash('sha256').update(JSON.stringify({ contents: [...contents].sort(), locations: [...locations].sort() })).digest('hex');
+}
+
+// Decide once per evidence state: a settled system drop keeps the evidence hash it was decided on in
+// reviews.dep_hashes_json.settledEvidenceHash (durable; review_log is pruned). A later settlement overwrites it.
+export const SETTLED_EVIDENCE_KEY = 'settledEvidenceHash';
+export function settledEvidenceHash(review) {
+  try {
+    const value = JSON.parse(review?.dep_hashes_json ?? '{}');
+    return value && typeof value === 'object' && !Array.isArray(value) && typeof value[SETTLED_EVIDENCE_KEY] === 'string' ? value[SETTLED_EVIDENCE_KEY] : null;
+  } catch { return null; }
+}
+export function storeSettledEvidence(db, postingId, hash) {
+  if (!hash) return;
+  db.prepare(`UPDATE reviews SET dep_hashes_json=json_set(CASE WHEN json_valid(dep_hashes_json) AND json_type(dep_hashes_json)='object'
+    THEN dep_hashes_json ELSE '{}' END,'$.${SETTLED_EVIDENCE_KEY}',?) WHERE posting_id=?`).run(hash, postingId);
 }

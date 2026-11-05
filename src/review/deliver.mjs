@@ -72,13 +72,17 @@ export const deliveryPolicy = (inputs) => withOverrides({ ...inputs.screeningPol
 // the review being delivered: `review rejudge --apply` writes evidence_json.reopenAuthorization.authorization
 // ('rejudge'), and the scan marks a relisted posting with the flag 'authorization:relist'. Both are single-use:
 // deliver() drops them from what it writes. Anything else is no authorization.
+// The scan marks a system drop reopened by new posting evidence with 'authorization:evidence_changed'. It reopens the
+// review only: delivery keeps it (never infers relist in its place) and it restores no withdrawn application.
 export const RELIST_FLAG = 'authorization:relist';
+export const EVIDENCE_FLAG = 'authorization:evidence_changed';
 export function storedReopenAuthorization(db, review) { // eslint-disable-line no-unused-vars
   if (!review) return null;
   const stored = parseJson(review.evidence_json)?.reopenAuthorization?.authorization;
   if (REOPEN_AUTHORIZATIONS.includes(stored)) return stored;
   const flags = parseJson(review.flags_json, []);
-  return Array.isArray(flags) && flags.includes(RELIST_FLAG) ? 'relist' : null;
+  if (!Array.isArray(flags)) return null;
+  return flags.includes(EVIDENCE_FLAG) ? 'evidence_changed' : flags.includes(RELIST_FLAG) ? 'relist' : null;
 }
 export const RELIST_REASONS = Object.freeze(['delisted', 'closed_verified', 'unavailable']);
 // A cap release restores only the cap's own withdrawal: the skip reason is a limit code and so is the note of the
@@ -199,6 +203,7 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     }
     // P4: a withdrawn application becomes a lead again only with an authorization (rejudge, cap_release, relist).
     // A withdrawal made only because the posting closed is relisted when the posting is listed and open again.
+    // Never in place of a stored authorization: evidence_changed stays evidence_changed and restores nothing.
     if (!authorization && app?.status === 'withdrawn' && RELIST_REASONS.includes(app.skip_reason) && posting.listed && posting.availability === 'open') authorization = 'relist';
     if (!protectedApp && app?.status === 'withdrawn' && value.decision === 'eligible' && !restoreAuthorized(app, authorization, lastStatus)) {
       const keptDecision = review.decision && review.decision !== 'eligible' ? review.decision : 'not_eligible';
@@ -309,7 +314,7 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     if (value.jev) evidence.jev = value.jev;
     const userHold = held && !['unavailable','quota_full','quota_reconciliation'].includes(value.code);
     db.prepare('UPDATE reviews SET flags_json=? WHERE posting_id=?')
-      .run(JSON.stringify([...new Set([...parseJson(review.flags_json, []).filter((flag) => !['term_inferred', 'model_decided', 'disputed', 'jev_decided', 'hold_kept', RELIST_FLAG].includes(flag)), ...(value.flags ?? [])])]), postingId);
+      .run(JSON.stringify([...new Set([...parseJson(review.flags_json, []).filter((flag) => !['term_inferred', 'model_decided', 'disputed', 'jev_decided', 'hold_kept', RELIST_FLAG, EVIDENCE_FLAG].includes(flag)), ...(value.flags ?? [])])]), postingId);
     db.prepare(`UPDATE reviews SET state=?,decision=?,code=?,evidence_json=?,deadline_json=?,hold_owner=?,hold_since=?,next_due=?,stage='deliver',
       lease_owner=NULL,lease_until=NULL,updated_at=? WHERE posting_id=? AND lease_owner=? AND lease_generation=?`)
       .run(held ? 'held' : 'done', value.decision, protectedApp ? 'superseded_by_user' : value.code ?? null, JSON.stringify(evidence), JSON.stringify(value.deadline ?? {}),
