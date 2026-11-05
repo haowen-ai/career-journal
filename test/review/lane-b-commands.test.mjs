@@ -91,8 +91,12 @@ test('[B8] settle-backlog restores provable settlements, settles exploration row
   settled(db, 'p-lead', { state: 'due', decision: 'eligible', code: null }); withApp(db, 'p-lead', 'lead');
   settled(db, 'p-auth', { state: 'due', evidence: { reopenAuthorization: { authorization: 'rejudge', fresh: true } } });
   // An exploration-lane row: a posting the scan classifies as a drop, re-queued with its sampled judgment.
-  ingestBatch(db, { runId: 'scan-1', source: 'greenhouse', partition: 'greenhouse:examplecorp', now: T0, policy: SCREENING_POLICY, profile: PROFILE,
-    records: [record({ sourceId: '9100001', url: urlOf('9100001'), title: 'Senior Staff Accountant', description: 'Ten years of accounting experience required. '.repeat(20) })] });
+  // Changed at integration (redesign A1): an unknown certain drop is counted, not stored, so the posting is first
+  // stored under a student title and its latest sighting then classifies as the drop.
+  const scan = (title, runId, now) => ingestBatch(db, { runId, source: 'greenhouse', partition: 'greenhouse:examplecorp', now, policy: SCREENING_POLICY, profile: PROFILE,
+    records: [record({ sourceId: '9100001', url: urlOf('9100001'), title, description: 'Ten years of accounting experience required. '.repeat(20) })] });
+  scan('Accounting Intern', 'scan-0', T0);
+  scan('Senior Staff Accountant', 'scan-1', at(0.5));
   const explore = db.prepare("SELECT posting_id FROM posting_aliases WHERE alias='source:greenhouse:9100001'").get().posting_id;
   db.prepare("UPDATE reviews SET state='due',decision='not_eligible',code='no_student_signal',lane='no_student_signal',evidence_json='{}' WHERE posting_id=?").run(explore);
   const hashes = reviewOf(db, 'p-prev').dep_hashes_json;

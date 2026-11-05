@@ -34,7 +34,19 @@ function scanner(ingestBatch, db) {
     ingestBatch(db, { runId: `scan-${run += 1}`, source, partition, records, now, policy, profile });
 }
 // A row queued before the change: a non-student profile leaves no-signal records due, as the old classifier did.
-const queued = (scan, records, options = {}) => scan(records, { profile: FULL_TIME, ...options });
+// Certain drops of unknown records are counted only since the 2026-11-05 redesign, so a queued fixture lifts the
+// company exclusion and the country filter too: it stands for a row stored before either rule existed.
+const QUEUED_POLICY = Object.freeze({ ...SCREENING_POLICY, userExcludedCompanies: [] });
+const OPEN_PROFILE = Object.freeze({ search: { jobType: 'full-time', countries: [] } });
+const queued = (scan, records, options = {}) => scan(records, { profile: FULL_TIME, policy: QUEUED_POLICY, ...options });
+// A drop settled before count-only ingest: its posting and every alias exist and its review is done.
+function settledDrop(scan, db, n, rec, code, options = {}) {
+  queued(scan, [rec], { profile: OPEN_PROFILE, ...options });
+  const id = postingOf(db, n);
+  db.prepare(`UPDATE reviews SET state = 'done', decision = 'dropped', code = ?, lane = ?, next_due = NULL WHERE posting_id = ?`)
+    .run(code, ['no_student_signal', 'out_of_direction'].includes(code) ? code : 'new', id);
+  return id;
+}
 const reclassify = (reclassifyReviews, db, options = {}) => reclassifyReviews(db, { policy: SCREENING_POLICY, profile: PROFILE, now: at(1), ...options });
 const eligibleJudges = () => ({
   primary: fakeJudge({ tier: 'primary', answers: () => ({ output: JUDGMENTS.eligible }) }),
@@ -89,7 +101,8 @@ test('[A] the new drop codes are part of the contract', async () => {
 
 // ===================================================================== ingest
 
-test('[A] a no-signal record is dropped at ingest: the posting stays, nothing is due, and a repeat sighting changes nothing', async () => {
+// Changed on purpose 2026-11-05 (redesign A1): an unknown no-signal record is counted, not stored.
+test('[A] a no-signal record is dropped at ingest: an unknown one is only counted, a settled one is never touched again', async () => {
   const { ingestBatch } = await ingest();
   const db = freshDb();
   const scan = scanner(ingestBatch, db);
@@ -97,11 +110,11 @@ test('[A] a no-signal record is dropped at ingest: the posting stays, nothing is
   assert.equal(counts.dropped.no_student_signal, 1);
   assert.equal(counts.review, 1);
   assert.equal(counts.observed, 2);
-  const id = postingOf(db, 1);
-  assert.deepEqual([...outcome(db, id), reviewOf(db, id).lane, reviewOf(db, id).next_due], [...DROPPED, 'no_student_signal', null]);
-  assert.ok(JSON.parse(reviewOf(db, id).flags_json).includes('no_student_signal'));
+  assert.equal(counts.countedOnly, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM postings').get().n, 1, 'only the student role is stored');
+  const id = settledDrop(scan, db, 3, roleRecord(3, NO_SIGNAL), 'no_student_signal');
   const updated = reviewOf(db, id).updated_at;
-  scan([roleRecord(1, NO_SIGNAL)], { now: at(1) });
+  scan([roleRecord(3, NO_SIGNAL)], { now: at(1) });
   assert.equal(reviewOf(db, id).updated_at, updated, 'an identical sighting does not touch it');
 });
 
@@ -109,8 +122,7 @@ test('[A] a dropped row reopens as due when its content gains a student signal',
   const { ingestBatch } = await ingest();
   const db = freshDb();
   const scan = scanner(ingestBatch, db);
-  scan([roleRecord(1, NO_SIGNAL)]);
-  const id = postingOf(db, 1);
+  const id = settledDrop(scan, db, 1, roleRecord(1, NO_SIGNAL), 'no_student_signal');
   scan([roleRecord(1, { ...NO_SIGNAL, description: LONG('Build pipelines. This is a paid internship.') })], { now: at(1) });
   assert.deepEqual([...outcome(db, id), reviewOf(db, id).lane], ['due', null, null, 'new']);
   assert.equal(reviewOf(db, id).next_due, at(1));
@@ -121,8 +133,7 @@ test('[A] a signal in another source reopens a drop, and one source\'s bare list
   const bare = (id) => roleRecord(id, { source: 'careerops', sourceId: `co-${id}`, ...NO_SIGNAL, description: '', completeness: { locations: 'partial', arrangement: 'unknown', description: 'none', employment_type: 'absent' } });
   const db = freshDb();
   const scan = scanner(ingestBatch, db);
-  scan([bare(1)], { source: 'careerops', partition: 'all' });
-  const dropped = postingOf(db, 1);
+  const dropped = settledDrop(scan, db, 1, bare(1), 'no_student_signal', { source: 'careerops', partition: 'all' });
   assert.deepEqual(outcome(db, dropped), DROPPED);
   scan([roleRecord(1, { title: 'Senior Data Engineer Intern' })], { now: at(1) });
   assert.deepEqual([...outcome(db, dropped), reviewOf(db, dropped).lane], ['due', null, null, 'new'], 'an unchanged-source rule must not hide the new source');
@@ -157,8 +168,7 @@ test('[A] a partial location list does not reopen outside_countries; a complete 
   const scan = scanner(ingestBatch, db);
   const known = { locations: 'complete', arrangement: 'known', description: 'full', employment_type: 'absent' };
   const overseas = roleRecord(1, { locations: ['Berlin, Germany'], remote: false, completeness: known });
-  scan([overseas]);
-  const id = postingOf(db, 1);
+  const id = settledDrop(scan, db, 1, overseas, 'outside_countries');
   assert.deepEqual(outcome(db, id), ['done', 'dropped', 'outside_countries']);
   scan([roleRecord(1, { source: 'careerops', sourceId: 'co-1', locations: [], completeness: { ...known, locations: 'partial', arrangement: 'unknown' } })], { source: 'careerops', partition: 'all', now: at(1) });
   assert.deepEqual(outcome(db, id), ['done', 'dropped', 'outside_countries']);
@@ -171,8 +181,7 @@ test('[A] a re-allowed company reopens at its next sighting without a content ch
   const db = freshDb();
   const scan = scanner(ingestBatch, db);
   const excluded = roleRecord(1, { company: 'Excluded Example Co' });
-  scan([excluded]);
-  const id = postingOf(db, 1);
+  const id = settledDrop(scan, db, 1, excluded, 'company_excluded');
   assert.deepEqual(outcome(db, id), ['done', 'dropped', 'company_excluded']);
   scan([excluded], { now: at(1), policy: { ...SCREENING_POLICY, reallowedCompanies: ['Excluded Example Co'] } });
   assert.deepEqual(outcome(db, id), ['due', null, null]);
@@ -182,21 +191,23 @@ test('[A] renewal never overwrites a user decision', async () => {
   const { ingestBatch } = await ingest();
   const db = freshDb();
   const scan = scanner(ingestBatch, db);
-  scan([1, 2, 3, 4].map((n) => roleRecord(n)));
-  const [logged, declined, legacy, control] = [1, 2, 3, 4].map((n) => postingOf(db, n));
+  scan([1, 2, 3, 4, 5].map((n) => roleRecord(n)));
+  const [logged, declined, legacy, settled, control] = [1, 2, 3, 4, 5].map((n) => postingOf(db, n));
   const settle = db.prepare(`UPDATE reviews SET state = 'done', decision = ?, code = ?, next_due = NULL WHERE posting_id = ?`);
-  for (const id of [logged, control]) settle.run('not_eligible', 'outside_area', id);
+  for (const id of [logged, settled]) settle.run('not_eligible', 'outside_area', id);
   settle.run('not_eligible', 'user_declined', declined);
   settle.run('eligible', null, legacy);
   db.prepare(`INSERT INTO review_log (posting_id, at, stage, kind, payload_json) VALUES (?, ?, 'deliver', 'user', '{}')`).run(logged, T0);
   const app = seedApplication(db, { company: 'Example Corp', role: 'Data Science Intern', jobUrl: urlOf(3), skipOwner: 'legacy' });
   db.prepare('UPDATE postings SET application_id = ? WHERE id = ?').run(app.id, legacy);
 
-  scan([1, 2, 3, 4].map((n) => roleRecord(n, { description: LONG('Rewritten summer 2027 internship.') })), { now: at(1) });
+  scan([1, 2, 3, 4, 5].map((n) => roleRecord(n, { description: LONG('Rewritten summer 2027 internship.') })), { now: at(1) });
   assert.deepEqual(outcome(db, logged), ['done', 'not_eligible', 'outside_area'], 'review_log kind user');
   assert.deepEqual(outcome(db, declined), ['done', 'not_eligible', 'user_declined']);
   assert.deepEqual(outcome(db, legacy), ['done', 'eligible', null], 'legacy skip owner');
-  assert.deepEqual(outcome(db, control), ['due', null, null], 'control: an automated verdict renews');
+  // Changed on purpose 2026-11-05 (redesign A2, decide once): a settled automated verdict no longer renews on a content change.
+  assert.deepEqual(outcome(db, settled), ['done', 'not_eligible', 'outside_area'], 'decide once: a settled automated verdict stays');
+  assert.deepEqual([...outcome(db, control), reviewOf(db, control).next_due], ['due', null, null, at(1)], 'control: open work renews');
 });
 
 test('[A] a delisted drop waits while unlisted and reopens on relisting', async () => {
@@ -265,8 +276,7 @@ test('[B] a nightly run neither fetches nor judges a drop, and its backlog and r
   const { reviewReport } = await load('DNS', './src/review/report.mjs', ['reviewReport']);
   const db = freshDb();
   const scan = scanner(ingestBatch, db);
-  scan([roleRecord(1, NO_SIGNAL)]);
-  const id = postingOf(db, 1);
+  const id = settledDrop(scan, db, 1, roleRecord(1, NO_SIGNAL), 'no_student_signal');
   const judges = eligibleJudges();
   const fetcher = fakeFetcher({ [urlOf(1)]: page(urlOf(1), SNAPSHOTS.eligible) });
   const receipt = await review(db, { now: at(30), runId: 'review-30', judges, fetcher });
@@ -364,7 +374,7 @@ test('[B] reclassify lets the most complete source decide but never drops a sign
   const scan = scanner(ingestBatch, db);
   const bare = (id, overrides) => roleRecord(id, { source: 'careerops', sourceId: `co-${id}`, description: '', completeness: { locations: 'partial', arrangement: 'unknown', description: 'none', employment_type: 'absent' }, ...overrides });
   const overseas = { locations: ['Berlin, Germany'], remote: false, completeness: { locations: 'complete', arrangement: 'known', description: 'full', employment_type: 'absent' } };
-  queued(scan, [roleRecord(1, NO_SIGNAL), roleRecord(2, { ...overseas, title: 'Data Science Intern' })]);
+  queued(scan, [roleRecord(1, NO_SIGNAL), roleRecord(2, { ...overseas, title: 'Data Science Intern' })], { profile: OPEN_PROFILE });
   queued(scan, [bare(1, { title: 'Senior Data Engineer Intern' }), bare(2, { title: 'Data Science Intern' })], { source: 'careerops', partition: 'all', now: at(1) });
   const [signal, outside] = [postingOf(db, 1), postingOf(db, 2)];
   db.prepare(`UPDATE reviews SET state = 'due', decision = NULL, code = NULL, next_due = ? WHERE posting_id IN (?, ?)`).run(T0, signal, outside);
@@ -630,7 +640,7 @@ test('[A] review reclassify runs from the CLI with the scan policy and profile',
     await writeFile(path.join(home, '.career-journal', 'profile', 'profile.json'), JSON.stringify({ schemaVersion: 1, ...PROFILE, sources: { atsBoards: [] } }));
     const context = await openHomeDatabase(home);
     const scan = scanner(ingestBatch, context.db);
-    queued(scan, [roleRecord(1, NO_SIGNAL), roleRecord(2), roleRecord(3, { company: 'Excluded Example Co' })]);
+    queued(scan, [roleRecord(1, NO_SIGNAL), roleRecord(2), roleRecord(3, { company: 'Excluded Example Co' })], { policy: SCREENING_POLICY });
     queued(scan, [roleRecord(4, { source: 'simplify', title: 'Computer Vision Intern', categories: ['Hardware'] })], { source: 'simplify', partition: 'simplify:1' });
     context.db.close();
     await writeFile(path.join(home, '.career-journal', 'profile', 'role-direction.json'), JSON.stringify({ rule: 'synthetic', allow: ['computer vision'] }));

@@ -143,9 +143,13 @@ export async function prune(db, home, { now, policy, dryRun = true, protectRunId
   const attemptDir = path.join(directory, 'attempts');
   const attempts = db.prepare('SELECT * FROM attempts').all();
   const pendingAttemptIds = new Set();
+  // Recovery reads attempt files. Applied, it runs before the writer transaction: each recovered
+  // attempt commits on its own, so no other writer waits on file I/O. A dry run must write nothing,
+  // so it previews recovery inside the transaction it rolls back.
+  if (!dryRun) await recoverLost(db, { attemptDir, now, before: cutoff(1) });
   db.exec('SAVEPOINT retention_prune');
   try {
-    await recoverLost(db, { attemptDir, now, before: cutoff(1) });
+    if (dryRun) await recoverLost(db, { attemptDir, now, before: cutoff(1) });
     db.prepare(`UPDATE reviews SET state='due',lease_owner=NULL,lease_until=NULL,
       lease_generation=lease_generation+1,next_due=?,updated_at=?
       WHERE state='leased' AND lease_until<=?`).run(now, now, now);
@@ -163,10 +167,10 @@ export async function prune(db, home, { now, policy, dryRun = true, protectRunId
       db.prepare('INSERT INTO retention_pending_logs (id, attempt_id) VALUES (?, ?)').run(row.id, row.attempt_id);
       if (row.attempt_id) pendingAttemptIds.add(row.attempt_id);
     }
+    // Freed bytes are the deleted rows' own bytes, read once before the delete (not two whole-table sums).
     const erase = (category, table, where, ...params) => {
-      const before = tableBytes(db, table);
+      const bytes = tableBytes(db, table, where, ...params);
       const rows = db.prepare(`DELETE FROM ${table} WHERE ${where}`).run(...params).changes;
-      const bytes = before - tableBytes(db, table);
       freed += bytes;
       tally(category, { rows, bytes });
     };
@@ -200,11 +204,17 @@ export async function prune(db, home, { now, policy, dryRun = true, protectRunId
       OR EXISTS (SELECT 1 FROM reviews r, json_tree(r.evidence_json) j WHERE r.posting_id = snapshots.posting_id AND j.value = snapshots.content_hash)
       OR EXISTS (SELECT 1 FROM reviews r, json_tree(r.dep_hashes_json) j WHERE r.posting_id = snapshots.posting_id AND j.value = snapshots.content_hash)`;
     erase('snapshots', 'snapshots', `fetched_at < ? AND NOT (${current})`, cutoff(policy.snapshotsDays));
+    // The snapshot byte total is read once per run and kept current from each payload's own size:
+    // pruning replaces text, fields and sections with NULL, '{}' and '[]' and stamps text_pruned_at.
+    let snapshotBytes = tableBytes(db, 'snapshots');
+    const blob = (column) => `COALESCE(length(CAST(${column} AS BLOB)), 0)`;
     const prunePayload = (where, ...params) => {
-      const before = tableBytes(db, 'snapshots');
+      const saved = db.prepare(`SELECT COALESCE(SUM(${blob('text')} + ${blob('fields_json')} - 2 + ${blob('sections_json')} - 2 - length(CAST(? AS BLOB))), 0) saving
+        FROM snapshots WHERE text_pruned_at IS NULL AND (${where})`).get(now, ...params).saving;
       const rows = db.prepare(`UPDATE snapshots SET text = NULL, fields_json = '{}', sections_json = '[]', text_pruned_at = ?
         WHERE text_pruned_at IS NULL AND (${where})`).run(now, ...params).changes;
-      const bytes = Math.max(0, before - tableBytes(db, 'snapshots'));
+      snapshotBytes -= saved;
+      const bytes = Math.max(0, saved);
       freed += bytes;
       tally('snapshot_payloads', { rows, bytes });
     };
@@ -216,7 +226,7 @@ export async function prune(db, home, { now, policy, dryRun = true, protectRunId
         (a.status IN ('withdrawn','rejected','declined','accepted') AND a.updated_at < ?) OR
         (p.availability = 'closed_verified' AND p.updated_at < ?)))`, cutoff(policy.closedPayloadDays), cutoff(policy.closedPayloadDays), cutoff(policy.closedPayloadDays));
     for (const snapshot of db.prepare(`SELECT id FROM snapshots WHERE text_pruned_at IS NULL AND NOT (${current}) ORDER BY fetched_at, id`).all()) {
-      if (tableBytes(db, 'snapshots') <= policy.snapshotsMaxBytes) break;
+      if (snapshotBytes <= policy.snapshotsMaxBytes) break;
       prunePayload('id = ?', snapshot.id);
     }
     erase('attempts', 'attempts', `state IN ('responded','adopted','failed','lost') AND COALESCE(finished_at, dispatched_at) < ?

@@ -17,11 +17,11 @@ export async function inventory(directory) {
   return files;
 }
 
-export function tableBytes(db, table, where = '1=1') {
+export function tableBytes(db, table, where = '1=1', ...params) {
   const columns = db.prepare(`PRAGMA table_info("${table}")`).all();
   if (!columns.length) return 0;
   const size = columns.map(({ name }) => `COALESCE(length(CAST("${name}" AS BLOB)), 0)`).join(' + ');
-  return db.prepare(`SELECT COALESCE(SUM(${size}), 0) bytes FROM "${table}" WHERE ${where}`).get().bytes;
+  return db.prepare(`SELECT COALESCE(SUM(${size}), 0) bytes FROM "${table}" WHERE ${where}`).get(...params).bytes;
 }
 
 export async function measureStorage(home, db) {

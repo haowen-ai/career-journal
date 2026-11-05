@@ -135,9 +135,10 @@ test('[A] a raw CareerOps company-board batch drops senior roles as no_student_s
   assert.equal(counts.review, 2, 'only the student titles are reviewed');
   assert.equal(counts.dropped.no_student_signal, SENIOR_TITLES.length);
   const reviews = Object.fromEntries(db.prepare('SELECT p.title, r.* FROM reviews r JOIN postings p ON p.id = r.posting_id').all().map((row) => [row.title, row]));
-  for (const title of SENIOR_TITLES) {
-    assert.deepEqual([reviews[title].state, reviews[title].decision, reviews[title].code, reviews[title].lane, reviews[title].next_due], ['done', 'dropped', 'no_student_signal', 'no_student_signal', null], title);
-  }
+  // Changed on purpose 2026-11-05 (redesign A1): unknown senior roles are counted, not stored.
+  assert.equal(counts.countedOnly, SENIOR_TITLES.length);
+  for (const title of SENIOR_TITLES) assert.equal(reviews[title], undefined, `${title}: counted only, no row`);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM postings').get().n, 2);
   assert.deepEqual([reviews['Software Engineering Intern'].state, reviews['Software Engineering Intern'].lane], ['due', 'new']);
   assert.deepEqual([reviews['Data Science Co-op'].state, reviews['Data Science Co-op'].lane], ['due', 'new']);
 });
@@ -325,9 +326,12 @@ test('[A] ingestBatch of 5,000 records into 5,000 postings and 1,000 application
   assert.equal(failure, undefined, `${failure?.message}\nfull-table reads so far:\n${scans.join('\n')}`);
   assert.ok(elapsed < 20_000, `ingest took ${Math.round(elapsed)} ms (limit 20,000 ms)`);
   assert.equal(counts.observed, 5_000);
-  assert.equal(counts.newPostings, 4_000, 'every re-sighting resolves to its existing posting');
-  assert.equal(db.prepare('SELECT COUNT(*) n FROM postings').get().n, EXISTING + 4_000);
-  assert.equal(db.prepare('SELECT COUNT(*) n FROM reviews').get().n, EXISTING + 4_000, 'every posting has exactly one review');
+  // Changed on purpose 2026-11-05 (redesign A1): a new no-signal role is counted, not stored.
+  assert.equal(counts.newPostings + counts.countedOnly, 4_000, 'every re-sighting resolves to its existing posting; each new role is stored or counted');
+  assert.ok(counts.countedOnly > 0 && counts.newPostings > 0, JSON.stringify(counts));
+  assert.equal(counts.stored + counts.countedOnly + counts.quarantined, counts.observed, 'conservation');
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM postings').get().n, EXISTING + counts.newPostings);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM reviews').get().n, EXISTING + counts.newPostings, 'every posting has exactly one review');
   assert.ok(counts.reused >= 200, 'postings bound to submitted applications are reused');
 });
 
@@ -343,7 +347,9 @@ const simplifyListing = (id, overrides = {}) => ({ id, company_name: 'Synthetic 
 const census = (ingestBatch, db, { runId, partition = 'simplify:1', listings, now = T0, profile = PROFILE }) =>
   ingestBatch(db, { runId, source: 'simplify', partition, records: parseSimplify(listings, { partition }), now, policy: SCREENING_POLICY, profile });
 
-test('[A] a first-seen unlisted record keeps its posting and observation but opens no due review until a later census lists it (volume U1)', async () => {
+// Changed on purpose 2026-11-05 (redesign A1): an unknown unlisted Simplify listing is counted only (no rows); other
+// sources keep their unlisted posting and observation. Either way nothing is due until a later census lists it.
+test('[A] a first-seen unlisted record opens no due review until a later census lists it; an unknown unlisted Simplify listing is only counted (volume U1)', async () => {
   const { ingestBatch } = await ingest();
   const db = freshDb();
   const unlisted = [
@@ -358,8 +364,9 @@ test('[A] a first-seen unlisted record keeps its posting and observation but ope
   // Any source: an Ashby isListed=false (or Greenhouse inactive) record follows the same rule.
   ingestBatch(db, { runId: 'scan-1', source: 'ashby', partition: 'ashby:examplecorp', now: T0, policy: SCREENING_POLICY, profile: PROFILE,
     records: [record({ source: 'ashby', sourceId: 'a-hidden', url: 'https://jobs.ashbyhq.com/examplecorp/a-hidden', partition: 'ashby:examplecorp', listed: false })] });
-  const unlistedIds = [...unlisted.map((item) => postingFor(db, `source:simplify:${item.id}`)), postingFor(db, 'source:ashby:a-hidden')];
-  for (const id of unlistedIds) {
+  assert.equal(first.countedOnly, 3, 'the unknown unlisted Simplify listings are counted only');
+  for (const item of unlisted) assert.equal(postingFor(db, `source:simplify:${item.id}`), undefined, `${item.id}: no row for an unknown unlisted listing`);
+  for (const id of [postingFor(db, 'source:ashby:a-hidden')]) {
     assert.ok(id, 'conservation: the unlisted record still resolves to a posting');
     assert.equal(db.prepare('SELECT listed FROM postings WHERE id = ?').get(id).listed, 0, `${id}: posting kept as unlisted`);
     assert.equal(db.prepare('SELECT COUNT(*) n FROM observations WHERE posting_id = ? AND listed = 0').get(id).n, 1, `${id}: observation kept`);
@@ -375,7 +382,9 @@ test('[A] a first-seen unlisted record keeps its posting and observation but ope
   census(ingestBatch, db, { runId: 'scan-2', now: at(1), listings: [...unlisted.map((item) => ({ ...item, active: true, is_visible: true })), listed] });
   ingestBatch(db, { runId: 'scan-2', source: 'ashby', partition: 'ashby:examplecorp', now: at(1), policy: SCREENING_POLICY, profile: PROFILE,
     records: [record({ source: 'ashby', sourceId: 'a-hidden', url: 'https://jobs.ashbyhq.com/examplecorp/a-hidden', partition: 'ashby:examplecorp', listed: true })] });
+  const unlistedIds = [...unlisted.map((item) => postingFor(db, `source:simplify:${item.id}`)), postingFor(db, 'source:ashby:a-hidden')];
   for (const id of unlistedIds) {
+    assert.ok(id, 'a listed census stores the posting');
     const review = reviewOf(db, id);
     assert.equal(review?.state, 'due', `${id}: listed=true in a later census opens a due review`);
     assert.equal(review.lane, 'new', `${id}: student title, lane new`);
@@ -403,8 +412,8 @@ test('[A] a posting listed in any partition of the census opens its review; an e
   assert.equal(existing?.state, 'due', 'an existing review is not closed by an unlisted sighting (closure stays absence-based)');
   // The rule never applies to a first-seen unlisted-only posting: it stays without a pending review.
   census(ingestBatch, db, { runId: 'scan-3', partition: 'simplify:1', now: at(2), listings: [{ ...shared('n-new-unlisted'), is_visible: false }] });
-  const fresh = reviewOf(db, postingFor(db, 'source:simplify:n-new-unlisted'));
-  assert.ok(!fresh || !PENDING.includes(fresh.state), `first-seen unlisted-only posting: ${JSON.stringify(fresh && fresh.state)}`);
+  // Changed on purpose 2026-11-05 (redesign A1): an unknown unlisted Simplify listing is counted only.
+  assert.equal(postingFor(db, 'source:simplify:n-new-unlisted'), undefined, 'first-seen unlisted-only listing: counted only');
 });
 
 test('[B] the worker never fetches or judges an unlisted-only posting, and the receipt backlog does not count it (volume U1)', async () => {
@@ -415,9 +424,12 @@ test('[B] the worker never fetches or judges an unlisted-only posting, and the r
   for (let i = 0; i < 6; i += 1) listings.push(simplifyListing(`w-unlisted-${i}`, { title: `Data Science Intern ${i}`, active: i % 2 === 0 ? false : true, is_visible: i % 2 === 0 }));
   for (let i = 0; i < 3; i += 1) listings.push(simplifyListing(`w-listed-${i}`, { title: `Data Analyst Intern ${i}` }));
   census(ingestBatch, db, { runId: 'scan-1', listings });
+  // Changed on purpose 2026-11-05 (redesign A1): unknown unlisted Simplify listings are counted only, so there is
+  // nothing for the worker to fetch at all.
   const unlistedIds = new Set(listings.filter((item) => item.id.startsWith('w-unlisted')).map((item) => postingFor(db, `source:simplify:${item.id}`)));
   const listedIds = listings.filter((item) => item.id.startsWith('w-listed')).map((item) => postingFor(db, `source:simplify:${item.id}`));
-  assert.equal(unlistedIds.size, 6);
+  assert.deepEqual([...unlistedIds], [undefined]);
+  unlistedIds.clear();
   const fetcher = fakeFetcher({});
   const judges = eligibleJudges();
   const receipt = await runReview({ db, runId: 'review-1', owner: 'worker-a', now: at(1), budget: 20, deadlineMs: 600_000, attemptDir: null, sleep: async () => {},

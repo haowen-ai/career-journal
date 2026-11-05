@@ -137,6 +137,32 @@ function withEntryTimeout(ctx, entry) {
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Default per-fetch ceilings of CareerOps providers (career-ops providers/*.mjs). A list that ends
+// exactly at its effective ceiling was cut off silently, so it is reported as `cap`, never as a
+// complete census. Entries can raise them: SuccessFactors `max_jobs` (default 1,000), Oracle Cloud
+// `max_pages` x 200 (default 25 pages), SmartRecruiters `max_pages` x 100 (default 50 pages),
+// Workday `max_pages` x 20, Radancy `max_jobs` (default 2,000).
+export const PROVIDER_CEILINGS = Object.freeze({ successfactors: 1_000, oraclecloud: 5_000, smartrecruiters: 5_000 });
+const PAGE_SIZES = Object.freeze({ oraclecloud: 200, smartrecruiters: 100 });
+
+const positive = (value) => Number.isInteger(Number(value)) && Number(value) > 0 ? Number(value) : null;
+
+// The number of jobs at which a provider stops on its own for this entry, or null when unknown.
+export function providerCeiling(providerId, entry = {}, portals = {}) {
+  if (providerId === 'workday') {
+    const maxPages = positive(entry.max_pages ?? entry.maxPages ?? entry.workday?.max_pages ?? portals.workday?.max_pages) ?? 100;
+    return maxPages * 20;
+  }
+  if (providerId === 'radancy' || providerId === 'successfactors') {
+    return positive(entry.max_jobs ?? entry.maxJobs) ?? (providerId === 'radancy' ? 2_000 : PROVIDER_CEILINGS.successfactors);
+  }
+  if (PAGE_SIZES[providerId]) {
+    const maxPages = positive(entry.max_pages ?? entry.maxPages);
+    return maxPages ? maxPages * PAGE_SIZES[providerId] : PROVIDER_CEILINGS[providerId];
+  }
+  return PROVIDER_CEILINGS[providerId] ?? null;
+}
+
 // Each fetch is sequential: stderr cap messages belong only to the current entry.
 export async function collectCareerOpsRaw({ portals, providers, resolveProvider, makeHttpCtx, sleep = defaultSleep, retryDelaysMs = RETRY_DELAYS_MS }) {
   const roles = [];
@@ -151,6 +177,8 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
     const originalError = console.error;
     let capDetected = false;
     let attempts = 0;
+    const startedAt = performance.now();
+    const elapsed = () => Math.round(performance.now() - startedAt);
     try {
       const resolved = await resolveProvider(entry, providers);
       provider = resolved?.provider ?? resolved;
@@ -176,8 +204,8 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
         }
       }
       if (!Array.isArray(jobs)) throw new Error('Provider returned no job array');
-      const maxPages = Number(entry.max_pages ?? entry.maxPages ?? entry.workday?.max_pages ?? portals.workday?.max_pages ?? 100);
-      if (provider.id === 'workday' && Number.isFinite(maxPages) && maxPages > 0 && jobs.length >= maxPages * 20) capDetected = true;
+      const ceiling = providerCeiling(provider.id, entry, portals);
+      if (ceiling != null && jobs.length >= ceiling) capDetected = true;
       const truncated = capDetected || Object.entries(jobs).some(([key, value]) => /(?:truncated|partial|capDetected)$/i.test(key) && value === true);
       for (const job of jobs) {
         const role = { ...job, company: job?.company ?? entry.name, partition,
@@ -190,9 +218,10 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
         }
         roles.push(role);
       }
-      partitions.push({ partition, status: truncated ? 'partial' : 'ok', count: jobs.length, rawCount: jobs.length, truncated, capDetected, attempts });
+      partitions.push({ partition, status: truncated ? 'partial' : 'ok', count: jobs.length, rawCount: jobs.length, truncated, capDetected, attempts, elapsedMs: elapsed(),
+        ...(capDetected && ceiling != null && jobs.length >= ceiling ? { ceiling } : {}) });
     } catch (error) {
-      partitions.push({ partition, status: 'error', count: 0, rawCount: 0, error: error.message, truncated: capDetected, capDetected, attempts });
+      partitions.push({ partition, status: 'error', count: 0, rawCount: 0, error: error.message, truncated: capDetected, capDetected, attempts, elapsedMs: elapsed() });
     } finally { configuredPartitions.push(partition); console.error = originalError; }
   }
   return { roles, partitions, configuredPartitions };
