@@ -57,7 +57,8 @@ test('[A1] an unknown certain-drop record creates no rows at all and is counted 
   assert.deepEqual([counts.observed, counts.stored, counts.countedOnly, counts.quarantined], [3, 0, 3, 0]);
   assert.deepEqual(counts.countedOnlyBy, { no_student_signal: 1, company_excluded: 1, outside_countries: 1 });
   assert.deepEqual(counts.dropped, { no_student_signal: 1, company_excluded: 1, outside_countries: 1 }, 'drops are still reported');
-  assert.deepEqual([...DEFAULT_CERTAIN_DROP_CODES].sort(), ['company_excluded', 'no_student_signal', 'outside_countries']);
+  // Changed at integration: the default set is the classifier's CERTAIN_DROP_CODES, which adds company_small (C1).
+  assert.deepEqual([...DEFAULT_CERTAIN_DROP_CODES].sort(), ['company_excluded', 'company_small', 'no_student_signal', 'outside_countries']);
 });
 
 test('[A1] a known settled-dropped posting gets no observation or sighting, but its last_seen and membership stay current', () => {

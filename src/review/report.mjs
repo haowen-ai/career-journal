@@ -1,13 +1,29 @@
 import { redact } from '../runtime/redact.mjs';
 import { parseJson } from './deliver.mjs';
 import { awaitingUserSummary } from './awaiting-user.mjs';
+import { nightlySummary, STOP_REASONS } from './summary.mjs';
 export function reviewReport(db, { receipt = null, sourceReceipts = [], lang = 'en' } = {}) {
   const zh = lang === 'zh';
   const rows = db.prepare(`SELECT p.*,r.state,r.decision,r.code,r.flags_json,r.evidence_json,r.hold_owner,a.fit,a.deadline_at,a.posting_end_at,a.skip_reason
     FROM postings p JOIN reviews r ON r.posting_id=p.id LEFT JOIN applications a ON a.id=p.application_id WHERE p.merged_into IS NULL ORDER BY r.updated_at DESC,p.id`).all();
   const url = (row) => row.canonical_url ? (/^https?:/.test(row.canonical_url) ? row.canonical_url : `https://${row.canonical_url}`) : '';
   const line = (row) => `- ${row.company} — ${row.title} ${url(row)}${parseJson(row.flags_json, []).includes('manual') ? ' [manual intake]' : ''}`;
-  const lines = [zh ? '# 岗位审核报告' : '# Official posting review', '', receipt ? `${receipt.run_id}: ${receipt.status}` : '', '', zh ? '## 已交付' : '## Delivered eligible'];
+  const lines = [zh ? '# 岗位审核报告' : '# Official posting review', '', receipt ? `${receipt.run_id}: ${receipt.status}` : ''];
+  if (receipt) {
+    const combined = receipt.kind === 'daily' ? receipt
+      : { kind: 'daily', run_id: receipt.run_id, status: receipt.status, stages: [...sourceReceipts.map((scan) => ({ receipt: scan })), { receipt: { kind: 'review', ...receipt } }] };
+    lines.push(nightlySummary(combined, { lang }).replace(/^[^:：]*[:：]\s*/, ''));
+    if (receipt.stop_reason) lines.push(`${zh ? '停止原因' : 'Stop reason'}: ${receipt.stop_reason}${STOP_REASONS[receipt.stop_reason] ? ` — ${STOP_REASONS[receipt.stop_reason][zh ? 'zh' : 'en']}` : ''}`);
+    if (receipt.wallStarted || receipt.wallFinished) lines.push(`${zh ? '实际时间' : 'Wall clock'}: ${receipt.wallStarted ?? '?'} → ${receipt.wallFinished ?? '?'}`);
+    for (const item of receipt.external_failures ?? []) lines.push(`${zh ? '外部故障' : 'External failure'}: ${item.postingId} ${item.error ?? ''}`);
+  }
+  // Per-source intake: fetched = stored + counted only (+ quarantined).
+  const ingest = sourceReceipts.flatMap((scan) => scan?.ingest ?? []);
+  if (ingest.length) {
+    lines.push('', zh ? '## 抓取与入库' : '## Intake (fetched / stored / counted only)');
+    for (const item of ingest) lines.push(`- ${item.source} ${item.partition}: ${item.fetched ?? '?'} / ${item.stored ?? '?'} / ${item.countedOnly ?? 0}${item.quarantined ? ` (${zh ? '隔离' : 'quarantined'} ${item.quarantined})` : ''}${Number.isFinite(item.elapsedMs) ? ` ${item.elapsedMs} ms` : ''}`);
+  }
+  lines.push('', zh ? '## 已交付' : '## Delivered eligible');
   for (const row of rows.filter((r) => r.decision === 'eligible' && r.application_id && !r.skip_reason)) lines.push(`${line(row)} — ${row.fit ?? ''}${row.deadline_at ? `; cutoff ${row.deadline_at}` : ''}${row.posting_end_at ? `; posting ends ${row.posting_end_at}` : ''}`);
   lines.push('', zh ? '## 模型代定' : '## Model-decided');
   for (const row of rows.filter((r) => r.state === 'done' && parseJson(r.flags_json, []).includes('model_decided'))) {

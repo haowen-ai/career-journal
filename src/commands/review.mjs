@@ -8,12 +8,14 @@ import { createJudgeAdapters } from '../review/judge.mjs';
 import { createSecondOpinion } from '../review/second-opinion.mjs';
 import { createJevSplit } from '../review/jev-split.mjs';
 import { runReview } from '../review/worker.mjs';
+import { createCompanySizeResolver } from '../review/company-size-runtime.mjs';
 import { commandFetcher, builtinFetcher, politeFetcher, validateSnapshot } from '../review/fetch.mjs';
 import { bootstrapExisting } from '../funnel/bootstrap.mjs';
 import { resolvePosting, duplicateGroups } from '../funnel/identity.mjs';
 import { segmentSections } from '../review/clauses.mjs';
 import { reviewExitCode, writeReceipt, readRunReceipt, readCurrentReceipt, finalizeDailyReceipt, localDate } from '../review/receipt.mjs';
 import { reviewReport } from '../review/report.mjs';
+import { nightlySummary } from '../review/summary.mjs';
 import { postingLedger } from '../review/ledger.mjs';
 import { matchMailHits } from '../review/mail.mjs';
 import { annotateMail, unhide, deliver, deliveryPolicy, logReview, parseJson } from '../review/deliver.mjs';
@@ -47,6 +49,12 @@ function numberOption(value, name, { zero = false, integer = true } = {}) {
 }
 const isBusy = (db, now) => db.prepare("SELECT heartbeat_at FROM runs WHERE kind='review' AND status='running'").all().some((row) => Date.parse(now) - Date.parse(row.heartbeat_at) <= 600000);
 
+export function reviewSizeResolver(context, inputs, runtime = {}) {
+  const parts = runtime.review?.companySize ?? {};
+  return createCompanySizeResolver({ profileDir: path.join(context.root, '.career-journal', 'profile'), reviewPolicy: inputs.policy,
+    askJev: parts.askJev, askModel: parts.askModel, runImpl: parts.runImpl, jevAdapter: parts.jev });
+}
+
 export async function reviewWithContext(context, runtime = {}, options = {}) {
   const now = runtime.now?.() ?? new Date().toISOString();
   const runId = options['run-id'] ?? `review-${randomUUID()}`;
@@ -66,8 +74,9 @@ export async function reviewWithContext(context, runtime = {}, options = {}) {
     deadlineMs: numberOption(options['deadline-min'] ?? budgets.deadlineMin, '--deadline-min', { integer: false }) * 60000,
     deadlineAt: options['deadline-at'], fetcher, judges, secondOpinion, jev, attemptDir: path.join(context.root, '.career-journal', 'attempts'),
     inputs: () => loadReviewInputs(context.root), hooks: runtime.review?.hooks ?? {},
-    // Integration point for Lane C's company-size decisions (see the hook in worker.mjs); none by default.
-    resolveCompanySizes: runtime.review?.resolveCompanySizes ?? null });
+    // Company size is decided once per company before the judge loop (hook in worker.mjs): one Jev question,
+    // then one codex call when Jev is in between. Tests and callers may inject the whole resolver or its parts.
+    resolveCompanySizes: runtime.review?.resolveCompanySizes ?? reviewSizeResolver(context, inputs, runtime) });
   receipt.run_date = localDate(now, context.config.timezone);
   if (receipt.status !== 'busy') {
     context.db.prepare('UPDATE runs SET receipt_json=? WHERE run_id=?').run(redact(JSON.stringify(receipt)), receipt.run_id);
@@ -158,7 +167,8 @@ export async function reviewCommand(parsed, io, runtime = {}) {
           result = current.receipt;
         }
         if (!result) throw new Error('Current receipt missing');
-        emit(options.summary ? `${result.run_id}: ${result.status}${result.stop_reason ? ` (${result.stop_reason})` : ''}${result.errors?.length ? `; ${JSON.stringify(result.errors)}` : ''}` : result); return reviewExitCode(result);
+        // --summary [zh]: one plain line (status, fetched/stored, judged, eligible, due left, holds, stop reason), then errors.
+        emit(options.summary ? `${nightlySummary(result, { lang: options.summary === 'zh' ? 'zh' : 'en' })}${result.errors?.length ? `; ${JSON.stringify(result.errors)}` : ''}` : result); return reviewExitCode(result);
       }
       case 'daily-finalize': {
         const raw = options.stage === undefined ? [] : [options.stage].flat();

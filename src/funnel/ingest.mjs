@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { aliasesFor, canonicalUrl, resolvePosting, postingCandidates, submittedApplicationIndex, submittedDuplicate } from './identity.mjs';
-import { classifyRole } from './classify.mjs';
+import { classifyRole, CERTAIN_DROP_CODES } from './classify.mjs';
 import { SIGNAL_DROP_CODES, SUBMITTED_STATUSES } from './contract.mjs';
 import { redact } from '../runtime/redact.mjs';
 import { assertScanOwner } from './scan-lease.mjs';
@@ -14,7 +14,8 @@ const stable = (value) => Array.isArray(value) ? value.map(stable) : value && ty
 
 // Drops that one record decides with certainty. The classifier may mark any outcome itself
 // (`certainDrop: true|false`); these codes are the default when it does not.
-export const DEFAULT_CERTAIN_DROP_CODES = Object.freeze(['no_student_signal', 'company_excluded', 'outside_countries']);
+// The classifier owns the list (company_small included: a company known to be small is a certain drop).
+export const DEFAULT_CERTAIN_DROP_CODES = CERTAIN_DROP_CODES;
 // Settlements that only say the posting left the board. A later listing is a relist.
 const DELIST_CODES = new Set(['delisted', 'closed_verified']);
 

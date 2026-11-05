@@ -104,7 +104,8 @@ const QUESTION_PATTERNS = Object.freeze({
 const EXPERIMENT_PHRASES = Object.freeze({
   degree: /does not restrict degree/,
   term: /first seen in fall 2026, it means 2027/,
-  place: /at least one office or remote option in the posting is inside the candidate's allowed areas for that work term/,
+  // Changed on purpose (redesign C3): the requisition's own work location decides, not any office on the page.
+  place: /this requisition's own work location \(or its remote option\) is inside the candidate's allowed areas/,
   auth: /not US military\/defense work or a clearance-required role/,
   function: /the role's main function is one of the wanted directions/,
   skills: /Preferred or "nice to have" items do not count/,

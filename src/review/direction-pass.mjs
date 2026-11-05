@@ -28,9 +28,11 @@ export function applyRoleDirection(db, { now, policy = {}, owner = 'review-role-
       const software = row.code === OUT_OF_DIRECTION_CODE;
       if (software && evidence.roleDirection?.software !== true) continue;
       const labelled = Object.hasOwn(evidence, 'function');
-      const titled = roleDirection(row.title, policy.direction, { functionValue: evidence.function });
+      // anyFunctionCompanies (role-direction.json) are honoured here exactly as at delivery.
+      const company = { company: row.company, aliases: policy.companyAliases };
+      const titled = roleDirection(row.title, policy.direction, { functionValue: evidence.function, ...company });
       // In direction only when the title rules pass and the label is not pure software engineering.
-      const result = titled.ok && softwareOnlyRole(row.title, evidence.function, policy.direction) ? { ok: false, reason: 'software' } : titled;
+      const result = titled.ok && softwareOnlyRole(row.title, evidence.function, policy.direction, company) ? { ok: false, reason: 'software' } : titled;
       const verdict = () => ({ ...restoredVerdict(row, evidence), ...(labelled ? { functionValue: evidence.function } : {}) });
       if (row.code === DIRECTION_CODE || software) {
         if (!result.ok) {

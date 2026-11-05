@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { FETCH_BATCH_MIN, JUDGE_TIME_SHARE } from '../funnel/contract.mjs';
-import { aliasesFor, reconcileAliases, providerRequisition } from '../funnel/identity.mjs';
+import { aliasesFor, reconcileAliases, providerRequisition, resolveIdentityConflicts } from '../funnel/identity.mjs';
 import { createBudget, recoverLost } from './budget.mjs';
 import { acquireRunLease, heartbeat, finishRun, claimItem, assertFence, atomic } from './lease.mjs';
 import { activeCooldown, setCooldown } from './cooldown.mjs';
@@ -14,7 +14,7 @@ import { dependencyHash, evalCurrent, screeningPolicyParts } from './inputs.mjs'
 import { segmentSections } from './clauses.mjs';
 import { decide } from './decide.mjs';
 import { validateSnapshot } from './fetch.mjs';
-import { applyCompanyCap, deliver, deliveryPolicy, heldReleaseBlock, keepHold, logReview, parseJson, suppressSubmittedDuplicates } from './deliver.mjs';
+import { applyCompanyCap, deliver, deliveryPolicy, heldReleaseBlock, keepHold, logReview, parseJson, requeueSystemFailures, suppressSubmittedDuplicates } from './deliver.mjs';
 import { scheduleRefresh, recheckHolds } from './freshness.mjs';
 import { redact } from '../runtime/redact.mjs';
 import { reviewOwnershipJoins, userDecisionSql } from './ownership.mjs';
@@ -220,7 +220,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   resolveCompanySizes = null, hooks = {} }) {
   // `now` is the frozen run time used for ordering and leases; wallStarted/wallFinished are the real clock.
   const receipt = { schema: 1, kind: 'review', run_id: runId, parent_run_id: parentRunId, started: now, finished: null, wallStarted: wallClock(), wallFinished: null, status: 'ok', stop_reason: null,
-    previous_run_interrupted: false, counts: { attempts: 0, attempts_lost: 0, escalations: 0, fetched: 0 }, sampling: { judged: 0, found: 0 },
+    previous_run_interrupted: false, counts: { attempts: 0, attempts_lost: 0, escalations: 0, fetched: 0, judged: 0, eligible: 0 }, sampling: { judged: 0, found: 0 },
     breaches: [], awaiting_user: [], awaiting_user_summary: [], model_decided: [], backlog: {}, warnings: [], errors: [] };
   const lease = acquireRunLease(db, { kind: 'review', owner, runId, parentRunId, now });
   if (!lease) return { ...receipt, status: 'busy' };
@@ -304,6 +304,16 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   applyCompanyExclusion(db, { now, policy: deliveryPolicy(current), owner });
   applyCompanyCap(db, { now, policy: deliveryPolicy(current), owner });
   applyRoleDirection(db, { now, policy: deliveryPolicy(current), owner });
+  // Redesign C9: identity holds written before C9 get an outcome (bound when authoritative ids prove one
+  // requisition, otherwise judged on their own), and recovery-created system_failure holds are re-queued once;
+  // a second one stays held and is reported as an external failure of this night.
+  atomic(db, () => resolveIdentityConflicts(db, { now, companyAliases: deliveryPolicy(current).companyAliases }));
+  const systemFailures = requeueSystemFailures(db, { now });
+  if (systemFailures.external.length) {
+    receipt.external_failures = systemFailures.external.map(({ postingId, error }) => ({ postingId, error: redact(String(error)).slice(0, 300) }));
+    receipt.stop_reason ??= 'external_failure';
+    noteError(`${systemFailures.external.length} posting(s) failed again after a system_failure re-queue: ${receipt.external_failures.slice(0, 5).map((item) => `${item.postingId}: ${item.error}`).join('; ')}`);
+  }
   }
   attemptDir ??= await mkdtemp(path.join(os.tmpdir(), 'cj-review-attempts-'));
   await mkdir(attemptDir, { recursive: true, mode: 0o700 });
@@ -636,6 +646,11 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       delete committedDependencies.releasedHold;
       await commitVerdict(id, fence, final, committedDependencies, { fresh });
       const committed = db.prepare('SELECT state,decision,code,flags_json,evidence_json FROM reviews WHERE posting_id=?').get(id);
+      // Nightly summary counts: a delivered verdict is a judged posting; an eligible one that is a visible lead counts as eligible.
+      if (committed.state !== 'due') {
+        receipt.counts.judged = (receipt.counts.judged ?? 0) + 1;
+        if (committed.decision === 'eligible' && committed.state === 'done') receipt.counts.eligible = (receipt.counts.eligible ?? 0) + 1;
+      }
       if (committed.state === 'done' && committed.code !== 'superseded_by_user' && final.modelDecision) {
         receipt.model_decided.push({ postingId: id, decision: committed.decision, assumption: final.modelDecision.assumption,
           disputed: parseJson(committed.flags_json, []).includes('disputed') });
@@ -677,6 +692,8 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       noteError(`company size unknown for ${company}: ${redact(String(error ?? 'no decision'))}`);
     }
     if (failed.length) receipt.stop_reason ??= 'company_size_unavailable';
+    // Decisions were saved to company-size.json: reload the inputs so deliver() sees the new sizes.
+    await refreshInputs();
   }
   // ==================================================================================================
   try {
@@ -778,6 +795,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       WHERE r.state='due' AND (r.next_due IS NULL OR r.next_due<=?) AND r.lane NOT IN ('no_student_signal','out_of_direction')
         AND NOT ${userDecisionSql} AND r.posting_id NOT IN (SELECT value FROM json_each(?))`).get(now, JSON.stringify([...unlistedOnly])).n;
     receipt.backlog.actionable_due = actionable;
+    receipt.backlog.held = pending.filter((r) => r.state === 'held').length;
     if (actionable && !receipt.stop_reason) receipt.stop_reason = receipt.errors.length ? 'external_failure' : 'unfinished';
     if (receipt.status !== 'failed' && (receipt.stop_reason || receipt.breaches.length || pending.some((r) => r.state === 'failed'))) receipt.status = 'partial';
     await hooks.beforeFinish?.();

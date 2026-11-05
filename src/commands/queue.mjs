@@ -13,6 +13,7 @@ import { DIRECTION_CODE, OUT_OF_DIRECTION_CODE, directionNote, loadDirectionRule
 import { readFile } from 'node:fs/promises';
 import { companyExcluded } from '../review/excluded.mjs';
 import { companySizeGate } from '../review/company-size.mjs';
+import { createCompanySizeResolver } from '../review/company-size-runtime.mjs';
 import { evaluateLimits, limitCounts } from '../review/limits.mjs';
 import { duplicateOfSubmitted, submittedApplications } from '../review/duplicate.mjs';
 import { loadUserOverrides, withOverrides } from '../review/overrides.mjs';
@@ -22,7 +23,7 @@ import { submittedApplicationIndex, submittedDuplicate } from '../funnel/identit
 import { configuredDecisionAdapters } from './email.mjs';
 import { profileOption } from './scan.mjs';
 
-const usage = 'Usage: career-journal queue list [--json] [--profile <path>] | queue siblings --id <application> | --url <job link> [--json] [--profile <path>] | queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>] [--actor user|apply|audit] [--code <code> (with --actor audit)] | queue score [--all] [--limit <n>] [--dry-run] [--json] [--profile <path>] | queue rescreen [--apply] [--json]';
+const usage = 'Usage: career-journal queue list [--json] [--profile <path>] | queue siblings --id <application> | --url <job link> [--json] [--profile <path>] | queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>] [--actor user|apply|audit] [--code <code> (with --actor audit)] | queue score [--all] [--limit <n>] [--dry-run] [--json] [--profile <path>] | queue rescreen [--decide-sizes] [--apply] [--json]';
 const FIT_ORDER = Object.freeze({ high: 0, medium: 1, low: 2 });
 
 const queueSelect = `SELECT id, company, role, job_url jobUrl, status, source, source_id sourceId, location,
@@ -401,6 +402,21 @@ export function rescreenLeads(db, { policy = {}, now = new Date().toISOString(),
   return { dryRun: !apply, leads: leads.length, violations: results.filter((item) => item.code !== 'company_size_unknown').length, results };
 }
 
+// `queue rescreen --decide-sizes`: settle the size of every lead's company that is still unknown, with the same
+// resolver the review run uses, before the gate rules are applied. Decisions land in company-size.json; a failed
+// decision leaves the company unknown (listed as company_size_unknown).
+async function decideLeadSizes(db, home, runtime = {}) {
+  const profileDir = path.join(path.resolve(home), '.career-journal', 'profile');
+  const policy = await gatePolicy(home);
+  const companies = [...new Set(db.prepare("SELECT company FROM applications WHERE status='lead' AND COALESCE(skip_owner,'review')='review' AND company IS NOT NULL ORDER BY company").all()
+    .map((row) => row.company).filter((company) => companySizeGate(company, policy.companySizes) === 'unknown'))];
+  const parts = runtime.review?.companySize ?? {};
+  const resolve = runtime.review?.resolveCompanySizes ?? createCompanySizeResolver({ profileDir, reviewPolicy: await readJson(path.join(profileDir, 'review-policy.json')),
+    askJev: parts.askJev, askModel: parts.askModel, runImpl: parts.runImpl, jevAdapter: parts.jev });
+  const result = await resolve({ companies, now: runtime.now?.() ?? new Date().toISOString() });
+  return { asked: companies.length, decided: result?.decided ?? [], failed: result?.failed ?? [] };
+}
+
 async function queueProfile(home, parsed) {
   const explicit = profileOption(parsed);
   try { return await loadScanProfile(home, { path: explicit }); }
@@ -419,10 +435,14 @@ export async function queueCommand(parsed, io, runtime = {}) {
   const context = await openHomeDatabase(home);
   try {
     if (parsed.subcommand === 'rescreen') {
+      let sizeDecisions = null;
+      if (parsed.options['decide-sizes'] === true) sizeDecisions = await decideLeadSizes(context.db, home, runtime);
       const summary = rescreenLeads(context.db, { policy: await gatePolicy(home), apply: parsed.options.apply === true });
+      if (sizeDecisions) summary.sizeDecisions = sizeDecisions;
       if (parsed.options.json) io.out(JSON.stringify(summary, null, 2));
       else {
         for (const item of summary.results) io.out([item.action, item.code, item.company, item.role, item.applicationId, item.detail ?? ''].join('\t'));
+        if (sizeDecisions) io.out(`company sizes: ${sizeDecisions.decided.length} decided, ${sizeDecisions.failed.length} failed${sizeDecisions.failed.map((item) => `\n  failed\t${item.company}\t${item.error}`).join('')}`);
         io.out(`${summary.violations} of ${summary.leads} leads violate a gate rule${summary.dryRun ? ' (dry run, nothing written; --apply withdraws them)' : ''}`);
       }
       return 0;

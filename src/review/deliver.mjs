@@ -14,7 +14,7 @@ import { DIRECTION_CODE, OUT_OF_DIRECTION_CODE, directionNote, roleDirection, so
 import { companySizeGate } from './company-size.mjs';
 import { evaluateLimits, limitCounts, programRule, LIMIT_CODES } from './limits.mjs';
 import { duplicateOfSubmitted } from './duplicate.mjs';
-import { REOPEN_AUTHORIZATIONS } from './reopen-policy.mjs';
+import { REOPEN_AUTHORIZATIONS, autoReopenAllowed } from './reopen-policy.mjs';
 
 export const parseJson = (value, fallback = {}) => { try { return JSON.parse(value); } catch { return fallback; } };
 export function logReview(db, postingId, { now, stage = 'deliver', kind = 'outcome', attemptId = null, payload = {} }) {
@@ -68,10 +68,18 @@ function companyVerdict(posting, verdict, policy) {
 // User overrides (re-allowed companies, active caps, limits, aliases, company sizes) apply here, outside the judge dependencies.
 export const deliveryPolicy = (inputs) => withOverrides({ ...inputs.screeningPolicy, companyCap: inputs.policy?.companyCap ?? null, direction: inputs.direction ?? null }, inputs.overrides);
 
-// Decide once (P4): a withdrawn application becomes a lead again only with an explicit authorization.
-// `review rejudge` records 'rejudge' durably on the review; this accessor reads it (integration point:
-// replace the body with the stored field once that lane lands). The default is no authorization.
-export function storedReopenAuthorization(db, review) { return null; } // eslint-disable-line no-unused-vars
+// Decide once (P4): a withdrawn application becomes a lead again only with an explicit authorization stored on
+// the review being delivered: `review rejudge --apply` writes evidence_json.reopenAuthorization.authorization
+// ('rejudge'), and the scan marks a relisted posting with the flag 'authorization:relist'. Both are single-use:
+// deliver() drops them from what it writes. Anything else is no authorization.
+export const RELIST_FLAG = 'authorization:relist';
+export function storedReopenAuthorization(db, review) { // eslint-disable-line no-unused-vars
+  if (!review) return null;
+  const stored = parseJson(review.evidence_json)?.reopenAuthorization?.authorization;
+  if (REOPEN_AUTHORIZATIONS.includes(stored)) return stored;
+  const flags = parseJson(review.flags_json, []);
+  return Array.isArray(flags) && flags.includes(RELIST_FLAG) ? 'relist' : null;
+}
 export const RELIST_REASONS = Object.freeze(['delisted', 'closed_verified', 'unavailable']);
 function restoreAuthorized(app, authorization) {
   if (!REOPEN_AUTHORIZATIONS.includes(authorization)) return false;
@@ -290,12 +298,14 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
       delete evidence.gate;
     }
     if (duplicate) evidence.provenance = 'automated';
+    // A stored reopen authorization is consumed by this delivery.
+    delete evidence.reopenAuthorization;
     if (value.modelDecision) evidence.modelDecision = value.modelDecision;
     else delete evidence.modelDecision;
     if (value.jev) evidence.jev = value.jev;
     const userHold = held && !['unavailable','quota_full','quota_reconciliation'].includes(value.code);
     db.prepare('UPDATE reviews SET flags_json=? WHERE posting_id=?')
-      .run(JSON.stringify([...new Set([...parseJson(review.flags_json, []).filter((flag) => !['term_inferred', 'model_decided', 'disputed', 'jev_decided', 'hold_kept'].includes(flag)), ...(value.flags ?? [])])]), postingId);
+      .run(JSON.stringify([...new Set([...parseJson(review.flags_json, []).filter((flag) => !['term_inferred', 'model_decided', 'disputed', 'jev_decided', 'hold_kept', RELIST_FLAG].includes(flag)), ...(value.flags ?? [])])]), postingId);
     db.prepare(`UPDATE reviews SET state=?,decision=?,code=?,evidence_json=?,deadline_json=?,hold_owner=?,hold_since=?,next_due=?,stage='deliver',
       lease_owner=NULL,lease_until=NULL,updated_at=? WHERE posting_id=? AND lease_owner=? AND lease_generation=?`)
       .run(held ? 'held' : 'done', value.decision, protectedApp ? 'superseded_by_user' : value.code ?? null, JSON.stringify(evidence), JSON.stringify(value.deadline ?? {}),
@@ -316,9 +326,10 @@ export function suppressSubmittedDuplicates(db, { now, policy = {}, owner = 'rev
   return atomic(db, () => {
     const index = submittedApplicationIndex(db, { companyAliases: policy.companyAliases });
     let suppressed = 0;
+    // Decide once: only open work (due/held/failed reviews and visible leads) is looked at; settled history stays.
     for (const posting of db.prepare(`SELECT p.*,r.posting_id,r.state,r.code,a.status application_status
       FROM postings p JOIN reviews r ON r.posting_id=p.id LEFT JOIN applications a ON a.id=p.application_id
-      WHERE p.merged_into IS NULL`).all()) {
+      WHERE p.merged_into IS NULL AND (r.state IN ('due','held','failed') OR r.decision='eligible' AND a.status='lead')`).all()) {
       if (userDecided(db, posting) || !submittedDuplicate(db, posting, { companyAliases: policy.companyAliases, index })) continue;
       if (posting.state === 'done' && posting.code === 'already_submitted'
         && (!posting.application_id || posting.application_status === 'withdrawn')) continue;
@@ -351,7 +362,8 @@ export function applyCompanyCap(db, { now, policy = {}, owner = 'review-company-
     const codes = LIMIT_CODES.map((code) => `'${code}'`).join(',');
     for (const row of db.prepare(`SELECT p.*,r.posting_id,r.state,r.decision,r.code,r.flags_json,r.evidence_json,r.dep_hashes_json,a.status application_status,a.skip_reason application_skip,a.skip_owner application_skip_owner
       FROM postings p JOIN reviews r ON r.posting_id=p.id LEFT JOIN applications a ON a.id=p.application_id
-      WHERE p.merged_into IS NULL AND (r.state='due' OR r.state='done' AND (r.code IN (${codes}) OR r.decision='eligible')
+      WHERE p.merged_into IS NULL AND (r.state='due' OR r.state='done' AND r.decision='eligible' AND a.status='lead'
+        OR r.state='done' AND r.code IN (${codes})
         OR r.state='held' AND r.code IN (${QUOTA_HOLD_CODES.map((code) => `'${code}'`).join(',')}))`).all()) {
       if (userDecided(db, row)) continue;
       const evidence = parseJson(row.evidence_json);
@@ -385,9 +397,14 @@ export function applyCompanyCap(db, { now, policy = {}, owner = 'review-company-
           if (!fence) continue;
           deliver(db, { postingId: row.id, fence, now, policy, authorization: 'cap_release', verdict: restoredVerdict(row, evidence) });
         } else {
-          db.prepare(`UPDATE reviews SET state='due',stage='fetch',decision=NULL,code=NULL,next_due=?,hold_owner=NULL,hold_since=NULL,updated_at=?
-            WHERE posting_id=? AND state IN ('due','done') AND code=?`).run(now, now, row.id, row.code);
-          logReview(db, row.id, { now, stage: 'fetch', payload: { action: 'company_cap_restored', judged: false, code: row.code } });
+          // A cap settlement is reopened only as a cap release (P4); the authorization is recorded on the row so
+          // its delivery may restore the withdrawal, and in the log.
+          const application = row.application_id ? { status: row.application_status } : null;
+          if (!autoReopenAllowed({ review: row, application, authorization: 'cap_release' })) continue;
+          const kept = { ...evidence, reopenAuthorization: { authorization: 'cap_release', at: now, code: row.code } };
+          db.prepare(`UPDATE reviews SET state='due',stage='fetch',decision=NULL,code=NULL,next_due=?,hold_owner=NULL,hold_since=NULL,evidence_json=?,updated_at=?
+            WHERE posting_id=? AND state IN ('due','done') AND code=?`).run(now, JSON.stringify(kept), now, row.id, row.code);
+          logReview(db, row.id, { now, stage: 'fetch', payload: { action: 'company_cap_restored', judged: false, code: row.code, authorization: 'cap_release' } });
         }
         restored += 1;
         continue;
