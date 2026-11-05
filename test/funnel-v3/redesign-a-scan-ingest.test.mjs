@@ -198,6 +198,15 @@ test('[A3] a CareerOps partition that returns exactly a known provider ceiling i
   assert.equal(providerCeiling('oraclecloud', { max_pages: 150 }), 30000);
   assert.equal(providerCeiling('smartrecruiters', { max_pages: 1000 }), 100000);
   assert.equal(providerCeiling('smartrecruiters', {}), 5000);
+  assert.equal(providerCeiling('jibeapply', {}), 500);
+  assert.equal(providerCeiling('jibeapply', { max_pages: 300 }), 3000);
+  assert.equal(providerCeiling('jibeapply', { max_pages: 100000 }), 50000);
+  const jibe = await collectCareerOpsRaw({
+    portals: { tracked_companies: [{ name: 'Jibe Default' }, { name: 'Jibe Raised', max_pages: 300 }] },
+    providers: {}, makeHttpCtx: async () => ({}), sleep: async () => {},
+    resolveProvider: async () => ({ provider: { id: 'jibeapply', fetch: async () => jobs(500) } }),
+  });
+  assert.deepEqual(jibe.partitions.map((item) => item.capDetected), [true, false], 'JibeApply stopping at 50 pages x 10 is a cap');
   const raised = await collectCareerOpsRaw({
     portals: { tracked_companies: [{ name: 'SF Raised', max_jobs: 5000 }, { name: 'SF Raised Full', max_jobs: 1200 }] },
     providers: {}, makeHttpCtx: async () => ({}), sleep: async () => {},

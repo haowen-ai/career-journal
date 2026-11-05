@@ -141,7 +141,7 @@ const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // exactly at its effective ceiling was cut off silently, so it is reported as `cap`, never as a
 // complete census. Entries can raise them: SuccessFactors `max_jobs` (default 1,000), Oracle Cloud
 // `max_pages` x 200 (default 25 pages), SmartRecruiters `max_pages` x 100 (default 50 pages),
-// Workday `max_pages` x 20, Radancy `max_jobs` (default 2,000).
+// Workday `max_pages` x 20, Radancy `max_jobs` (default 2,000), JibeApply `max_pages` x 10 (default 50 pages).
 export const PROVIDER_CEILINGS = Object.freeze({ successfactors: 1_000, oraclecloud: 5_000, smartrecruiters: 5_000 });
 const PAGE_SIZES = Object.freeze({ oraclecloud: 200, smartrecruiters: 100 });
 
@@ -155,6 +155,10 @@ export function providerCeiling(providerId, entry = {}, portals = {}) {
   }
   if (providerId === 'radancy' || providerId === 'successfactors') {
     return positive(entry.max_jobs ?? entry.maxJobs) ?? (providerId === 'radancy' ? 2_000 : PROVIDER_CEILINGS.successfactors);
+  }
+  if (providerId === 'jibeapply') {
+    // 10 jobs per page; max_pages defaults to 50 and is bounded by the provider's 5,000-page cap.
+    return Math.min(positive(entry.max_pages ?? entry.maxPages) ?? 50, 5_000) * 10;
   }
   if (PAGE_SIZES[providerId]) {
     const maxPages = positive(entry.max_pages ?? entry.maxPages);
