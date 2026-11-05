@@ -47,7 +47,7 @@ export function rejudgeReviews(db, { codes = null, leads = false, postings = nul
   const where = codes ? `r.state='done' AND r.decision IN ('not_eligible','dropped') AND r.code IN (SELECT value FROM json_each(:list))`
     : leads ? `r.state='done' AND r.decision='eligible' AND a.status='lead'`
       : `r.posting_id IN (SELECT value FROM json_each(:list))`;
-  const rows = db.prepare(`SELECT r.posting_id,r.state,r.decision,r.code,r.first_seen,r.lease_until,r.evidence_json,p.company,p.merged_into,
+  const rows = db.prepare(`SELECT r.posting_id,r.state,r.decision,r.code,r.lane,r.first_seen,r.lease_until,r.evidence_json,p.company,p.merged_into,
       ${userDecisionSql} user_decided
     FROM reviews r JOIN postings p ON p.id=r.posting_id ${reviewOwnershipJoins}
     WHERE ${where} ORDER BY r.first_seen,r.posting_id`).all(...(leads ? [] : [{ list: JSON.stringify(codes ?? postings) }]));
@@ -58,7 +58,10 @@ export function rejudgeReviews(db, { codes = null, leads = false, postings = nul
   for (const row of rows) {
     if (wanted && companyKey(row.company, companyAliases) !== wanted) continue;
     if (since && !(Date.parse(row.first_seen) >= Date.parse(since))) continue;
-    const skip = ownershipClass({ ...row, now_iso: now }) ?? (postings && !['done', 'held'].includes(row.state) ? 'already_open' : null);
+    // An open row in an exploration lane is never scheduled when exploration.share is 0, so an explicit
+    // --posting may still move it to the normal lane; other open rows are already queued.
+    const exploring = ['no_student_signal', 'out_of_direction'].includes(row.lane) && row.state === 'due';
+    const skip = ownershipClass({ ...row, now_iso: now }) ?? (postings && !['done', 'held'].includes(row.state) && !exploring ? 'already_open' : null);
     if (skip) { bump(report.skipped, skip); continue; }
     chosen.push(row);
     report.selected += 1;

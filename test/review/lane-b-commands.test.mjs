@@ -64,6 +64,16 @@ test('[B13] rejudge --posting takes explicit ids with the same protections; --le
   assert.throws(() => rejudgeReviews(db, { now: at(1) }), /Usage/);
 });
 
+test('[B13b] rejudge --posting moves an open exploration-lane row to the normal lane; other open rows stay skipped', () => {
+  const db = freshDb();
+  insertPosting(db, { id: 'p-x' }); insertReview(db, { postingId: 'p-x', stage: 'judge' });
+  db.prepare("UPDATE reviews SET lane='no_student_signal' WHERE posting_id='p-x'").run();
+  insertPosting(db, { id: 'p-open' }); insertReview(db, { postingId: 'p-open', stage: 'judge' });
+  const report = rejudgeReviews(db, { postings: ['p-x', 'p-open'], now: at(1), apply: true });
+  assert.deepEqual([report.requeued, report.skipped], [1, { already_open: 1 }]);
+  assert.deepEqual([reviewOf(db, 'p-x').state, reviewOf(db, 'p-x').lane], ['due', 'new']);
+});
+
 test('[B2] a rejudged review is judged afresh (cached judgments are not replayed) and the authorization is consumed', async () => {
   const db = freshDb();
   insertPosting(db, { id: 'p-r', url: urlOf('p-r'), title: snapshotTitle(SNAPSHOTS.undergradOnly) });
