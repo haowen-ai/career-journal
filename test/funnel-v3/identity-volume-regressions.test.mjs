@@ -228,19 +228,26 @@ test('[A] two application rows for one requisition are resolved by the system: s
 test('[A] a genuine identity contradiction is held for the user only when the posting matters (identity I5)', async () => {
   const db = freshDb();
   // Each Simplify listing was first seen on a Greenhouse job, then re-pointed to a Workday requisition.
+  // Changed on purpose 2026-11-05 (redesign A1): an unknown no-signal record and an unknown unlisted Simplify
+  // listing are counted only, so they create no posting and no contradiction at all.
   const cases = [
-    ['matters', '[A] Data Science Intern (identity I5)', {}, true],
-    ['no_student_signal', '[A] Network Engineer (identity I5)', SENIOR, false],
-    ['out_of_direction', '[A] Chip Layout Intern (identity I5)', { categories: ['Hardware'] }, false],
-    ['unlisted-only', '[A] Analytics Intern (identity I5)', { listed: false }, false],
+    ['matters', '[A] Data Science Intern (identity I5)', {}, true, true],
+    ['no_student_signal', '[A] Network Engineer (identity I5)', SENIOR, false, false],
+    ['out_of_direction', '[A] Chip Layout Intern (identity I5)', { categories: ['Hardware'] }, false, true],
+    ['unlisted-only', '[A] Analytics Intern (identity I5)', { listed: false }, false, false],
   ];
   let run = 0;
-  for (const [name, title, extra, userOwned] of cases) {
+  for (const [name, title, extra, userOwned, stored] of cases) {
     const sourceId = `s-i5-${name}`;
     const job = 9500000 + run;
     await batch(db, [record({ source: 'simplify', sourceId, partition: 'simplify:list', title, url: `https://job-boards.greenhouse.io/examplecorp/jobs/${job}`, completeness: SIMPLIFY_PARTIAL, ...extra })], { runId: `run-${run += 1}` });
     await batch(db, [record({ source: 'simplify', sourceId, partition: 'simplify:list', title, url: workday('examplecorp', 'Careers', 'Role', `R95${job}`), completeness: SIMPLIFY_PARTIAL, ...extra })], { runId: `run-${run += 1}` });
     const fresh = postingFor(db, `req:workday:examplecorp:R95${job}`);
+    if (!stored) {
+      assert.equal(fresh, undefined, `${name}: counted only, no posting`);
+      assert.equal(postingFor(db, `source:simplify:${sourceId}`), undefined, `${name}: counted only, no posting`);
+      continue;
+    }
     assert.ok(fresh, `${name}: the re-pointed requisition is its own posting`);
     assert.notEqual(fresh, postingFor(db, `source:simplify:${sourceId}`), `${name}: never merged into the Greenhouse posting`);
     const review = reviewOf(db, fresh);
@@ -252,7 +259,7 @@ test('[A] a genuine identity contradiction is held for the user only when the po
       assert.notEqual(review?.hold_owner, 'user', `${name}: a posting that does not matter never asks the user`);
     }
   }
-  assert.equal(conflictLinks(db), cases.length, 'every contradiction keeps its conflict link for audit');
+  assert.equal(conflictLinks(db), cases.filter((item) => item[4]).length, 'every contradiction keeps its conflict link for audit');
   assert.equal(userHolds(db), 1);
 });
 
@@ -295,10 +302,11 @@ test('[A] no maybe_same links for no_student_signal, out_of_direction or unliste
     title: `[A] Chip Layout Intern - Site ${n} (identity I6)`, url: `https://job-boards.greenhouse.io/examplecorp/jobs/${9600300 + n}`, completeness: SIMPLIFY_PARTIAL })); // out_of_direction
   await batch(db, hardware, { runId: 'run-2' });
   const id = (item) => postingFor(db, `source:${item.source}:${item.sourceId}`);
-  assert.equal(reviewOf(db, id(quiet[0])).lane, 'no_student_signal', 'fixture: senior titles are no_student_signal');
+  // Changed on purpose 2026-11-05 (redesign A1): unknown no-signal records are counted only and have no posting to link.
+  for (const item of quiet.slice(0, 6)) assert.equal(id(item), undefined, `${item.title}: counted only`);
   assert.equal(reviewOf(db, id(hardware[0])).lane, 'out_of_direction', 'fixture: hardware-only Simplify records are out_of_direction');
   assert.equal(reviewOf(db, id(quiet[6])), undefined, 'fixture: unlisted-only postings open no review');
-  for (const item of [...quiet, ...hardware]) assert.deepEqual(linksOf(db, id(item)), [], `${item.title}: no maybe_same links`);
+  for (const item of [...quiet, ...hardware]) if (id(item)) assert.deepEqual(linksOf(db, id(item)), [], `${item.title}: no maybe_same links`);
   assert.ok(linked(db, id(loud[0]), id(loud[1])), 'two reviewed postings with similar titles are still linked');
   assert.ok(!linked(db, id(loud[0]), id(loud[3])) && !linked(db, id(loud[1]), id(loud[3])), 'never across company keys');
   for (const review of db.prepare('SELECT flags_json FROM reviews').all()) {

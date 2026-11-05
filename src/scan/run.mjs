@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { openDatabase } from '../storage/database.mjs';
-import { ingestBatch } from '../funnel/ingest.mjs';
+import { createIngestContext, ingestBatch } from '../funnel/ingest.mjs';
 import { buildExpectedManifest, assessSourceHealth } from '../funnel/health.mjs';
 import { fetchAtsBoards } from './sources/ats-boards.mjs';
 import { fetchCareerOpsRoles } from './sources/careerops.mjs';
@@ -17,9 +17,17 @@ export async function collectRoles(profile, { fetchImpl, careerOpsConfig, career
   const parts = [];
   const beforeDeadline = () => !deadlineAt || clock() < Date.parse(deadlineAt);
   const options = (defaultTimeoutMs = 30_000) => ({ timeoutMs: deadlineAt ? Math.max(1, Math.min(timeoutMs ?? defaultTimeoutMs, Date.parse(deadlineAt) - clock())) : timeoutMs });
+  // Wall time of one partition's whole fetch, retries included. CareerOps times its entries itself.
+  const timed = async (fetch) => {
+    const started = performance.now();
+    const part = await fetch();
+    const elapsedMs = Math.round(performance.now() - started);
+    for (const source of part.sources) source.elapsedMs ??= elapsedMs;
+    return part;
+  };
   for (const entry of profile.sources.atsBoards ?? []) {
     if (!beforeDeadline()) break;
-    parts.push(await fetchAtsBoards([entry], fetchImpl, options()));
+    parts.push(await timed(() => fetchAtsBoards([entry], fetchImpl, options())));
   }
   if (beforeDeadline()) {
     const config = { ...careerOpsConfig };
@@ -32,7 +40,7 @@ export async function collectRoles(profile, { fetchImpl, careerOpsConfig, career
     if (beforeDeadline()) parts.push(await fetchSimplify(settings, fetchImpl, options()));
   } else for (const [index, url] of urls.entries()) {
     if (!beforeDeadline()) break;
-    const part = await fetchSimplify({ ...settings, url, urls: [] }, fetchImpl, options(settings.timeoutMs ?? DEFAULT_SIMPLIFY_TIMEOUT_MS));
+    const part = await timed(() => fetchSimplify({ ...settings, url, urls: [] }, fetchImpl, options(settings.timeoutMs ?? DEFAULT_SIMPLIFY_TIMEOUT_MS)));
     const partition = `simplify:${index + 1}`;
     for (const source of part.sources) source.partition = partition;
     for (const batch of part.batches) { batch.partition = partition; for (const record of batch.records) record.partition = partition; }
@@ -87,18 +95,31 @@ export async function runScan(options) {
     const collected = await (collect ?? collectRoles)(profile, { fetchImpl, careerOpsConfig, careerOpsDependencies, timeoutMs: options.timeoutMs, deadlineAt, clock });
     if (heartbeatError) throw heartbeatError;
     assertScanOwner(db, runId, owner);
-    const counts = { raw: 0, observed: 0, newPostings: 0, reused: 0, dropped: {}, review: 0, quarantined: 0 };
+    const counts = { raw: 0, observed: 0, stored: 0, countedOnly: 0, countedOnlyBy: {}, newPostings: 0, reused: 0, dropped: {}, review: 0, quarantined: 0 };
     const reported = collected.sources.map((item) => ({ ...item }));
+    const ingest = [];
+    // Candidate, submission and sighting indexes are read once per run and kept current by each batch.
+    const context = collected.batches?.length ? createIngestContext(db, { policy }) : null;
     for (const batch of collected.batches ?? []) {
       if (batch.rawCount !== batch.records.length) throw new Error(`Collector conservation violation: ${batch.partition}`);
       counts.raw += batch.rawCount;
-      const result = ingestBatch(db, { ...batch, runId, runOwner: owner, now: timestamp(), policy, profile });
+      const result = ingestBatch(db, { ...batch, runId, runOwner: owner, now: timestamp(), policy, profile, context });
       heartbeat();
       if (heartbeatError) throw heartbeatError;
-      for (const key of ['observed', 'newPostings', 'reused', 'review', 'quarantined']) counts[key] += result[key];
+      // Every fetched record is stored, counted only, or quarantined: exactly one of the three.
+      if (result.stored + result.countedOnly + result.quarantined !== batch.rawCount) throw new Error(`Ingest conservation violation: ${batch.partition}`);
+      for (const key of ['observed', 'stored', 'countedOnly', 'newPostings', 'reused', 'review', 'quarantined']) counts[key] += result[key];
       for (const [code, count] of Object.entries(result.dropped)) counts.dropped[code] = (counts.dropped[code] ?? 0) + count;
+      for (const [code, count] of Object.entries(result.countedOnlyBy)) counts.countedOnlyBy[code] = (counts.countedOnlyBy[code] ?? 0) + count;
+      ingest.push({ source: batch.source, partition: batch.partition, fetched: batch.rawCount, stored: result.stored, countedOnly: result.countedOnly,
+        quarantined: result.quarantined, elapsedMs: result.elapsedMs });
       const source = reported.find((item) => item.source === batch.source && item.partition === batch.partition);
       if (!source) throw new Error(`Collector omitted partition status: ${batch.partition}`);
+      // Health keeps reading the fetched census (count/rawCount); these say what was written.
+      source.fetched = (source.fetched ?? 0) + batch.rawCount;
+      source.stored = (source.stored ?? 0) + result.stored;
+      source.countedOnly = (source.countedOnly ?? 0) + result.countedOnly;
+      source.ingestElapsedMs = (source.ingestElapsedMs ?? 0) + result.elapsedMs;
       source.quarantined = (source.quarantined ?? 0) + result.quarantined;
       if (result.quarantined && source.status !== 'error') source.status = 'partial';
     }
@@ -124,7 +145,7 @@ export async function runScan(options) {
       const attempted = reported.filter((item) => ['ok', 'empty', 'partial', 'error'].includes(item.status));
       const status = attempted.length && attempted.every((item) => item.status === 'error') ? 'failed'
         : sources.some((item) => item.alert && expectedKeys.has(`${item.source}\0${item.partition}`)) ? 'partial' : 'ok';
-      const summary = { runId, status, dryRun: false, sources, alerts, counts };
+      const summary = { runId, status, dryRun: false, sources, alerts, counts, ingest };
       db.prepare("UPDATE runs SET status=?,heartbeat_at=?,finished_at=?,receipt_json=? WHERE run_id=? AND owner=? AND status='running'").run(status, finishedAt, finishedAt, redact(JSON.stringify(summary)), runId, owner);
       db.exec('COMMIT');
       return summary;

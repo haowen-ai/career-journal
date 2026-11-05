@@ -254,14 +254,21 @@ test('[L2] replan after a facts change re-queues only R3-dependent held/not_elig
   assert.equal(replan(db, { inputs, now: at(1) }).requeued, 0);
 });
 
-test('[L1] a posting reappearing after its freshness horizon renews its review', async () => {
+// Changed on purpose 2026-11-05 (redesign A2, decide once): reappearance renews open work only. A settled
+// automated verdict stays settled; an eligible lead (still open in the apply queue) is renewed.
+test('[L1] a posting reappearing after its freshness horizon renews an open review and leaves a settled verdict alone', async () => {
   const { ingestBatch } = await load('L1', './src/funnel/ingest.mjs', ['ingestBatch']);
   const db = freshDb();
-  const original = record({ sourceId: '9900001', url: 'https://job-boards.greenhouse.io/examplecorp/jobs/9900001' });
-  ingestBatch(db, { runId: 'scan-1', source: 'greenhouse', partition: 'greenhouse:examplecorp', records: [original], now: T0, policy: SCREENING_POLICY });
-  const postingId = db.prepare("SELECT posting_id FROM posting_aliases WHERE alias = 'source:greenhouse:9900001'").get().posting_id;
-  db.prepare("UPDATE reviews SET state='done', decision='not_eligible', code='requirement_conflict', updated_at=? WHERE posting_id=?").run(T0, postingId);
-  db.prepare('UPDATE postings SET last_seen = ? WHERE id = ?').run(T0, postingId);
-  ingestBatch(db, { runId: 'scan-90', source: 'greenhouse', partition: 'greenhouse:examplecorp', records: [{ ...original, description: `${original.description} Reposted for 2027.` }], now: at(90), policy: SCREENING_POLICY });
-  assert.equal(reviewOf(db, postingId).state, 'due');
+  const original = (n) => record({ sourceId: `990000${n}`, url: `https://job-boards.greenhouse.io/examplecorp/jobs/990000${n}` });
+  ingestBatch(db, { runId: 'scan-1', source: 'greenhouse', partition: 'greenhouse:examplecorp', records: [original(1), original(2)], now: T0, policy: SCREENING_POLICY });
+  const [settled, lead] = [1, 2].map((n) => db.prepare('SELECT posting_id FROM posting_aliases WHERE alias = ?').get(`source:greenhouse:990000${n}`).posting_id);
+  db.prepare("UPDATE reviews SET state='done', decision='not_eligible', code='requirement_conflict', updated_at=? WHERE posting_id=?").run(T0, settled);
+  const app = seedApplication(db, { company: 'Example Corp', role: 'Data Science Intern', jobUrl: original(2).url });
+  db.prepare('UPDATE postings SET application_id = ? WHERE id = ?').run(app.id, lead);
+  db.prepare("UPDATE reviews SET state='done', decision='eligible', code=NULL, updated_at=? WHERE posting_id=?").run(T0, lead);
+  db.prepare('UPDATE postings SET last_seen = ?').run(T0);
+  ingestBatch(db, { runId: 'scan-90', source: 'greenhouse', partition: 'greenhouse:examplecorp',
+    records: [1, 2].map((n) => ({ ...original(n), description: `${original(n).description} Reposted for 2027.` })), now: at(90), policy: SCREENING_POLICY });
+  assert.deepEqual([reviewOf(db, settled).state, reviewOf(db, settled).decision], ['done', 'not_eligible'], 'decide once');
+  assert.equal(reviewOf(db, lead).state, 'due', 'an eligible lead is open work and is renewed');
 });
