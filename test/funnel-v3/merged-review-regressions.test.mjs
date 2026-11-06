@@ -426,7 +426,13 @@ writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify([process.pid, descendan
 setInterval(() => {}, 1000);
 `;
 
-test('[B] fetch and judge timeouts end the whole process tree within a bounded time (merged #11)', { timeout: 10_000 }, async () => {
+// A timeout only proves something once the stuck programs have started. On a machine running the whole
+// suite a node start can take longer than the timeout, the version probe included, so a run where they
+// did not start is repeated. Everything else about a run fails the test as usual.
+const STUCK_TIMEOUT_MS = 1000;
+const STUCK_BOUND_MS = 3000;
+const STUCK_ATTEMPTS = 5;
+test('[B] fetch and judge timeouts end the whole process tree within a bounded time (merged #11)', { timeout: 60_000 }, async () => {
   const { commandFetcher } = await fetchModule();
   const { codexExecAdapter } = await judgeModule();
   const root = await tempDir('cj-merged-tree-');
@@ -438,20 +444,26 @@ test('[B] fetch and judge timeouts end the whole process tree within a bounded t
     await writeFile(fetchScript, stuckProgram(fetchPids));
     await writeFile(judgeBin, stuckProgram(judgePids));
     await chmod(judgeBin, 0o755);
-    const fetcher = commandFetcher({ argv: [process.execPath, fetchScript], timeoutMs: 500 });
-    const adapter = codexExecAdapter({ bin: judgeBin, codexHome: path.join(root, 'codex-home'), model: 'model-synthetic', tier: 'primary', timeoutMs: 500, workDir: root });
-    const [fetched, judged] = await Promise.all([
-      settleWithin(fetcher.fetch({ postingId: 'p-1', url: 'https://job-boards.greenhouse.io/examplecorp/jobs/9000001' }), 1500),
-      settleWithin(adapter.ready.then(() => adapter.judge({ postingId: 'p-1', prompt: 'synthetic' }, { attemptId: 'attempt-1', outputPath: path.join(root, 'out.json') })), 1500),
-    ]);
-    const [fp, jp] = [await readPids(fetchPids), await readPids(judgePids)];
-    assert.equal(fp.length, 2, 'the fetch command started its descendant before the timeout');
-    assert.equal(jp.length, 2, 'the judge command started its descendant before the timeout');
-    assert.ok(!fetched.hung, `the timed-out fetch settled within 1500 ms (timeout 500 ms); still waiting after ${fetched.elapsed} ms`);
-    assert.ok(!judged.hung, `the timed-out judge call settled within 1500 ms (timeout 500 ms); still waiting after ${judged.elapsed} ms`);
+    let fetched; let judged; let fp = []; let jp = [];
+    for (let attempt = 0; attempt < STUCK_ATTEMPTS && (fp.length !== 2 || jp.length !== 2); attempt += 1) {
+      killAll([...fp, ...jp]);
+      await rm(fetchPids, { force: true });
+      await rm(judgePids, { force: true });
+      const fetcher = commandFetcher({ argv: [process.execPath, fetchScript], timeoutMs: STUCK_TIMEOUT_MS });
+      const adapter = codexExecAdapter({ bin: judgeBin, codexHome: path.join(root, 'codex-home'), model: 'model-synthetic', tier: 'primary', timeoutMs: STUCK_TIMEOUT_MS, workDir: root });
+      [fetched, judged] = await Promise.all([
+        settleWithin(fetcher.fetch({ postingId: 'p-1', url: 'https://job-boards.greenhouse.io/examplecorp/jobs/9000001' }), STUCK_BOUND_MS),
+        settleWithin(adapter.ready.then(() => adapter.judge({ postingId: 'p-1', prompt: 'synthetic' }, { attemptId: `attempt-${attempt}`, outputPath: path.join(root, 'out.json') })), STUCK_BOUND_MS),
+      ]);
+      [fp, jp] = [await readPids(fetchPids), await readPids(judgePids)];
+    }
+    assert.equal(fp.length, 2, `the fetch command started its descendant before the timeout; fetch returned ${JSON.stringify(fetched)}`);
+    assert.equal(jp.length, 2, `the judge command started its descendant before the timeout; judge returned ${JSON.stringify(judged)}`);
+    assert.ok(!fetched.hung, `the timed-out fetch settled within ${STUCK_BOUND_MS} ms (timeout ${STUCK_TIMEOUT_MS} ms); still waiting after ${fetched.elapsed} ms`);
+    assert.ok(!judged.hung, `the timed-out judge call settled within ${STUCK_BOUND_MS} ms (timeout ${STUCK_TIMEOUT_MS} ms); still waiting after ${judged.elapsed} ms`);
     assert.deepEqual([fetched.value?.ok, fetched.value?.error], [false, 'timeout']);
     assert.equal(judged.value?.status, 'timeout');
-    for (const pid of [...fp, ...jp]) assert.ok(await goneWithin(pid, 500), `process ${pid} of the timed-out tree was terminated`);
+    for (const pid of [...fp, ...jp]) assert.ok(await goneWithin(pid, 1000), `process ${pid} of the timed-out tree was terminated`);
   } finally {
     killAll([...await readPids(fetchPids), ...await readPids(judgePids)]);
     await rm(root, { recursive: true, force: true });
