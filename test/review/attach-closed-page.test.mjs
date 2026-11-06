@@ -26,6 +26,8 @@ for (const text of [
   'Applications remain open until our recruiting team confirms with the hiring manager that this position has been filled.',
   'Pay reflects the geographic differential for the location in which the position is filled.',
   'The role is closed to remote work.',
+  'Data Science Intern. Requirements: Python and SQL. This job is unavailable for remote work. Apply now.',
+  'Data Science Intern. Requirements: Python and SQL. Please note that this role is closed to remote work. Apply now.',
   'Relocation for this position not available.',
   'You will track how long each job is open and when the position is closed out.',
   'Open until this position has been filled.',
@@ -40,10 +42,12 @@ test('a status inside a long job description does not close it; the same status 
   assert.ok(closedPageWording(`This position has been filled. ${body}`));
   assert.ok(closedPageWording(`${body}\nThis job has expired.`));
   assert.ok(closedPageWording(`${body}Page not found`));
+  assert.ok(closedPageWording('Build your Career at Tesla\nJob not available\nThis job is unavailable at the moment.'));
 });
 
 test('a complete short job description is not an empty page', () => {
   assert.equal(hasNoPostingBody('Data Science Intern — Example Corp. Chicago, IL. Summer 2027, full time, paid. Build Python models and SQL dashboards. Current BS or MS students welcome. Must be authorized to work in the US. Apply using the form below.'), false);
+  assert.equal(hasNoPostingBody('Data Analyst Intern — Example Corp, Chicago. June–August 2027, $25/hour. Build dashboards, analyze customer data and present findings. Enrolled in a BS or MS program; Python and SQL proficiency. Apply below.'), false);
   assert.equal(hasNoPostingBody('Skip to main content Sign In Search for Jobs Follow Us'), true);
 });
 
