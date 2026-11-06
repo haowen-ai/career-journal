@@ -409,18 +409,3 @@ test('[L2] a lead withdrawn by a lifted company rule is restored by an eligible 
     assert.equal(db.prepare('SELECT status FROM applications WHERE id = ?').get(appId).status, 'withdrawn');
   }
 });
-
-test('[O1] every company not known to be small is location exempt; the size gate settles the unknown ones (user 2026-11-06)', async () => {
-  const { locationExempt } = await overridesModule();
-  const { companySizes } = await import('../../src/review/company-size.mjs');
-  const overrides = { locationExempt: { brands: [] }, companySizes: companySizes({ large: ['Big Example Co'], small: ['Tiny Example Co'],
-    decided: [{ company: 'Learned Example Co', size: 'large' }, { company: 'Learned Tiny Co', size: 'small' }], aliases: { 'Big Example Holdings': 'Big Example Co' } }) };
-  assert.equal(locationExempt('Big Example Co', overrides), true, 'a listed large company');
-  assert.equal(locationExempt('Learned Example Co', overrides), true, 'a company decided large');
-  assert.equal(locationExempt('Big Example Holdings', overrides), true, 'an alias of a large company');
-  assert.equal(locationExempt('Never Seen Co', overrides), true, 'unknown size: the delivery size gate decides it');
-  assert.equal(locationExempt('Tiny Example Co', overrides), false, 'a small company keeps the area rule');
-  assert.equal(locationExempt('Learned Tiny Co', overrides), false, 'a company decided small keeps the area rule');
-  assert.equal(locationExempt('Big Example Co', { locationExempt: { brands: [] } }), false, 'no size data, no size exemption');
-  assert.equal(locationExempt('', overrides), false, 'no company, no exemption');
-});

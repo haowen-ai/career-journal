@@ -130,13 +130,8 @@ export function withOverrides(screeningPolicy = {}, overrides) {
     companyAliases: aliases, limits: o.limits ?? [], companySizes: o.companySizes ?? null };
 }
 
-// User 2026-11-06: any US location for every big company, not only the listed brands. An unknown size
-// counts here: the delivery size gate decides it before anything reaches the queue.
 export function locationExempt(company, overrides, aliases = {}) {
-  if (!company) return false;
-  if (sameCompany(overrides?.locationExempt?.brands, company, aliases)) return true;
-  const sizes = overrides?.companySizes;
-  return Boolean(sizes) && sizes.sizeOf(company) !== 'small';
+  return Boolean(company) && sameCompany(overrides?.locationExempt?.brands, company, aliases);
 }
 
 // A place is in the US when it names a US state or the US, or ends in a US state
@@ -163,7 +158,7 @@ export function jevPlaceOnly(probabilities, thresholds) {
     && Object.entries(reject).every(([dimension, value]) => dimension === 'place' || probabilities[dimension] >= value);
 }
 
-// Replays the deterministic decision with an exempt company's US offices counted as
+// Replays the deterministic decision with an exempt brand's US offices counted as
 // in area. The replay stands only when it is eligible, or at the primary tier when
 // it escalates to the escalation tier. Anything else (a non-US office, a window
 // outside the exemption, any other failed rule or open question) keeps the
