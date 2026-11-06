@@ -91,28 +91,41 @@ export function builtinFetcher({ fetchImpl = globalThis.fetch, timeoutMs = 30000
   } };
 }
 
-// Wording of an employer page that no longer shows the posting. A condition such as "open until the
-// position is filled" describes a live posting, so a match right after one of those words does not count.
-const CLOSED_PAGE = new RegExp([
-  "this (?:position|job|posting|opening|role|requisition) (?:has been|is|was) (?:filled|closed|removed)",
-  "(?:position|job|posting|opening|role|requisition) has been (?:filled|closed|removed)",
-  "(?:position|job|posting|opening|role|requisition) has expired",
-  "(?:position|job|posting|opening|role|requisition) (?:is|has been) no longer (?:available|open|active)",
+// Wording of an employer page that no longer shows the posting. Two kinds, because a full job description can
+// say "filled" or "closed" about something else ("pay depends on where this position is filled"):
+// a notice names the page itself and counts anywhere; a status counts only as its own sentence or on a short page.
+const TARGET = '(?:position|job|posting|opening|role|requisition)';
+const PAGE_NOTICE = [
   "no longer accepting applications",
+  `${TARGET} (?:is|has been) no longer (?:available|open|active)`,
   "page you(?: are|['’]re) looking for (?:does not|doesn['’]t|cannot|can['’]t|could not|couldn['’]t|no longer)",
   "page not found",
   "job (?:posting )?not found",
-].join('|'), 'gi');
-const LIVE_CONDITION = /\b(?:until|once|when|after|before|if|which)\b[^.!?]*$/i;
+  "job not available",
+  "this job is unavailable",
+];
+const STATUS = [
+  `this ${TARGET} (?:has been|is|was) (?:filled|closed|removed)`,
+  `(?:(?:this|the) )?${TARGET} has been (?:filled|closed|removed)`,
+  `(?:(?:this|the) )?${TARGET} has expired`,
+];
+const CLOSED_PAGE = new RegExp([...PAGE_NOTICE, ...STATUS].join('|'), 'gi');
+const NOTICE = new RegExp(`^(?:${PAGE_NOTICE.join('|')})$`, 'i');
+const LIVE_CONDITION = /\b(?:until|once|when|where|after|before|if|which)\b/i;
+const SHORT_PAGE = 600;
 export function closedPageWording(text) {
   const value = String(text ?? '');
   for (const match of value.matchAll(CLOSED_PAGE)) {
-    if (!LIVE_CONDITION.test(value.slice(Math.max(0, match.index - 40), match.index))) return match[0];
+    const lead = value.slice(0, match.index).split(/[.!?\n]/).at(-1).trim();
+    if (LIVE_CONDITION.test(lead)) continue;
+    if (NOTICE.test(match[0]) || !lead || value.length < SHORT_PAGE) return match[0];
   }
   return null;
 }
-// A page this short with no requirements section shows no posting: an error page or an empty shell.
-export const isStubText = (text) => String(text ?? '').length < 600 && !/requirements|qualifications|required skills|minimum education/i.test(String(text ?? ''));
+// A page this short with no requirements section shows no posting (the fetcher sends it to a browser read).
+export const isStubText = (text) => String(text ?? '').length < SHORT_PAGE && !/requirements|qualifications|required skills|minimum education/i.test(String(text ?? ''));
+// A browser-read page: a person already opened it, so only a page with no job content at all is refused.
+export const hasNoPostingBody = (text) => isStubText(text) && !/responsibilit|experience|students?\b|degree|skills|duties|authorized to work|what you['’]ll do/i.test(String(text ?? ''));
 
 export function politeFetcher(inner, { perHost = 1, minGapMs = 1000, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), clock = Date.now } = {}) {
   if (!Number.isInteger(perHost) || perHost < 1 || minGapMs < 0) throw new Error('Invalid host fetch limits');

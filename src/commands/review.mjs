@@ -9,7 +9,7 @@ import { createSecondOpinion } from '../review/second-opinion.mjs';
 import { createJevSplit } from '../review/jev-split.mjs';
 import { runReview } from '../review/worker.mjs';
 import { createCompanySizeResolver } from '../review/company-size-runtime.mjs';
-import { commandFetcher, builtinFetcher, politeFetcher, validateSnapshot, closedPageWording, isStubText } from '../review/fetch.mjs';
+import { commandFetcher, builtinFetcher, politeFetcher, validateSnapshot, closedPageWording, hasNoPostingBody } from '../review/fetch.mjs';
 import { bootstrapExisting } from '../funnel/bootstrap.mjs';
 import { resolvePosting, duplicateGroups } from '../funnel/identity.mjs';
 import { segmentSections } from '../review/clauses.mjs';
@@ -20,6 +20,7 @@ import { postingLedger } from '../review/ledger.mjs';
 import { matchMailHits } from '../review/mail.mjs';
 import { annotateMail, unhide, deliver, deliveryPolicy, logReview, parseJson } from '../review/deliver.mjs';
 import { claimItem, atomic } from '../review/lease.mjs';
+import { userDecided } from '../review/ownership.mjs';
 import { redecideReviews } from '../review/redecide.mjs';
 import { releaseHolds } from '../review/release-holds.mjs';
 import { reclassifyReviews } from '../review/reclassify.mjs';
@@ -215,7 +216,8 @@ export async function reviewCommand(parsed, io, runtime = {}) {
         if (!result.text?.trim()) throw new Error('Attachment text is empty');
         // The page decides before any model sees it: a gone page settles closed, a page with no posting body is refused.
         const closed = closedPageWording(result.text);
-        if (!closed && isStubText(result.text)) throw new Error('Attachment too_short: the page shows no posting');
+        if (!closed && hasNoPostingBody(result.text)) throw new Error('Attachment too_short: the page shows no posting');
+        if (closed && userDecided(context.db, { ...context.db.prepare('SELECT * FROM reviews WHERE posting_id=?').get(postingId), application_id: posting.application_id })) throw new Error('Review is owned by a user decision');
         const inputs = closed ? await loadReviewInputs(context.root) : null;
         if (leasedByLiveRun(context.db, postingId, now)) { emit({ postingId, status: 'busy' }); return 75; }
         let busy = false;

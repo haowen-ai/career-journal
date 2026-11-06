@@ -6,13 +6,14 @@ import path from 'node:path';
 import { insertPosting, insertReview, seedApplication, T0 } from '../../test-utils/funnel-v3.mjs';
 import { SNAPSHOTS, writeReviewHome } from '../../test-utils/funnel-v3-fixtures.mjs';
 import { memoryIO } from '../../test-utils/helpers.mjs';
-import { closedPageWording, isStubText } from '../../src/review/fetch.mjs';
+import { closedPageWording, isStubText, hasNoPostingBody } from '../../src/review/fetch.mjs';
 
 for (const text of [
   "The page you are looking for doesn't exist.",
   'The page you’re looking for does not exist',
   'Page not found',
   'Job not found',
+  'Job not available. This job is unavailable at the moment.',
   'This job is no longer available',
   'This position has been filled.',
   'This posting has expired.',
@@ -21,14 +22,30 @@ for (const text of [
 
 for (const text of [
   'Applications are accepted until the position is filled.',
+  'The salary range depends on where this position is filled.',
+  'Applications remain open until our recruiting team confirms with the hiring manager that this position has been filled.',
   'Pay reflects the geographic differential for the location in which the position is filled.',
   'The role is closed to remote work.',
+  'Relocation for this position not available.',
   'You will track how long each job is open and when the position is closed out.',
   'Open until this position has been filled.',
   'We will review resumes once the position is closed to new candidates.',
   'Data Science Intern. You will build dashboards and models.',
   '',
 ]) test(`a live page does not read as closed: ${text || '(empty)'}`, () => assert.equal(closedPageWording(text), null));
+
+test('a status inside a long job description does not close it; the same status as its own sentence does', () => {
+  const body = 'Build Python models and SQL dashboards with the analytics team. '.repeat(12);
+  assert.equal(closedPageWording(`${body}Your manager reviews whether this position has been filled by a contractor.`), null);
+  assert.ok(closedPageWording(`This position has been filled. ${body}`));
+  assert.ok(closedPageWording(`${body}\nThis job has expired.`));
+  assert.ok(closedPageWording(`${body}Page not found`));
+});
+
+test('a complete short job description is not an empty page', () => {
+  assert.equal(hasNoPostingBody('Data Science Intern — Example Corp. Chicago, IL. Summer 2027, full time, paid. Build Python models and SQL dashboards. Current BS or MS students welcome. Must be authorized to work in the US. Apply using the form below.'), false);
+  assert.equal(hasNoPostingBody('Skip to main content Sign In Search for Jobs Follow Us'), true);
+});
 
 test('stub text has no posting body; a full posting does not count as a stub', () => {
   assert.equal(isStubText('Something went wrong. Please try again.'), true);
@@ -80,6 +97,22 @@ test('a queued lead whose page is gone leaves the queue', () => withHome(async (
   const result = await attach('Page not found');
   assert.equal(result.code, 0, result.out + result.err);
   await read((db) => assert.equal(db.prepare('SELECT a.status FROM applications a JOIN postings p ON p.application_id=a.id WHERE p.id=?').get('p-gone').status, 'withdrawn'));
+}));
+
+test('a gone page never withdraws a lead the user approved', () => withHome(async ({ attach, read }) => {
+  await read((db) => {
+    seed(db, { state: 'done', decision: 'eligible', code: null });
+    const app = seedApplication(db, { company: 'Example Corp', role: 'Role', status: 'lead' });
+    db.prepare('UPDATE postings SET application_id=? WHERE id=?').run(app.id, 'p-gone');
+    db.prepare("INSERT INTO review_log(posting_id,at,stage,kind,payload_json) VALUES ('p-gone',?,'deliver','user','{}')").run(T0);
+  });
+  const result = await attach('Page not found');
+  assert.notEqual(result.code, 0);
+  assert.match(result.out + result.err, /owned by a user decision/);
+  await read((db) => {
+    assert.equal(db.prepare('SELECT a.status FROM applications a JOIN postings p ON p.application_id=a.id WHERE p.id=?').get('p-gone').status, 'lead');
+    assert.equal(db.prepare('SELECT decision FROM reviews WHERE posting_id=?').get('p-gone').decision, 'eligible');
+  });
 }));
 
 test('attaching a stub with no posting body is refused and the hold stays', () => withHome(async ({ attach, read }) => {
