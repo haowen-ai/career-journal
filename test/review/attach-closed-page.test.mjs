@@ -21,6 +21,9 @@ for (const text of [
 
 for (const text of [
   'Applications are accepted until the position is filled.',
+  'Pay reflects the geographic differential for the location in which the position is filled.',
+  'The role is closed to remote work.',
+  'You will track how long each job is open and when the position is closed out.',
   'Open until this position has been filled.',
   'We will review resumes once the position is closed to new candidates.',
   'Data Science Intern. You will build dashboards and models.',

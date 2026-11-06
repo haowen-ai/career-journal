@@ -94,7 +94,8 @@ export function builtinFetcher({ fetchImpl = globalThis.fetch, timeoutMs = 30000
 // Wording of an employer page that no longer shows the posting. A condition such as "open until the
 // position is filled" describes a live posting, so a match right after one of those words does not count.
 const CLOSED_PAGE = new RegExp([
-  "(?:position|job|posting|opening|role|requisition) (?:has been |is |was )?(?:filled|closed|removed|expired)",
+  "this (?:position|job|posting|opening|role|requisition) (?:has been|is|was) (?:filled|closed|removed)",
+  "(?:position|job|posting|opening|role|requisition) has been (?:filled|closed|removed)",
   "(?:position|job|posting|opening|role|requisition) has expired",
   "(?:position|job|posting|opening|role|requisition) (?:is|has been) no longer (?:available|open|active)",
   "no longer accepting applications",
@@ -102,7 +103,7 @@ const CLOSED_PAGE = new RegExp([
   "page not found",
   "job (?:posting )?not found",
 ].join('|'), 'gi');
-const LIVE_CONDITION = /\b(?:until|once|when|after|before|if)\b[^.!?]*$/i;
+const LIVE_CONDITION = /\b(?:until|once|when|after|before|if|which)\b[^.!?]*$/i;
 export function closedPageWording(text) {
   const value = String(text ?? '');
   for (const match of value.matchAll(CLOSED_PAGE)) {
