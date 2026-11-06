@@ -9,7 +9,7 @@ import { createSecondOpinion } from '../review/second-opinion.mjs';
 import { createJevSplit } from '../review/jev-split.mjs';
 import { runReview } from '../review/worker.mjs';
 import { createCompanySizeResolver } from '../review/company-size-runtime.mjs';
-import { commandFetcher, builtinFetcher, politeFetcher, validateSnapshot } from '../review/fetch.mjs';
+import { commandFetcher, builtinFetcher, politeFetcher, validateSnapshot, closedPageWording, isStubText } from '../review/fetch.mjs';
 import { bootstrapExisting } from '../funnel/bootstrap.mjs';
 import { resolvePosting, duplicateGroups } from '../funnel/identity.mjs';
 import { segmentSections } from '../review/clauses.mjs';
@@ -33,7 +33,7 @@ const usage = ['Usage: career-journal review run|redecide|reclassify|release-hol
   '  review settle-backlog [--apply] [--profile <path>]   dry run unless --apply',
   '  review hold --posting <id> --code <code> --reason <text>',
   '  review list [--held] [--json]',
-  '  review attach --posting <id> --file <page>   exits 75 (busy) while a live run leases the posting',
+  '  review attach --posting <id> --file <page>   a gone page settles closed; a page with no posting body is refused; exits 75 (busy) while a live run leases the posting',
   '  review report [--run-id <id>] [--lang zh]   review receipt [--run-id <id>] [--summary [zh]]'].join('\n');
 const listOption = (value, name) => {
   const items = [value].flat().flatMap((item) => (typeof item === 'string' ? item.split(',') : [])).map((item) => item.trim()).filter(Boolean);
@@ -213,6 +213,10 @@ export async function reviewCommand(parsed, io, runtime = {}) {
         let result; try { result = JSON.parse(content); } catch { result = { text: content }; }
         if (result.ok !== undefined && !validateSnapshot(posting, result).identityOk) throw new Error('Attachment identity validation failed');
         if (!result.text?.trim()) throw new Error('Attachment text is empty');
+        // The page decides before any model sees it: a gone page settles closed, a page with no posting body is refused.
+        const closed = closedPageWording(result.text);
+        if (!closed && isStubText(result.text)) throw new Error('Attachment too_short: the page shows no posting');
+        const inputs = closed ? await loadReviewInputs(context.root) : null;
         if (leasedByLiveRun(context.db, postingId, now)) { emit({ postingId, status: 'busy' }); return 75; }
         let busy = false;
         atomic(context.db, () => {
@@ -220,9 +224,14 @@ export async function reviewCommand(parsed, io, runtime = {}) {
           context.db.prepare(`INSERT INTO snapshots(id,posting_id,content_hash,fetched_at,final_url,method,identity_ok,fields_json,sections_json,text) VALUES (?,?,?,?,?,'manual',1,?,?,?)`)
             .run(randomUUID(), postingId, dependencyHash({ text: result.text, title: result.title, requisitionId: result.requisitionId, locations: result.locations, jsonLd: result.jsonLd }), now, result.finalUrl ?? posting.canonical_url, JSON.stringify({ ...result, text: undefined }), JSON.stringify(segmentSections(result.text)), result.text);
           context.db.prepare("UPDATE reviews SET state='due',stage='judge',next_due=?,lease_owner=NULL,lease_until=NULL,updated_at=? WHERE posting_id=?").run(now, now, postingId);
+          if (closed) {
+            const fence = claimItem(context.db, postingId, { owner: 'review-attach', now }); if (!fence) throw new Error('Review is leased');
+            context.db.prepare("UPDATE postings SET availability='closed_verified',updated_at=? WHERE id=?").run(now, postingId);
+            deliver(context.db, { postingId, fence, now, policy: deliveryPolicy(inputs), verdict: { decision: 'not_eligible', code: 'closed_verified' } });
+          }
         });
         if (busy) { emit({ postingId, status: 'busy' }); return 75; }
-        emit({ postingId, method: 'manual' }); return 0;
+        emit({ postingId, method: 'manual', ...(closed ? { closed } : {}) }); return 0;
       }
       case 'annotate': {
         if (options.hits) {

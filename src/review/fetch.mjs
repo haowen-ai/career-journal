@@ -85,11 +85,33 @@ export function builtinFetcher({ fetchImpl = globalThis.fetch, timeoutMs = 30000
         company: job?.hiringOrganization?.name, requisitionId: job?.identifier?.value ?? null,
         locations: [job?.jobLocation].flat().filter(Boolean), offices: [], remote: job?.jobLocationType ?? null,
         employmentType: job?.employmentType, text: plainText(job?.description ?? text), jsonLd: job ?? null,
-        closedWording: /(?:position (?:has been |is )?(?:filled|closed)|no longer accepting applications|job is no longer available)/i.exec(plainText(text))?.[0] ?? null };
+        closedWording: closedPageWording(plainText(text)) };
     } catch (error) { return { ok: false, error: controller.signal.aborted ? 'timeout' : error.message }; }
     finally { clearTimeout(timer); }
   } };
 }
+
+// Wording of an employer page that no longer shows the posting. A condition such as "open until the
+// position is filled" describes a live posting, so a match right after one of those words does not count.
+const CLOSED_PAGE = new RegExp([
+  "(?:position|job|posting|opening|role|requisition) (?:has been |is |was )?(?:filled|closed|removed|expired)",
+  "(?:position|job|posting|opening|role|requisition) has expired",
+  "(?:position|job|posting|opening|role|requisition) (?:is|has been) no longer (?:available|open|active)",
+  "no longer accepting applications",
+  "page you(?: are|['’]re) looking for (?:does not|doesn['’]t|cannot|can['’]t|could not|couldn['’]t|no longer)",
+  "page not found",
+  "job (?:posting )?not found",
+].join('|'), 'gi');
+const LIVE_CONDITION = /\b(?:until|once|when|after|before|if)\b[^.!?]*$/i;
+export function closedPageWording(text) {
+  const value = String(text ?? '');
+  for (const match of value.matchAll(CLOSED_PAGE)) {
+    if (!LIVE_CONDITION.test(value.slice(Math.max(0, match.index - 40), match.index))) return match[0];
+  }
+  return null;
+}
+// A page this short with no requirements section shows no posting: an error page or an empty shell.
+export const isStubText = (text) => String(text ?? '').length < 600 && !/requirements|qualifications|required skills|minimum education/i.test(String(text ?? ''));
 
 export function politeFetcher(inner, { perHost = 1, minGapMs = 1000, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), clock = Date.now } = {}) {
   if (!Number.isInteger(perHost) || perHost < 1 || minGapMs < 0) throw new Error('Invalid host fetch limits');
@@ -153,6 +175,6 @@ export function validateSnapshot(posting, result) {
   if (!(req && fetchedReq) && !keyedApi && !reqInUrl && !retainedIdAndTitle
     && normalize(posting.title) !== normalize(result.title)) return fail('wrong_posting');
   const hasJob = result.jsonLd && ([result.jsonLd['@type']].flat().includes('JobPosting') || result.jsonLd.title);
-  if (text.length < 600 && !hasJob && !/requirements|qualifications|required skills|minimum education/i.test(text)) return fail('too_short');
+  if (!hasJob && isStubText(text)) return fail('too_short');
   return { identityOk: true, reason: null };
 }
