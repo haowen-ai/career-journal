@@ -240,3 +240,15 @@ test('[B] review run without attempt, fetch or deadline limits finishes every du
     assert.deepEqual([zero.code, zero.receipt.status, zero.receipt.counts?.judged], [0, 'ok', 1], `0 means unbounded: ${zero.err}`);
   } finally { await rm(home, { recursive: true, force: true }); }
 });
+
+test('rejudge --posting --retry-now reschedules a backing-off due row to now; without it the row stays already_open', () => {
+  const db = freshDb();
+  settled(db, 'p-wait', { state: 'due', decision: null, code: null });
+  db.prepare("UPDATE reviews SET stage='fetch', next_due=? WHERE posting_id='p-wait'").run(at(50));
+  assert.deepEqual(rejudgeReviews(db, { postings: ['p-wait'], now: at(1) }).skipped, { already_open: 1 });
+  assert.throws(() => rejudgeReviews(db, { codes: ['outside_area'], retryNow: true, now: at(1) }), /--retry-now needs --posting/);
+  const r = rejudgeReviews(db, { postings: ['p-wait'], retryNow: true, now: at(1), apply: true });
+  assert.equal(r.requeued, 1);
+  const row = reviewOf(db, 'p-wait');
+  assert.deepEqual([row.state, row.stage, row.next_due], ['due', 'fetch', at(1)]);
+});

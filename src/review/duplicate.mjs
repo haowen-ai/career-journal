@@ -1,12 +1,20 @@
+import { randomUUID } from 'node:crypto';
 import { companyKey, titleSimilarity } from '../scan/dedupe.mjs';
 import { SUBMITTED_STATUSES } from '../funnel/contract.mjs';
+import { recordEvent } from '../domain/events.mjs';
+import { redact } from '../runtime/redact.mjs';
+import { atomic, assertFence, claimItem } from './lease.mjs';
 
 // A cross-ATS repost of a role already submitted: separate postings (identities are never merged),
 // but the later one is settled not_eligible duplicate_submitted, linked to the submitted application.
 // All must hold:
 //   - the other application has submission evidence (applied_at, a submitted status, or a submitted
 //     event); a merely withdrawn application is not evidence;
-//   - same company through the alias map, same normalized title (equal title tokens);
+//   - same company through the alias map, same normalized title (equal title tokens) of the trusted official titles:
+//     each side's latest official snapshot title (fields_json.title); a side without one falls back to its posting
+//     title (the new posting) or the application's role (the submitted side). Plan 2026-11-10 (root cause 3): the
+//     submitted row's role is often a board's shortened title ("Data Scientist Intern" for the official
+//     "Data Scientist Intern - Summer 2027"), which skipped the text comparison;
 //   - official text similarity >= threshold (word 3-gram Jaccard over the latest snapshots of both);
 //   - season/year tokens compatible (equal, or absent on one side);
 //   - location sets overlapping when both are known;
@@ -64,6 +72,11 @@ export function differentRequisitions(leftAliases, rightAliases) {
 
 const latestText = (db, postingId) => db.prepare(`SELECT text FROM snapshots WHERE posting_id=? AND identity_ok=1 AND text IS NOT NULL AND text<>''
   ORDER BY fetched_at DESC,rowid DESC LIMIT 1`).get(postingId)?.text ?? null;
+// The official title of the latest identity-checked snapshot (fields_json.title), or null.
+function officialTitle(db, postingId) {
+  const row = db.prepare(`SELECT fields_json FROM snapshots WHERE posting_id=? AND identity_ok=1 ORDER BY fetched_at DESC,rowid DESC LIMIT 1`).get(postingId);
+  try { const title = JSON.parse(row?.fields_json ?? '{}')?.title; return typeof title === 'string' && title.trim() ? title.trim() : null; } catch { return null; }
+}
 const aliasesOf = (db, postingId) => db.prepare('SELECT alias,kind FROM posting_aliases WHERE posting_id=?').all(postingId);
 function locationsOf(db, postingId, fallback = []) {
   const row = db.prepare('SELECT fields_json FROM observations WHERE posting_id=? ORDER BY observed_at DESC,rowid DESC LIMIT 1').get(postingId);
@@ -90,10 +103,11 @@ export function duplicateOfSubmitted(db, posting, { companyAliases, text, locati
   const ownAliases = aliasesOf(db, posting.id);
   const ownLocations = locationsOf(db, posting.id, locations ?? []);
   const ownSeasons = seasonTokens(posting.title, ownText);
+  const ownTitle = (posting.id ? officialTitle(db, posting.id) : null) ?? posting.title;
   for (const app of candidates ?? submittedApplications(db)) {
     if (app.id === posting.application_id || companyKey(app.company, companyAliases) !== company) continue;
-    if (titleSimilarity(app.role, posting.title) < 1) continue;
     for (const other of db.prepare('SELECT * FROM postings WHERE application_id=? AND merged_into IS NULL AND id<>?').all(app.id, posting.id)) {
+      if (titleSimilarity(officialTitle(db, other.id) ?? app.role, ownTitle) < 1) continue;
       const otherText = latestText(db, other.id);
       if (!otherText) continue;
       if (differentRequisitions(ownAliases, aliasesOf(db, other.id))) continue;
@@ -107,3 +121,44 @@ export function duplicateOfSubmitted(db, posting, { companyAliases, text, locati
   return null;
 }
 export { submittedApplications };
+
+// Plan 2026-11-10 (v4): the one-time `queue rescreen --only dedup --apply` withdraws a visible lead that is a confirmed
+// duplicate (already_submitted by job id / canonical URL, or duplicate_submitted by the body rule) without delivery:
+// delivery always runs the company exclusion first, which would rewrite the reason and skip the body check. Nothing
+// but the dedup verdict is applied here: no exclusion, size, limit or direction gate. The withdrawal is review-owned,
+// automated and fenced like a delivery: the review lease is claimed, checked and cleared inside one transaction.
+// violation: { code: 'already_submitted' | 'duplicate_submitted', applicationIds: [submitted id], detail? }.
+export const DEDUP_CODES = Object.freeze(['already_submitted', 'duplicate_submitted']);
+export function withdrawDuplicateLead(db, { applicationId, postingId = null, violation, now, owner = 'queue-rescreen-dedup' }) {
+  if (!DEDUP_CODES.includes(violation?.code)) throw new Error(`Not a dedup verdict: ${violation?.code}`);
+  const code = violation.code;
+  const evidence = (violation.applicationIds ?? []).map((id) => ({ applicationId: id, match: violation.detail ?? null }));
+  if (db.prepare('SELECT status FROM applications WHERE id=?').get(applicationId)?.status !== 'lead') return { action: 'not_a_lead' };
+  const hasReview = postingId && db.prepare('SELECT 1 FROM reviews WHERE posting_id=?').get(postingId);
+  const fence = hasReview ? claimItem(db, postingId, { owner, now }) : null;
+  if (hasReview && !fence) return { action: 'busy' };
+  return atomic(db, () => {
+    const app = db.prepare('SELECT * FROM applications WHERE id=?').get(applicationId);
+    if (!app || app.status !== 'lead') throw new Error(`Application ${applicationId} is not a lead`);
+    if (fence) {
+      assertFence(db, postingId, fence);
+      const review = db.prepare('SELECT evidence_json FROM reviews WHERE posting_id=?').get(postingId);
+      let old = {};
+      try { old = JSON.parse(review?.evidence_json || '{}') ?? {}; } catch { old = {}; }
+      const kept = { ...old, evidence, gate: { code, judged: false, provenance: old.gate ? old.gate.provenance ?? null : old.provenance ?? null, duplicateOf: evidence[0] ?? null },
+        provenance: 'automated' };
+      const changed = db.prepare(`UPDATE reviews SET state='done',decision='not_eligible',code=?,stage='deliver',evidence_json=?,hold_owner=NULL,hold_since=NULL,next_due=NULL,
+        lease_owner=NULL,lease_until=NULL,updated_at=? WHERE posting_id=? AND lease_owner=? AND lease_generation=?`)
+        .run(code, JSON.stringify(kept), now, postingId, fence.owner, fence.generation).changes;
+      if (changed !== 1) throw new Error('Dedup withdrawal readback mismatch');
+      db.prepare("INSERT INTO review_log(posting_id,at,stage,kind,payload_json) VALUES (?,?,'deliver','outcome',?)")
+        .run(postingId, now, redact(JSON.stringify({ action: 'rescreen_dedup_withdrawn', applicationId, code, evidence })));
+    }
+    recordEvent(db, { id: randomUUID(), applicationId, type: 'review_withdrawn', observedAt: now, recordedAt: now, title: 'review_withdrawn', note: code,
+      source: { actor: 'review-worker', kind: 'queue-rescreen-dedup', code, ...(postingId ? { postingId } : {}), evidence, automatedProvenance: true }, statusAfter: 'withdrawn' }, { withinTransaction: true });
+    db.prepare("UPDATE applications SET skip_reason=?,skip_owner='review',updated_at=? WHERE id=?").run(code, now, applicationId);
+    const back = db.prepare('SELECT status,skip_reason FROM applications WHERE id=?').get(applicationId);
+    if (back.status !== 'withdrawn' || back.skip_reason !== code) throw new Error('Dedup withdrawal readback mismatch');
+    return { action: 'withdrawn' };
+  });
+}

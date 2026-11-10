@@ -278,7 +278,9 @@ test('[B] the judge pool refills free slots instead of waiting for the slowest i
     } };
   };
   const started = Date.now();
-  await runReview(runOptions(db, { budget: 60, concurrency: 4, pages: q.pages, judges: { primary: slowJudge('primary'), escalation: slowJudge('escalation') } }));
+  // Same-title grouping (2026-11-09) is off: the twelve postings share a title and text on purpose to measure the pool.
+  await runReview(runOptions(db, { budget: 60, concurrency: 4, pages: q.pages, judges: { primary: slowJudge('primary'), escalation: slowJudge('escalation') },
+    inputs: () => reviewInputs({ policy: { ...REVIEW_POLICY, grouping: { windowDays: 0 } } }) }));
   const elapsed = Date.now() - started;
   for (const id of ids) assert.equal(reviewOf(db, id).state, 'done', `${id} judged`);
   // Batches of 4 would wait 400 ms three times (≥ 1200 ms); a refilling pool finishes in roughly one slow call plus a few fast ones.

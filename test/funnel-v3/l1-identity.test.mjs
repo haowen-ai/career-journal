@@ -124,9 +124,12 @@ for (const status of ['lead', 'applied', 'rejected', 'withdrawn']) {
     bootstrapExisting(db, { provenance: { automatedSkipPrefixes: [], userDeclineMarkers: [] }, now: T0 });
     await batch(db, [record({ sourceId: '9300009', url: 'https://job-boards.greenhouse.io/examplecorp/jobs/9300009', title: 'Analytics Intern' })]);
     // Amended for dedupe D2 (2026-10-27): after a submitted application the same program is never reviewed again.
+    // Amended again 2026-11-10 (plan intern-scan/plans/2026-11-10-dedup-fix.md, root cause 5): a same title with a
+    // different requisition id is no longer settled already_submitted; it is reviewed (and flagged suspected_duplicate
+    // when company-overrides.json has a duplicateCheck block, which this policy does not).
     const review = reviewOf(db, postingFor(db, 'source:greenhouse:9300009'));
-    if (status === 'applied' || status === 'rejected') assert.equal(review.code, 'already_submitted');
-    else assert.equal(review.state, 'due');
+    assert.equal(review.state, 'due');
+    assert.notEqual(review.code, 'already_submitted');
   });
 }
 

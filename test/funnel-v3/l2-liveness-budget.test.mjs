@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { freshDb, load, insertPosting, insertReview, reviewOf, fakeJudge, fakeFetcher, T0, at } from '../../test-utils/funnel-v3.mjs';
-import { FACTS, REVIEW_POLICY, SCREENING_POLICY, SNAPSHOTS, JUDGMENTS, page, snapshotTitle, reviewInputs } from '../../test-utils/funnel-v3-fixtures.mjs';
+import { FACTS, REVIEW_POLICY, SCREENING_POLICY, SNAPSHOTS, JUDGMENTS, page, snapshotTitle, judgment, reviewInputs } from '../../test-utils/funnel-v3-fixtures.mjs';
 
 const worker = () => load('L2', './src/review/worker.mjs', ['runReview']);
 const budgetModule = () => load('L2', './src/review/budget.mjs', ['createBudget']);
@@ -53,7 +53,9 @@ test('[L2] every judge call has exactly one attempt row; escalations count; noth
   const { runReview } = await worker();
   const db = freshDb();
   const ids = [arrive(db, { now: T0, snapshot: 'undergradOnly' }), arrive(db, { now: T0 }), arrive(db, { now: T0 })];
-  const primary = fakeJudge({ tier: 'primary', answers: (request) => ({ output: request.postingId === ids[0] ? JUDGMENTS.undergradOnly : JUDGMENTS.eligible }) });
+  // Amendment G2: a quoted degree rejection is final at the primary tier; a non-final code (requirement) still escalates.
+  const nonFinal = judgment({ criteria: [{ ...JUDGMENTS.undergradOnly.criteria[0], key: 'requirement' }] });
+  const primary = fakeJudge({ tier: 'primary', answers: (request) => ({ output: request.postingId === ids[0] ? nonFinal : JUDGMENTS.eligible }) });
   const escalation = fakeJudge({ tier: 'escalation', answers: () => ({ output: JUDGMENTS.undergradOnly }) });
   const receipt = await runReview(nightOptions(db, { now: T0, budget: 3, runId: 'review-1', judges: { primary, escalation } }));
   const attempts = db.prepare('SELECT COUNT(*) n FROM attempts').get().n;

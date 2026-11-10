@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createApplication } from '../commands/application.mjs';
-import { bindApplication, submittedApplicationIndex, submittedDuplicate } from '../funnel/identity.mjs';
+import { bindApplication, submittedApplicationIndex, submittedDuplicate, identityOptionsOf, suspectedDuplicates, suspectedFlags, SUSPECTED_FLAG } from '../funnel/identity.mjs';
 import { SUBMITTED_STATUSES } from '../funnel/contract.mjs';
 import { recordEvent } from '../domain/events.mjs';
 import { atomic, assertFence, claimItem } from './lease.mjs';
@@ -135,7 +135,8 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     authorization ??= storedReopenAuthorization(db, review);
     if (heldReleaseBlock(review, verdict, { fresh, explicit })) verdict = keepHold(review, verdict);
     let app = posting.application_id ? db.prepare('SELECT * FROM applications WHERE id=?').get(posting.application_id) : null;
-    const duplicate = submittedDuplicate(db, posting, { companyAliases: policy.companyAliases });
+    const identity = identityOptionsOf(policy);
+    const duplicate = submittedDuplicate(db, posting, identity);
     const oldEvidence = parseJson(review.evidence_json);
     const lastEvent = app && db.prepare('SELECT * FROM application_events WHERE application_id=? ORDER BY recorded_at DESC,rowid DESC LIMIT 1').get(app.id);
     const lastStatus = app && db.prepare('SELECT * FROM application_events WHERE application_id=? AND status_after IS NOT NULL ORDER BY recorded_at DESC,rowid DESC LIMIT 1').get(app.id);
@@ -183,8 +184,16 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     if (duplicate) value = { decision: 'not_eligible', code: 'already_submitted', evidence: [duplicate] };
     // A cross-ATS repost of a submitted role (src/review/duplicate.mjs): linked, never merged.
     const repost = !duplicate && value.decision === 'eligible'
-      ? duplicateOfSubmitted(db, posting, { companyAliases: policy.companyAliases, text, locations: (value.location?.offices ?? []).map((office) => office.place) }) : null;
+      ? duplicateOfSubmitted(db, posting, { companyAliases: identity.companyAliases, text, locations: (value.location?.offices ?? []).map((office) => office.place) }) : null;
     if (repost) value = { ...value, decision: 'not_eligible', code: 'duplicate_submitted', judged: true, question: null, holdFactIds: [], nextAction: null };
+    // Plan 2026-11-10: a posting that becomes (or stays) a lead is compared again with submitted applications and open
+    // leads, so a lead delivered earlier in the same run counts. A similar title is only flagged; the decision stands.
+    // With a duplicateCheck block the flags are recomputed here (kept ones from a replayed verdict are dropped first).
+    if (policy.duplicateCheck) {
+      const suspects = !duplicate && !repost && ['eligible', 'unclear'].includes(value.decision)
+        ? suspectedFlags(suspectedDuplicates(db, posting, { identityOptions: identity, duplicateCheck: policy.duplicateCheck, exclude: [app?.id] })) : [];
+      value = { ...value, flags: [...new Set([...(value.flags ?? []).filter((flag) => !String(flag).startsWith(SUSPECTED_FLAG)), ...suspects])] };
+    }
     const capped = !duplicate && (value.decision === 'eligible' || LIMIT_CODES.includes(value.code))
       && evaluateLimits(posting.company, { policy, now, db, program: value.program, exclude: app?.id ?? null });
     // The cap keeps the eligible verdict's fields so the startup pass can restore it without a model call.
@@ -223,8 +232,8 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     else if (app?.status === 'prepared') { action = 'prepared'; held = false; }
     else {
       if (!app && value.decision !== 'not_eligible' && value.decision !== 'dropped') {
-        app = createApplication(db, { company: posting.company, role: posting.title, jobUrl: /^https?:/.test(posting.canonical_url) ? posting.canonical_url : `https://${posting.canonical_url}`, externalId: `posting:${postingId}`, companyAliases: policy.companyAliases }, now);
-        const bound = bindApplication(db, app.id, { now, companyAliases: policy.companyAliases });
+        app = createApplication(db, { company: posting.company, role: posting.title, jobUrl: /^https?:/.test(posting.canonical_url) ? posting.canonical_url : `https://${posting.canonical_url}`, externalId: `posting:${postingId}`, companyAliases: identity.companyAliases, jobIdFormats: identity.jobIdFormats }, now);
+        const bound = bindApplication(db, app.id, { now, ...identity });
         if (bound.action === 'conflict' || bound.postingId !== postingId) throw new Error('Delivery identity conflict');
         db.prepare('UPDATE postings SET application_id=? WHERE id=?').run(app.id, postingId);
         action = 'created';
@@ -306,6 +315,17 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
       }
       delete evidence.gate;
     }
+    // A pre-fetch rule settlement (gates.mjs, amendment G): automated, never a group source; a later delivery that is
+    // not a rule settlement drops the marker and gives back the provenance it replaced.
+    if (value.ruleGate && !duplicate) {
+      evidence.ruleGate = { ...value.ruleGate, provenance: oldEvidence.ruleGate ? oldEvidence.ruleGate.provenance ?? null : evidence.provenance ?? null };
+      evidence.provenance = 'automated';
+    } else if (oldEvidence.ruleGate) {
+      if (!LIMIT_CODES.includes(value.code) && !directionOwned && !duplicate && !userExcluded && !evidence.gate) {
+        if (oldEvidence.ruleGate.provenance) evidence.provenance = oldEvidence.ruleGate.provenance; else delete evidence.provenance;
+      }
+      delete evidence.ruleGate;
+    }
     if (duplicate) evidence.provenance = 'automated';
     // A stored reopen authorization is consumed by this delivery.
     delete evidence.reopenAuthorization;
@@ -313,8 +333,11 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     else delete evidence.modelDecision;
     if (value.jev) evidence.jev = value.jev;
     const userHold = held && !['unavailable','quota_full','quota_reconciliation'].includes(value.code);
+    // Suspected-duplicate flags are recomputed at each delivery that checks them (a duplicateCheck block present).
+    const recheck = Boolean(policy.duplicateCheck);
     db.prepare('UPDATE reviews SET flags_json=? WHERE posting_id=?')
-      .run(JSON.stringify([...new Set([...parseJson(review.flags_json, []).filter((flag) => !['term_inferred', 'model_decided', 'disputed', 'jev_decided', 'hold_kept', RELIST_FLAG, EVIDENCE_FLAG].includes(flag)), ...(value.flags ?? [])])]), postingId);
+      .run(JSON.stringify([...new Set([...parseJson(review.flags_json, []).filter((flag) => !['term_inferred', 'model_decided', 'disputed', 'jev_decided', 'hold_kept', 'title_rule', 'location_rule', 'automated', RELIST_FLAG, EVIDENCE_FLAG].includes(flag)
+        && !(recheck && String(flag).startsWith(SUSPECTED_FLAG))), ...(value.flags ?? [])])]), postingId);
     db.prepare(`UPDATE reviews SET state=?,decision=?,code=?,evidence_json=?,deadline_json=?,hold_owner=?,hold_since=?,next_due=?,stage='deliver',
       lease_owner=NULL,lease_until=NULL,updated_at=? WHERE posting_id=? AND lease_owner=? AND lease_generation=?`)
       .run(held ? 'held' : 'done', value.decision, protectedApp ? 'superseded_by_user' : value.code ?? null, JSON.stringify(evidence), JSON.stringify(value.deadline ?? {}),
@@ -333,13 +356,14 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
 // unchanged reviews are never requeued for a paid judgment.
 export function suppressSubmittedDuplicates(db, { now, policy = {}, owner = 'review-dedupe' }) {
   return atomic(db, () => {
-    const index = submittedApplicationIndex(db, { companyAliases: policy.companyAliases });
+    const identity = identityOptionsOf(policy);
+    const index = submittedApplicationIndex(db, identity);
     let suppressed = 0;
     // Decide once: only open work (due/held/failed reviews and visible leads) is looked at; settled history stays.
     for (const posting of db.prepare(`SELECT p.*,r.posting_id,r.state,r.code,a.status application_status
       FROM postings p JOIN reviews r ON r.posting_id=p.id LEFT JOIN applications a ON a.id=p.application_id
       WHERE p.merged_into IS NULL AND (r.state IN ('due','held','failed') OR r.decision='eligible' AND a.status='lead')`).all()) {
-      if (userDecided(db, posting) || !submittedDuplicate(db, posting, { companyAliases: policy.companyAliases, index })) continue;
+      if (userDecided(db, posting) || !submittedDuplicate(db, posting, { ...identity, index })) continue;
       if (posting.state === 'done' && posting.code === 'already_submitted'
         && (!posting.application_id || posting.application_status === 'withdrawn')) continue;
       const fence = claimItem(db, posting.id, { owner, now });

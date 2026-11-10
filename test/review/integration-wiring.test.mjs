@@ -156,6 +156,27 @@ test('[INT-a] queue rescreen --decide-sizes settles unknown lead companies first
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
+// 2026-11-10 dedup fix, code review: --only dedup never decides company sizes. The argument conflict is rejected
+// before anything runs: no Jev/model call, company-size.json unchanged.
+test('[INT-a] queue rescreen --only dedup --decide-sizes is a usage error before the size resolver runs', async () => {
+  const { home, profileDir, cli, open } = await cliHome('cj-int-dedup-sizes-');
+  try {
+    const sizes = JSON.stringify({ large: ['Big Example Co'], small: [] });
+    await writeFile(path.join(profileDir, 'company-size.json'), sizes);
+    const context = await open();
+    seedApplication(context.db, { company: 'Unknown Size Example Co', role: 'Data Science Intern' });
+    context.db.close();
+    const asked = [];
+    const companySize = { askJev: async (question, { company }) => { asked.push(company); return { probability: 0.05 }; } };
+    const resolveCompanySizes = async (input) => { asked.push(...input.companies); return { decided: [], failed: [] }; };
+    const result = await cli(['queue', 'rescreen', '--only', 'dedup', '--decide-sizes', '--json'], { review: { companySize, resolveCompanySizes } });
+    assert.notEqual(result.code, 0, 'the conflicting call fails');
+    assert.match(result.err, /--decide-sizes/);
+    assert.deepEqual(asked, [], 'the size resolver is never called');
+    assert.equal(await readFile(path.join(profileDir, 'company-size.json'), 'utf8'), sizes, 'company-size.json is untouched');
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
 // ===================================================================== (b) startup pass
 
 test('[INT-b] the startup pass separates old identity holds and re-queues a system_failure hold once, then reports it external', async () => {

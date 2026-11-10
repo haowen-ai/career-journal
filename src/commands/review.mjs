@@ -24,13 +24,13 @@ import { userDecided } from '../review/ownership.mjs';
 import { redecideReviews } from '../review/redecide.mjs';
 import { releaseHolds } from '../review/release-holds.mjs';
 import { reclassifyReviews } from '../review/reclassify.mjs';
-import { rejudgeReviews, settleBacklog, holdReview } from '../review/backlog.mjs';
+import { rejudgeReviews, settleBacklog, holdReview, scanReviewable } from '../review/backlog.mjs';
 import { loadScanProfile } from '../scan/profile-input.mjs';
 import { profileOption, scanPolicy } from './scan.mjs';
 
 const usage = ['Usage: career-journal review run|redecide|reclassify|release-holds|rejudge|settle-backlog|hold|bootstrap|list|report|receipt|attach|add|annotate|unhide|resolve|ledger|audit|daily-finalize|eval',
   '  review run [--budget <n>] [--max-fetches <n>] [--deadline-min <m>] [--deadline-at <time>] [--concurrency <n>]   limits optional; omitted or 0 = unbounded',
-  '  review rejudge (--code <a,b> [--company <name>] [--since <date>] | --leads | --posting <id,...>) [--apply]   dry run unless --apply',
+  '  review rejudge (--code <a,b> [--company <name>] [--since <date>] [--reclassified [--flag <name>]] | --leads | --posting <id,...>) [--apply]   dry run unless --apply; --reclassified keeps only scan drops that today\'s scan rules would review',
   '  review settle-backlog [--apply] [--profile <path>]   dry run unless --apply',
   '  review hold --posting <id> --code <code> --reason <text>',
   '  review list [--held] [--json]',
@@ -138,7 +138,11 @@ export async function reviewCommand(parsed, io, runtime = {}) {
         const apply = options.apply === true;
         if (apply && activeRun(context.db, now)) { emit({ status: 'busy', reason: 'a scan or review run is active' }); return 75; }
         const inputs = await loadReviewInputs(context.root);
-        emit(rejudgeReviews(context.db, { now, apply, companyAliases: deliveryPolicy(inputs).companyAliases ?? {},
+        const reviewable = options.reclassified === true
+          ? scanReviewable(context.db, { policy: await scanPolicy(context), profile: await loadScanProfile(context.root, { path: profileOption(parsed) }),
+            flag: options.flag === undefined ? null : required(options.flag, '--flag') }) : null;
+        if (options.flag !== undefined && !reviewable) throw new Error('--flag needs --reclassified');
+        emit(rejudgeReviews(context.db, { now, apply, reviewable, retryNow: options['retry-now'] === true, companyAliases: deliveryPolicy(inputs).companyAliases ?? {},
           codes: options.code === undefined ? null : listOption(options.code, '--code'), leads: options.leads === true,
           postings: options.posting === undefined ? null : listOption(options.posting, '--posting'),
           company: options.company === undefined ? null : required(options.company, '--company'),

@@ -115,6 +115,8 @@ const PROFILE_FILES = [
   'profile.json', 'answers.md', 'screening-rules.md', 'fit-rules.md',
   'facts.json', 'facts-sources.json', 'resume.txt', 'review-policy.json',
   'screening-policy.json', 'review-provenance.json', 'eval-record.json',
+  // Ingest-time title rules (2026-11-09), read by scanPolicy when present.
+  'title-screen.json',
 ];
 
 async function backupProfile(root, destination) {

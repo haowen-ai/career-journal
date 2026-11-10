@@ -109,7 +109,7 @@ export async function runEval({ setDir, judges, secondOpinion, jev, judgePolicy,
               firstSeen: item.posting.firstSeen, jobType: profile.inputs.profile?.search?.jobType });
             if (tier === 'primary') {
               const result = await reviewPrimaryVerdict({ verdict, inputs: profile.inputs, snapshotText: snapshot.text,
-                firstSeen: item.posting.firstSeen, secondOpinion: profile.secondOpinion, counts: metrics.secondOpinion });
+                firstSeen: item.posting.firstSeen, secondOpinion: profile.secondOpinion, counts: metrics.secondOpinion, judgment: attempts.at(-1)?.judgment ?? null, postingId: item.id ?? null });
               verdict = result.verdict; opinionAsked = result.asked;
             }
             if (tier === 'primary' && verdict.escalate) continue;

@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { access, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { executeCareerOpsProcess, MAX_RAW_SCAN_BYTES } from './careerops-process.mjs';
+import { executeCareerOpsProcess, MAX_RAW_SCAN_BYTES, parseResultLine, partitionEvent, splitLines } from './careerops-process.mjs';
 import { fileURLToPath } from 'node:url';
 
 const MAX_REQUEST_BYTES = 1_000_000;
@@ -109,25 +109,47 @@ export async function detectCareerOpsScan(config = {}) {
 //   node <careerops-root>/career-journal-adapter.mjs scan
 // stdin: { "action": "scan", "readOnly": true }
 // stdout: { "ok": true, "roles": [{ id, company, title, url, locations[] | location, postedAt, description }] }
+// The built-in bridge with a spool folder also prints one `{"event":"partition","partition":{...}}` line per
+// finished entry before the result line; `dependencies.onPartition(partition)` is called for each of them
+// while the scan runs. If it throws, the scan is stopped and its error is the scan's error.
 export async function runCareerOpsScan(config = {}, dependencies = {}) {
   const health = await detectCareerOpsScan(config);
   if (!health.ok) throw new Error(health.detail);
   const execute = dependencies.execute ?? executeProcess;
-  const execution = await execute({
-    command: config.nodeExecutable ?? process.execPath,
-    args: [health.entrypoint, health.builtInBridge ? 'scan-raw' : 'scan'],
-    cwd: health.root,
-    stdin: JSON.stringify({ action: health.builtInBridge ? 'scan-raw' : 'scan', readOnly: true }),
-    // Portal scans have no time cap unless the caller supplies one.
-    timeoutMs: config.scanTimeoutMs,
-    maxBytes: MAX_RAW_SCAN_BYTES,
-  });
+  const { onPartition } = dependencies;
+  let partitionError;
+  const controller = onPartition ? new AbortController() : null;
+  const live = onPartition ? { signal: controller.signal, onStdout: splitLines((line) => {
+    const partition = partitionError ? null : partitionEvent(line);
+    if (!partition) return;
+    try { onPartition(partition); } catch (error) { partitionError = error; controller.abort(); }
+  }) } : {};
+  let execution;
+  try {
+    execution = await execute({
+      command: config.nodeExecutable ?? process.execPath,
+      args: [health.entrypoint, health.builtInBridge ? 'scan-raw' : 'scan'],
+      cwd: health.root,
+      stdin: JSON.stringify({ action: health.builtInBridge ? 'scan-raw' : 'scan', readOnly: true }),
+      // Portal scans have no time cap unless the caller supplies one.
+      timeoutMs: config.scanTimeoutMs,
+      maxBytes: MAX_RAW_SCAN_BYTES,
+      // The built-in bridge writes each entry's roles into the spool folder (so its output stays small)
+      // and reads this many hosts at once. Other bridges ignore both.
+      ...(config.scanSpoolDir || config.scanConcurrency ? { env: { ...process.env,
+        ...(config.scanSpoolDir ? { CAREER_JOURNAL_SCAN_SPOOL: String(config.scanSpoolDir) } : {}),
+        ...(config.scanConcurrency ? { CAREER_JOURNAL_SCAN_CONCURRENCY: String(config.scanConcurrency) } : {}) } } : {}),
+      ...live,
+    });
+  } catch (error) { throw partitionError ?? error; }
+  if (partitionError) throw partitionError;
   if (execution.exitCode !== 0) {
     const detail = String(execution.stderr ?? '').trim().slice(0, 2_000);
     throw new Error(`CareerOps scan failed${detail ? `: ${detail}` : ''}`);
   }
   let result;
-  try { result = JSON.parse(String(execution.stdout ?? '')); }
+  // Only the last line is the result; earlier lines are partition events.
+  try { result = parseResultLine(execution.stdout); }
   catch { throw new Error('CareerOps scan returned invalid JSON'); }
   if (!result || result.ok !== true || !Array.isArray(result.roles)) throw new Error('CareerOps scan did not report a successful role list');
   return result;

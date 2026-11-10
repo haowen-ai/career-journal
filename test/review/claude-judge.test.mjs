@@ -121,7 +121,7 @@ test('[claude] failures carry a stable code and redacted text: auth, billing, ra
     [apiError(400, 'billing_error'), 'error', 'billing'],
     [apiError(429, 'rate_limit_error'), 'error', 'rate_limited'],
     [apiError(500, 'api_error'), 'error', 'unavailable'],
-    [apiError(529, 'overloaded_error'), 'error', 'unavailable'],
+    [apiError(529, 'overloaded_error'), 'error', 'overloaded'],
     [APIError.generate(undefined, undefined, 'socket hang up', undefined), 'error', 'unavailable'],
     [apiError(404, 'not_found_error'), 'error', 'http_404'],
     ['not json at all', 'invalid', 'invalid_output'],
@@ -210,7 +210,7 @@ const policy = { ...REVIEW_POLICY, judge: { primary: { ...CLAUDE }, escalation: 
 const run = (db, pages, judges) => offline(() => runReview({ db, runId: 'review-claude', owner: 'worker-a', now: T0, budget: 20, deadlineMs: 600_000, attemptDir: null,
   sleep: async () => {}, fetcher: fakeFetcher(pages), judges, inputs: () => reviewInputs({ policy }), hooks: {} }));
 
-test('[claude] a review run with a Claude primary, a Codex escalation and no Jev: eligible, not_eligible and unclear→escalation', async () => {
+test('[claude] a review run with a Claude primary, a Codex escalation and no Jev: eligible, quoted not_eligible final, unclear→escalation', async () => {
   const db = freshDb();
   const pages = queue(db, Object.keys(POSTINGS));
   const client = fakeClient((params) => POSTINGS[postingOf(params)].primary);
@@ -226,12 +226,14 @@ test('[claude] a review run with a Claude primary, a Codex escalation and no Jev
   assert.equal(outcome('p-unclear')[1], 'not_eligible');
   assert.deepEqual(receipt.model_decided.map((item) => [item.postingId, item.decision]), [['p-unclear', 'not_eligible']]);
   assert.equal(client.calls.length, 4, 'one Claude call per posting');
-  assert.deepEqual(escalation.calls.map((call) => `${call.request.postingId}${call.request.forceDecision ? ':forced' : ''}`).sort(), ['p-degree', 'p-unclear', 'p-unclear:forced']);
+  // Amendment G2: the quoted degree rejection (a final code) is final at the primary tier; only the missing fact escalates.
+  assert.deepEqual(escalation.calls.map((call) => `${call.request.postingId}${call.request.forceDecision ? ':forced' : ''}`).sort(), ['p-unclear', 'p-unclear:forced']);
+  assert.equal(receipt.counts.primary_final, 1);
   assert.equal(receipt.counts.secondOpinion, undefined);
   assert.equal(receipt.jev, undefined);
   assert.deepEqual(receipt.errors, []);
   const runners = db.prepare("SELECT runner,tier,state FROM attempts WHERE run_id='review-claude' ORDER BY tier,posting_id").all().map((row) => `${row.tier}:${row.runner}:${row.state}`);
-  assert.deepEqual(runners, [...Array(3).fill('escalation:fake:responded'), ...Array(4).fill('primary:claude:responded')]);
+  assert.deepEqual(runners, [...Array(2).fill('escalation:fake:responded'), ...Array(4).fill('primary:claude:responded')]);
 });
 
 test('[claude] an API outage (402 billing) stops the run after 3 identical failures: adapter_failure, postings stay due, no Codex storm', async () => {

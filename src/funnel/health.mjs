@@ -4,6 +4,7 @@ import { simplifyUrls } from '../scan/sources/simplify.mjs';
 import { redact } from '../runtime/redact.mjs';
 
 const keyOf = (item) => `${item.source}\0${item.partition}`;
+const KEYWORD_SEARCH = /^keyword search\b/;
 const attempted = (status) => ['ok', 'empty', 'partial', 'error'].includes(status);
 export function buildExpectedManifest(profile, { careerOpsPartitions = [] } = {}) {
   const manifest = [];
@@ -33,12 +34,18 @@ export function assessSourceHealth(db, { runId, now, manifest, reported, baselin
   const results = [];
   for (const item of sources.values()) {
     const isExpected = expected.has(keyOf(item));
+    // A browser read of a failed list (src/scan/browser-list.mjs) is not a fetch attempt: it is left
+    // out, so the fail streak, the cold start and the baseline describe the provider alone.
     const history = db.prepare(`SELECT rs.*,r.started_at FROM run_sources rs JOIN runs r ON r.run_id=rs.run_id
-      WHERE rs.source=? AND rs.partition=? AND rs.run_id<>? ORDER BY r.started_at DESC`).all(item.source, item.partition, runId);
+      WHERE rs.source=? AND rs.partition=? AND rs.run_id<>? AND NOT (json_valid(r.receipt_json) AND json_extract(r.receipt_json,'$.browserList') IS NOT NULL)
+      ORDER BY r.started_at DESC`).all(item.source, item.partition, runId);
     const registry = db.prepare('SELECT first_expected FROM expected_partitions WHERE source=? AND partition=?').get(item.source, item.partition);
     const attempts = history.filter((row) => attempted(row.status)).length + Number(attempted(item.status));
     const coldStart = isExpected && attempts < COLD_START.censuses && Date.parse(now) - Date.parse(registry.first_expected) < COLD_START.days * 86_400_000;
-    const counts = history.filter((row) => ['ok', 'empty'].includes(row.status) && Date.parse(row.started_at) >= Date.parse(now) - baselineDays * 86_400_000).map((row) => row.count).sort((a, b) => a - b);
+    // A keyword search of a big board (detail "keyword search …") counts student hits, a whole-board
+    // read counts every job: only censuses of the same kind form this one's baseline.
+    const sameKind = (row) => KEYWORD_SEARCH.test(row.detail ?? '') === KEYWORD_SEARCH.test(item.detail ?? '');
+    const counts = history.filter((row) => ['ok', 'empty'].includes(row.status) && sameKind(row) && Date.parse(row.started_at) >= Date.parse(now) - baselineDays * 86_400_000).map((row) => row.count).sort((a, b) => a - b);
     const baseline = counts.length ? Math.round((counts[Math.floor((counts.length - 1) / 2)] + counts[Math.ceil((counts.length - 1) / 2)]) / 2) : null;
     let status = item.status;
     let alert = item.alert ?? null;
@@ -51,7 +58,9 @@ export function assessSourceHealth(db, { runId, now, manifest, reported, baselin
     else if (status === 'stale') alert = history.some((row) => ['ok', 'empty'].includes(row.status)) ? 'missing' : 'never_reported';
     else if (['ok', 'empty'].includes(status)) {
       status = count === 0 ? 'empty' : 'ok';
-      if (count === 0 && !coldStart && isExpected) alert = 'zero';
+      // A big board can truly have no student roles; a keyword search reports zero without alarm
+      // until a search of the same board has found some before.
+      if (count === 0 && !coldStart && isExpected && (!KEYWORD_SEARCH.test(item.detail ?? '') || counts.some((value) => value > 0))) alert = 'zero';
       else if (baseline != null && count < 0.5 * baseline) alert = 'drop';
       const sample = db.prepare('SELECT status FROM source_samples WHERE partition=? AND sampled_at<=? ORDER BY sampled_at DESC LIMIT 1').get(item.partition, now);
       if (sample?.status === 'sample_mismatch') alert = 'sample_mismatch';

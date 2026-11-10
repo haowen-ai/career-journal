@@ -8,9 +8,12 @@ import { validForcedDecision, validJudgment } from './judge.mjs';
 // structured `messages.create` call per judgment through the official SDK. Failures carry a stable errorCode,
 // so the worker's identical-failure breaker stops a run on an outage instead of storming the API:
 //   auth            401/403 or no API key          billing       402 or billing_error
-//   rate_limited    429 after the SDK's retries     unavailable   network, timeout or 5xx
+//   rate_limited    429 after the SDK's retries     unavailable   network, timeout or other 5xx
+//   overloaded      529 or overloaded_error
 //   invalid_output  not JSON or not the schema      refused       stop_reason refusal
 // Error text is built here from the status and error type only; it never carries the key or a response body.
+// rate_limited and overloaded carry retryAfterMs (from retry-after-ms or retry-after, else null): the worker backs
+// off and slows down on them instead of counting them as failures (rate-control.mjs).
 
 export const CLAUDE_EFFORTS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
 
@@ -28,7 +31,20 @@ const POSTING_MARK = '<<<POSTING';
 const STRING_FORMATS = new Set(['date-time', 'time', 'date', 'duration', 'email', 'hostname', 'uri', 'ipv4', 'ipv6', 'uuid']);
 
 export class ClaudeJudgeError extends Error {
-  constructor(message, { code, status = 'error' } = {}) { super(message); this.name = 'ClaudeJudgeError'; this.code = code; this.status = status; }
+  constructor(message, { code, status = 'error', retryAfterMs = null } = {}) { super(message); this.name = 'ClaudeJudgeError'; this.code = code; this.status = status; this.retryAfterMs = retryAfterMs; }
+}
+
+// The server's requested wait, in ms: retry-after-ms first, then retry-after (seconds or an HTTP date); else null.
+export function retryAfterMs(headers, now = Date.now()) {
+  const get = (name) => (typeof headers?.get === 'function' ? headers.get(name) : headers?.[name]) ?? null;
+  const precise = Number.parseFloat(get('retry-after-ms'));
+  if (Number.isFinite(precise) && precise >= 0) return precise;
+  const raw = get('retry-after');
+  if (raw === null || String(raw).trim() === '') return null;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const date = Date.parse(raw);
+  return Number.isFinite(date) ? Math.max(0, date - now) : null;
 }
 
 const typeOfValue = (value) => (value === null ? 'null' : Number.isInteger(value) ? 'integer' : typeof value === 'number' ? 'number' : typeof value);
@@ -107,7 +123,8 @@ function classify(error) {
     const label = `Claude API HTTP ${status ?? 'none'}${type ? ` ${type}` : ''}`;
     if (status === 402 || type === 'billing_error') return new ClaudeJudgeError(label, { code: 'billing' });
     if (status === 401 || status === 403) return new ClaudeJudgeError(label, { code: 'auth' });
-    if (status === 429) return new ClaudeJudgeError(label, { code: 'rate_limited' });
+    if (status === 429) return new ClaudeJudgeError(label, { code: 'rate_limited', retryAfterMs: retryAfterMs(error.headers) });
+    if (status === 529 || type === 'overloaded_error') return new ClaudeJudgeError(label, { code: 'overloaded', retryAfterMs: retryAfterMs(error.headers) });
     if (status >= 500) return new ClaudeJudgeError(label, { code: 'unavailable' });
     return new ClaudeJudgeError(label, { code: `http_${status ?? 'none'}` });
   }
@@ -178,7 +195,8 @@ export function claudeApiAdapter({ model, effort = 'low', tier, maxTokens = 4096
         return finish('ok', { output, rawText, usage });
       } catch (error) {
         const failure = classify(error);
-        return finish(failure.status, { errorCode: failure.code, error: failure.message, usage: error.usage ?? null, rawText: error.rawText ?? '' });
+        return finish(failure.status, { errorCode: failure.code, error: failure.message, usage: error.usage ?? null, rawText: error.rawText ?? '',
+          ...(['rate_limited', 'overloaded'].includes(failure.code) ? { retryAfterMs: failure.retryAfterMs ?? null } : {}) });
       }
     },
   };

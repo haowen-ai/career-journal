@@ -6,10 +6,12 @@ import { redact } from '../runtime/redact.mjs';
 import { userDecided } from './ownership.mjs';
 import { judgmentEnvelope, rememberJudgment } from './judgment-cache.mjs';
 
+export const UNAVAILABLE_MARK = '[unavailable]';
 export function createBudget(db, { runId, limit, concurrency = 1, maxTransportRetries = 2 }) {
   // limit Infinity: no attempt cap (goal 5); concurrency still bounds what is in flight.
   if (!(Number.isInteger(limit) || limit === Infinity) || limit < 0 || !Number.isInteger(concurrency) || concurrency < 1 || !Number.isInteger(maxTransportRetries) || maxTransportRetries < 0) throw new Error('Invalid attempt budget');
-  const used = () => db.prepare('SELECT COALESCE(SUM(1+transport_retries),0) n FROM attempts WHERE run_id=?').get(runId).n;
+  // A network failure (markUnavailable) reached no model and does not use the budget.
+  const used = () => db.prepare(`SELECT COALESCE(SUM(CASE WHEN state='failed' AND error LIKE '${UNAVAILABLE_MARK}%' THEN 0 ELSE 1+transport_retries END),0) n FROM attempts WHERE run_id=?`).get(runId).n;
   const remaining = () => Math.max(0, limit - used());
   return {
     used, remaining,
@@ -26,6 +28,13 @@ export function createBudget(db, { runId, limit, concurrency = 1, maxTransportRe
     markResponded(id, { usage = {}, transportRetries = 0, now }) {
       db.prepare("UPDATE attempts SET state='responded',usage_json=?,transport_retries=?,finished_at=? WHERE id=? AND run_id=? AND state='dispatched'")
         .run(JSON.stringify(usage), transportRetries, now, id, runId);
+    },
+    markUnavailable(id, { error, now }) {
+      atomic(db, () => {
+        const changed = db.prepare("UPDATE attempts SET state='failed',error=?,transport_retries=0,finished_at=? WHERE id=? AND run_id=? AND state='dispatched'")
+          .run(`${UNAVAILABLE_MARK} ${String(error)}`, now, id, runId).changes;
+        if (changed) db.prepare('UPDATE reviews SET paid_attempts=MAX(0,paid_attempts-1) WHERE posting_id=(SELECT posting_id FROM attempts WHERE id=?)').run(id);
+      });
     },
     markFailed(id, { error, transportRetries = 0, now }) {
       db.prepare("UPDATE attempts SET state='failed',error=?,transport_retries=?,finished_at=? WHERE id=? AND run_id=? AND state='dispatched'")

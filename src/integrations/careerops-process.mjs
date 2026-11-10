@@ -77,3 +77,38 @@ export function installCareerOpsShutdown() {
       .finally(() => process.exit(signal === 'SIGTERM' ? 143 : 130));
   });
 }
+
+// The raw scan worker prints one `{"event":"partition",...}` line per finished entry while it runs and
+// its result object as the last line. Each hop reads the output as lines.
+export const PARTITION_EVENT = 'partition';
+
+// Returns a chunk handler that calls onLine with every complete line (without its newline); a partial
+// line waits for the rest of it in a later chunk.
+export function splitLines(onLine) {
+  let pending = '';
+  return (chunk) => {
+    // Only the new chunk is searched, so a long result line is not rescanned on every chunk.
+    const newline = chunk.lastIndexOf('\n');
+    if (newline < 0) { pending += chunk; return; }
+    const lines = `${pending}${chunk.slice(0, newline)}`.split('\n');
+    pending = chunk.slice(newline + 1);
+    for (const line of lines) if (line.trim()) onLine(line);
+  };
+}
+
+// The partition report of a progress line, or null for any other line.
+export function partitionEvent(line) {
+  if (!line.startsWith('{"event"')) return null;
+  try {
+    const event = JSON.parse(line);
+    return event?.event === PARTITION_EVENT && event.partition && typeof event.partition === 'object' ? event.partition : null;
+  } catch { return null; }
+}
+
+// The result object: the last non-empty line (earlier lines are progress events). Output that is one
+// pretty-printed object (an adapter bridge) is read whole.
+export function parseResultLine(stdout) {
+  const text = String(stdout ?? '');
+  const last = text.trimEnd().split('\n').at(-1) ?? '';
+  try { return JSON.parse(last); } catch { return JSON.parse(text); }
+}

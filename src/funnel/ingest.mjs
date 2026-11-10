@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { aliasesFor, canonicalUrl, resolvePosting, postingCandidates, submittedApplicationIndex, submittedDuplicate } from './identity.mjs';
+import { aliasesFor, canonicalUrl, resolvePosting, postingCandidates, submittedApplicationIndex, submittedDuplicate, identityOptionsOf, suspectIndex, suspectedDuplicates, suspectedFlags } from './identity.mjs';
 import { classifyRole, CERTAIN_DROP_CODES } from './classify.mjs';
 import { EVIDENCE_DROP_CODES, SIGNAL_DROP_CODES, SUBMITTED_STATUSES } from './contract.mjs';
 import { redact } from '../runtime/redact.mjs';
@@ -47,12 +47,18 @@ function reviewElsewhere(db, postingId, record, options, reader, cache, { fallba
 // Indexes an ingest needs, read once per scan run and kept current by every batch of that run.
 // Batches of one run see each other's postings; another writer's change between batches can
 // at most delay a maybe_same link or a same-program submission match to the next run.
+// Plan 2026-11-10: identity uses the policy's aliases and verified job-id URL formats; a review-worthy posting is also
+// compared with submitted applications and open leads of the same company (suspected_duplicate flag only).
+export const DUPLICATE_CHECK_MISSING = 'duplicateCheck missing in company-overrides.json: no configured job-id URL formats, no suspected-duplicate flags';
 export function createIngestContext(db, { policy = {} } = {}) {
-  const companyAliases = policy.companyAliases;
+  const identity = identityOptionsOf(policy);
+  const companyAliases = identity.companyAliases;
   return {
     companyAliases,
+    identity,
     candidates: postingCandidates(db, { companyAliases }),
-    submitted: submittedApplicationIndex(db, { companyAliases }),
+    submitted: submittedApplicationIndex(db, identity),
+    suspects: policy.duplicateCheck ? suspectIndex(db, { companyAliases }) : null,
     userLogged: userLoggedPostings(db),
     latest: null, // built on first need, then maintained per sighting
   };
@@ -92,12 +98,13 @@ function countOnly(db, record, classification, context) {
   if (!certain && !unlistedListing) return null;
   const owners = new Set();
   let unowned = 0;
-  for (const { alias } of aliasesFor(record, { companyAliases: context.companyAliases })) {
+  const identity = context.identity ?? { companyAliases: context.companyAliases };
+  for (const { alias } of aliasesFor(record, identity)) {
     const hit = db.prepare('SELECT posting_id FROM posting_aliases WHERE alias=?').get(alias);
     if (!hit) { unowned += 1; continue; }
     owners.add(effectiveId(db, hit.posting_id) ?? hit.posting_id);
   }
-  if (submittedDuplicate(db, record, { companyAliases: context.companyAliases, index: context.submitted })) return null;
+  if (submittedDuplicate(db, record, { ...identity, index: context.submitted })) return null;
   if (!owners.size) return { known: null };
   if (owners.size > 1 || unowned || !certain) return null;
   const [id] = owners;
@@ -119,6 +126,7 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
     // Built once per scan run when the caller passes a context; one batch otherwise.
     context ??= createIngestContext(db, { policy });
     const { candidates, submitted, userLogged } = context;
+    const identity = context.identity ?? identityOptionsOf(policy);
     const reader = currentRecordReader(db);
     const touchPartition = db.prepare(`INSERT INTO posting_partitions(posting_id,source,partition,last_seen) VALUES (?,?,?,?)
       ON CONFLICT(posting_id,source,partition) DO UPDATE SET last_seen=MAX(last_seen,excluded.last_seen)`);
@@ -142,7 +150,7 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
         continue;
       }
       counts.stored += 1;
-      const resolved = resolvePosting(db, record, { now, companyAliases: policy.companyAliases, candidates, classification });
+      const resolved = resolvePosting(db, record, { now, ...identity, candidates, classification });
       const id = resolved.postingId;
       if (resolved.created) counts.newPostings += 1;
       const posting = db.prepare('SELECT * FROM postings WHERE id=?').get(id);
@@ -165,7 +173,7 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
       }
       const old = db.prepare('SELECT * FROM reviews WHERE posting_id=?').get(id);
       let result = classifyRole(record, { policy, profile, identity: {
-        submitted: submittedDuplicate(db, record, { companyAliases: policy.companyAliases, index: submitted })
+        submitted: submittedDuplicate(db, record, { ...identity, index: submitted })
           ?? (application && (SUBMITTED_STATUSES.includes(application.status) || Boolean(application.applied_at))),
         userDeclined: application?.status === 'withdrawn' && application.skip_owner === 'user',
       } });
@@ -181,6 +189,13 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
       else if (result.kind === 'drop') counts.dropped[result.code] = (counts.dropped[result.code] ?? 0) + 1;
       else counts.review += 1;
       for (const linked of resolved.links) result.flags.push(`maybe_same:${linked.postingId}`);
+      // Not a confirmed duplicate and to be reviewed: a similar title of the same company is only flagged.
+      if (result.kind === 'review') {
+        if (policy.duplicateCheck) {
+          context.suspects ??= suspectIndex(db, { companyAliases: identity.companyAliases });
+          result.flags.push(...suspectedFlags(suspectedDuplicates(db, record, { identityOptions: identity, duplicateCheck: policy.duplicateCheck, index: context.suspects, exclude: [posting.application_id] })));
+        } else if (!(counts.warnings ??= []).includes(DUPLICATE_CHECK_MISSING)) counts.warnings.push(DUPLICATE_CHECK_MISSING);
+      }
       const reappeared = Date.parse(now) - Date.parse(posting.last_seen) >= (policy.freshness?.reappearAfterDays ?? 14) * 86_400_000;
       // A settled drop whose record now classifies for review. It reopens only with a stored
       // authorization (decide once): a relaxed rule needs an explicit `review rejudge`. A partial

@@ -14,7 +14,8 @@
 //   stdin:  { "action": "scan", "readOnly": true }
 //   stdout: { "ok": true, "roles": [...] }
 
-import { executeCareerOpsProcess, installCareerOpsShutdown, MAX_RAW_SCAN_BYTES } from './careerops-process.mjs';
+import { executeCareerOpsProcess, installCareerOpsShutdown, MAX_RAW_SCAN_BYTES, parseResultLine, partitionEvent, PARTITION_EVENT, splitLines } from './careerops-process.mjs';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -114,6 +115,8 @@ export async function scanCareerOps(root, { execute = run, env = process.env, ti
 // about 0.8 MB) sometimes take longer. Calls without their own timeout get this one, and an
 // entry can set `timeout_ms` in portals.yml.
 export const DEFAULT_ENTRY_TIMEOUT_MS = 30_000;
+// Hosts read at the same time when config careerOps.scanConcurrency is not set.
+export const DEFAULT_SCAN_CONCURRENCY = 8;
 // A transient failure is retried in the same run so one slow response does not drop a board
 // for the night. A definite answer (404, a parse error, a missing provider) is not retried.
 export const RETRY_DELAYS_MS = Object.freeze([2_000, 5_000]);
@@ -167,19 +170,86 @@ export function providerCeiling(providerId, entry = {}, portals = {}) {
   return PROVIDER_CEILINGS[providerId] ?? null;
 }
 
-// Each fetch is sequential: stderr cap messages belong only to the current entry.
-export async function collectCareerOpsRaw({ portals, providers, resolveProvider, makeHttpCtx, sleep = defaultSleep, retryDelaysMs = RETRY_DELAYS_MS }) {
-  const roles = [];
-  const partitions = [];
-  const configuredPartitions = [];
+const CAP_LINE = /\btruncat(?:ed|ion)\b|\bpartial (?:result|census)|\b(?:page|result) (?:limit|cap)\b/i;
+// The entry a console.error call belongs to: cap warnings are attributed to the entry that printed
+// them, also while other entries are fetched beside it.
+const entryScope = new AsyncLocalStorage();
+
+// The first http(s) address an entry names, careers page first.
+export function entryUrl(entry = {}) {
+  for (const key of ['careers_url', 'api', 'url', 'board_url', 'feed_url']) {
+    try { const url = new URL(String(entry[key])); if (/^https?:$/.test(url.protocol)) return url.href; } catch { /* not a URL */ }
+  }
+  return null;
+}
+
+// Entries are grouped by the host they read: entries of one host are not fetched at the same time.
+export function entryHost(entry = {}) {
+  const url = entryUrl(entry);
+  return url ? new URL(url).host.toLowerCase() : null;
+}
+
+// portals.yml `keyword_search: { terms: [...], min_total: N }` tells every provider that supports it
+// to read a board bigger than `min_total` jobs through the site's own keyword search, one query per
+// term, instead of paging the whole board (user 2026-11-09: 「可以直接在他们官网做筛选」). An entry
+// keeps its own `keywords` / `keyword_min_total`; `keywords: false` turns the search off for it.
+// `keyword_search.providers.<id>.terms` overrides the term list for one provider (Workday's full-text
+// search matches "co-op" in almost every posting, so it gets a list without it).
+export function withKeywordDefaults(entry = {}, portals = {}, providerId = null) {
+  if (entry.keywords === false) { const { keywords, ...rest } = entry; return rest; }
+  const defaults = portals?.keyword_search;
+  if (!defaults || typeof defaults !== 'object') return entry;
+  const out = { ...entry };
+  const perProvider = providerId && defaults.providers && typeof defaults.providers === 'object' ? defaults.providers[providerId] : null;
+  const terms = Array.isArray(perProvider?.terms) ? perProvider.terms : defaults.terms;
+  if (!Array.isArray(entry.keywords) && Array.isArray(terms) && terms.length) out.keywords = terms.map(String);
+  if (out.keyword_min_total == null && positive(defaults.min_total)) out.keyword_min_total = positive(defaults.min_total);
+  // The site facet values that count as student roles: plain words the providers escape and match as whole
+  // words (never a regular expression from configuration, so a bad pattern cannot stall the scan).
+  if (out.facet_values == null && Array.isArray(defaults.facet_values) && defaults.facet_values.length) {
+    out.facet_values = defaults.facet_values.map((value) => String(value).trim()).filter(Boolean);
+  }
+  return out;
+}
+
+// How a big board was read, for the receipt and for source health: the site's own facet (field and
+// values) or a keyword search (terms). Both carry the "keyword search" detail prefix that health uses.
+export function searchMeta(search) {
+  const boardTotal = Number.isFinite(search.boardTotal) ? search.boardTotal : null;
+  const board = boardTotal ?? 'unknown';
+  if (search.mode === 'facet' && search.facet && typeof search.facet === 'object') {
+    const values = Array.isArray(search.facet.values) ? search.facet.values.map(String) : [];
+    return { mode: 'facet', boardTotal, facetName: String(search.facet.name ?? ''), facetValues: values,
+      detail: `keyword search (facet ${search.facet.name ?? '?'} = ${values.join(' | ') || '?'}, board ${board})` };
+  }
+  const terms = positive(search.terms) ?? 0;
+  return { mode: 'keywords', boardTotal, keywordTerms: terms, detail: `keyword search (${terms} terms, board ${board})` };
+}
+
+// Fetches every enabled entry. `concurrency` hosts are read at the same time (default: one, in
+// order); entries of one host stay sequential. With `spoolDir` each entry's roles are written to
+// `<index>.json` there and the returned report carries no role text, so the size of a scan is
+// bounded by its largest entry instead of by the whole inventory. `onPartition(meta)` is called with each
+// entry's partition report (the same object the returned `partitions` keeps) as soon as that entry is done
+// and its spool file is written, so the caller can store it while the other entries are still fetched.
+export async function collectCareerOpsRaw({ portals, providers, resolveProvider, makeHttpCtx, sleep = defaultSleep, retryDelaysMs = RETRY_DELAYS_MS,
+  concurrency = 1, spoolDir, onPartition }) {
   // `enabled: false` turns an entry off (CareerOps's own scan skips it too); it then leaves the
   // configured inventory, so its partition is retired instead of failing every night.
   const entries = [...(portals.tracked_companies ?? []), ...(portals.job_boards ?? [])].filter((entry) => entry?.enabled !== false);
-  for (const entry of entries) {
+  const rolesByEntry = entries.map(() => []);
+  const partitions = new Array(entries.length);
+  const configuredPartitions = new Array(entries.length);
+  const originalError = console.error;
+  console.error = (...args) => {
+    const scope = entryScope.getStore();
+    if (scope && CAP_LINE.test(args.map(String).join(' '))) scope.capDetected = true;
+    originalError(...args);
+  };
+  const fetchEntry = (entry, index) => entryScope.run({ capDetected: false }, async () => {
+    const scope = entryScope.getStore();
     let provider;
     let partition = `unknown:${entry.name ?? entry.board ?? entry.url ?? ''}`;
-    const originalError = console.error;
-    let capDetected = false;
     let attempts = 0;
     const startedAt = performance.now();
     const elapsed = () => Math.round(performance.now() - startedAt);
@@ -189,17 +259,13 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
       if (typeof provider === 'string') provider = providers.get?.(provider) ?? providers[provider];
       if (!provider?.fetch) throw new Error('No provider for configured entry');
       partition = `${provider.id ?? resolved.id ?? resolved.providerId ?? 'unknown'}:${entry.name ?? entry.board ?? entry.url ?? ''}`;
-      console.error = (...args) => {
-        const line = args.map(String).join(' ');
-        if (/\btruncat(?:ed|ion)\b|\bpartial (?:result|census)|\b(?:page|result) (?:limit|cap)\b/i.test(line)) capDetected = true;
-        originalError(...args);
-      };
+      const request = withKeywordDefaults(entry, portals, provider.id ?? resolved.id ?? resolved.providerId ?? null);
       let jobs;
       for (;;) {
         attempts += 1;
-        capDetected = false;
+        scope.capDetected = false;
         try {
-          jobs = await provider.fetch(entry, withEntryTimeout(await makeHttpCtx(entry, portals), entry));
+          jobs = await provider.fetch(request, withEntryTimeout(await makeHttpCtx(request, portals), request));
           break;
         } catch (error) {
           if (attempts > retryDelaysMs.length || !isTransientError(error)) throw error;
@@ -208,9 +274,14 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
         }
       }
       if (!Array.isArray(jobs)) throw new Error('Provider returned no job array');
-      const ceiling = providerCeiling(provider.id, entry, portals);
-      if (ceiling != null && jobs.length >= ceiling) capDetected = true;
+      // A keyword search returns the merged hits of several queries, so the whole-board ceiling does
+      // not apply; the provider marks a capped query itself (jobs.truncated).
+      const search = jobs.keywordSearch && typeof jobs.keywordSearch === 'object' ? jobs.keywordSearch : null;
+      const ceiling = search ? null : providerCeiling(provider.id, entry, portals);
+      if (ceiling != null && jobs.length >= ceiling) scope.capDetected = true;
+      const capDetected = scope.capDetected;
       const truncated = capDetected || Object.entries(jobs).some(([key, value]) => /(?:truncated|partial|capDetected)$/i.test(key) && value === true);
+      const roles = [];
       for (const job of jobs) {
         const role = { ...job, company: job?.company ?? entry.name, partition,
           locations: job?.locations ?? (job?.location ? [job.location] : []), requisitionId: job?.requisitionId ?? job?.jobReqId ?? null };
@@ -222,16 +293,43 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
         }
         roles.push(role);
       }
-      partitions.push({ partition, status: truncated ? 'partial' : 'ok', count: jobs.length, rawCount: jobs.length, truncated, capDetected, attempts, elapsedMs: elapsed(),
-        ...(capDetected && ceiling != null && jobs.length >= ceiling ? { ceiling } : {}) });
+      let spoolFile;
+      if (spoolDir && roles.length) {
+        spoolFile = `${index}.json`;
+        await writeFile(path.join(spoolDir, spoolFile), JSON.stringify(roles));
+      } else rolesByEntry[index] = roles;
+      partitions[index] = { partition, status: truncated ? 'partial' : 'ok', count: jobs.length, rawCount: jobs.length, truncated, capDetected, attempts, elapsedMs: elapsed(),
+        ...(capDetected && ceiling != null && jobs.length >= ceiling ? { ceiling } : {}), ...(spoolFile ? { spoolFile } : {}),
+        // Source health keeps keyword counts and whole-board counts apart by this detail prefix.
+        ...(search ? searchMeta(search) : {}) };
     } catch (error) {
-      partitions.push({ partition, status: 'error', count: 0, rawCount: 0, error: error.message, truncated: capDetected, capDetected, attempts, elapsedMs: elapsed() });
-    } finally { configuredPartitions.push(partition); console.error = originalError; }
-  }
-  return { roles, partitions, configuredPartitions };
+      // The company and its careers page travel with a failed list, for the browser read that follows it.
+      partitions[index] = { partition, status: 'error', count: 0, rawCount: 0, error: error.message, truncated: scope.capDetected, capDetected: scope.capDetected, attempts, elapsedMs: elapsed(),
+        ...(entry.name ? { company: String(entry.name) } : {}), ...(entryUrl(entry) ? { careersUrl: entryUrl(entry) } : {}) };
+    } finally { configuredPartitions[index] = partition; }
+    onPartition?.(partitions[index]);
+  });
+  try {
+    // One lane per host, in configured order; an entry without a readable host gets its own lane.
+    const lanes = new Map();
+    entries.forEach((entry, index) => {
+      const key = entryHost(entry) ?? `entry:${index}`;
+      if (!lanes.has(key)) lanes.set(key, []);
+      lanes.get(key).push(index);
+    });
+    const queue = [...lanes.values()];
+    const limit = Math.max(1, Math.min(positive(concurrency) ?? 1, queue.length || 1));
+    await Promise.all(Array.from({ length: limit }, async () => {
+      for (let lane = queue.shift(); lane; lane = queue.shift()) for (const index of lane) await fetchEntry(entries[index], index);
+    }));
+  } finally { console.error = originalError; }
+  return { roles: spoolDir ? [] : rolesByEntry.flat(), partitions, configuredPartitions, ...(spoolDir ? { spooled: true } : {}) };
 }
 
-export async function scanCareerOpsRaw(root, { execute = run, env = process.env, timeoutMs } = {}) {
+// The middle hop: runs the worker in a child process and passes each partition event line on to its own
+// stdout (`write`) the moment it arrives, so the caller can store finished entries during the fetch. The
+// worker's result line is returned, and printed once by main().
+export async function scanCareerOpsRaw(root, { execute = run, env = process.env, timeoutMs, write = (text) => process.stdout.write(text) } = {}) {
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'career-journal-careerops-raw-'));
   try {
     const portals = path.join(temporary, 'portals.yml');
@@ -239,10 +337,11 @@ export async function scanCareerOpsRaw(root, { execute = run, env = process.env,
     const execution = await execute(process.execPath, [fileURLToPath(import.meta.url), 'scan-raw', '--worker'], {
       cwd: root, timeoutMs, maxBytes: MAX_RAW_SCAN_BYTES,
       env: { ...env, CAREER_OPS_ROOT: temporary, CAREER_OPS_PORTALS: portals },
+      onStdout: splitLines((line) => { if (partitionEvent(line)) write(`${line}\n`); }),
     });
     if (execution.exitCode !== 0) throw new Error(`CareerOps raw scan exited with ${execution.exitCode}: ${String(execution.stderr ?? '').slice(-1000)}`);
     let result;
-    try { result = JSON.parse(String(execution.stdout)); } catch { throw new Error('CareerOps raw scan printed invalid JSON'); }
+    try { result = parseResultLine(execution.stdout); } catch { throw new Error('CareerOps raw scan printed invalid JSON'); }
     if (!Array.isArray(result.roles)) throw new Error('CareerOps raw scan printed no role array');
     return result;
   } finally { await rm(temporary, { recursive: true, force: true }); }
@@ -265,7 +364,13 @@ async function rawWorker(root) {
   const plugins = await import(pathToFileURL(path.join(base, 'plugins', '_engine.mjs')).href);
   let providers = await registry.loadProviders(path.join(base, 'providers'));
   providers = await plugins.mergeProviderPlugins(providers, { root: base }) ?? providers;
-  return collectCareerOpsRaw({ portals, providers, resolveProvider: registry.resolveProvider, makeHttpCtx: http.makeHttpCtx });
+  // Both are set by CAREER JOURNAL (config careerOps.scanConcurrency; a spool folder it owns and removes).
+  const spoolDir = process.env.CAREER_JOURNAL_SCAN_SPOOL || undefined;
+  return collectCareerOpsRaw({ portals, providers, resolveProvider: registry.resolveProvider, makeHttpCtx: http.makeHttpCtx,
+    concurrency: positive(process.env.CAREER_JOURNAL_SCAN_CONCURRENCY) ?? DEFAULT_SCAN_CONCURRENCY, spoolDir,
+    // A spooled entry is announced as soon as its file is written: one complete JSON line per entry, before
+    // the result line that main() prints last. The roles stay in the file, so each line is small.
+    ...(spoolDir ? { onPartition: (partition) => process.stdout.write(`${JSON.stringify({ event: PARTITION_EVENT, partition })}\n`) } : {}) });
 }
 
 async function readStdin() {

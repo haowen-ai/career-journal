@@ -15,6 +15,26 @@ const LEGACY_CODE = new Set([
   'sha256:51b415d03ca80c642e2c470c414a204b118d263329f8a1671ce99a10d038e136',
 ]);
 
+// Review policy keys introduced after P1 (when policy hashes became screening-only). No legacy full-policy hash
+// can contain them, so they are left out when reconstructing those hashes; they never change a judge dependency.
+export const POST_P1_POLICY_KEYS = Object.freeze([['fetcher', 'browserAtOnce']]);
+
+// Every legacy shape the policy could have had without its later keys. A section left empty may have been absent,
+// null or {} in the legacy policy, so all three are reconstructed.
+function withoutLaterKeys(policy) {
+  let results = [policy];
+  for (const [section, key] of POST_P1_POLICY_KEYS) {
+    results = results.flatMap((result) => {
+      if (!result?.[section] || typeof result[section] !== 'object' || !(key in result[section])) return [result];
+      const rest = { ...result[section] }; delete rest[key];
+      if (Object.keys(rest).length) return [{ ...result, [section]: rest }];
+      const absent = { ...result }; delete absent[section];
+      return [absent, { ...result, [section]: null }, { ...result, [section]: {} }];
+    });
+  }
+  return results;
+}
+
 export function dependencyComparison(db, inputs) {
   const jobType = inputs.profile?.search?.jobType ?? null;
   const inputPolicy = dependencyHash({ policy: screeningPolicyParts(inputs.policy), jobType });
@@ -37,9 +57,12 @@ export function dependencyComparison(db, inputs) {
     const judge = { ...inputs.policy.judge, ...(primary && { primary }), ...(escalation && { escalation }) };
     const withoutOpinion = { ...judge }; delete withoutOpinion.secondOpinion;
     for (const config of [judge, withoutOpinion]) {
-      const policy = inputs.policy.judge ? { ...inputs.policy, judge: config } : inputs.policy;
-      inputPolicies.add(dependencyHash({ policy, jobType }));
-      judgmentPolicies.add(dependencyHash({ policy, screeningPolicy: inputs.screeningPolicy, provenance: inputs.provenance, jobType }));
+      const full = inputs.policy.judge ? { ...inputs.policy, judge: config } : inputs.policy;
+      // Keys added after P1 never appeared in a full-policy hash: reconstruct those hashes without them too.
+      for (const policy of [full, ...withoutLaterKeys(full)]) {
+        inputPolicies.add(dependencyHash({ policy, jobType }));
+        judgmentPolicies.add(dependencyHash({ policy, screeningPolicy: inputs.screeningPolicy, provenance: inputs.provenance, jobType }));
+      }
     }
   }
   const schemaText = readFileSync(JUDGMENT_SCHEMA_PATH, 'utf8');

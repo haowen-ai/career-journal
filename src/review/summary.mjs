@@ -7,6 +7,9 @@ export const STOP_REASONS = Object.freeze({
   jev_unavailable: { en: 'Jev unavailable', zh: 'Jev 不可用' },
   adapter_failure: { en: 'Codex adapter failed', zh: 'Codex 调用失败' },
   company_size_unavailable: { en: 'company size could not be decided', zh: '公司规模未能判定' },
+  rate_limited: { en: 'judge API still rate-limited at concurrency 1', zh: '判定接口在并发 1 时仍持续限流' },
+  network_unavailable: { en: 'judge API unreachable (network) for the stall budget', zh: '判定接口网络持续不可用，超过等待上限' },
+  invalid_config: { en: 'invalid review-policy setting', zh: 'review-policy 配置无效' },
   budget: { en: 'budget', zh: '预算用完' },
   deadline: { en: 'deadline', zh: '到达截止时间' },
 });
@@ -30,6 +33,14 @@ export function nightlyCounts(receipt) {
   return {
     status: receipt?.status ?? 'unknown', fetched: scanned ? fetched : null, stored: scanned ? stored : null, countedOnly: scanned ? countedOnly : null,
     judged: sum(reviews, (item) => item.counts?.judged), eligible: sum(reviews, (item) => item.counts?.eligible),
+    // Same-title grouping: reviews settled from another member's decision, with no fetch or model call.
+    groupCopied: sum(reviews, (item) => item.counts?.group_copied), groupLocationRule: sum(reviews, (item) => item.counts?.group_location_rule),
+    groupTextMismatch: sum(reviews, (item) => item.counts?.group_text_mismatch),
+    // Amendment G: pre-fetch rule gates, re-queued rule settlements, final primary rejections and the escalation sample.
+    gateTitle: sum(reviews, (item) => item.counts?.gate_title), gateLocation: sum(reviews, (item) => item.counts?.gate_location),
+    gateReopened: sum(reviews, (item) => item.counts?.gate_reopened), primaryFinal: sum(reviews, (item) => item.counts?.primary_final),
+    sampleAsked: sum(reviews, (item) => item.counts?.escalation_sample?.asked), sampleOverturned: sum(reviews, (item) => item.counts?.escalation_sample?.overturned),
+    dueTotal: lastReview?.backlog?.due ?? null,
     dueLeft: lastReview?.backlog?.actionable_due ?? null, holds: lastReview?.backlog?.held ?? null,
     stopReasons, wallStarted: parts.find((item) => item.wallStarted)?.wallStarted ?? null, wallFinished: [...parts].reverse().find((item) => item.wallFinished)?.wallFinished ?? null,
   };
@@ -43,8 +54,14 @@ export function nightlySummary(receipt, { lang = 'en' } = {}) {
     ? c.stopReasons.map((code) => `${code}${STOP_REASONS[code] ? (zh ? `（${STOP_REASONS[code].zh}）` : ` (${STOP_REASONS[code].en})`) : ''}`).join(zh ? '、' : ', ')
     : (zh ? '无' : 'none');
   const id = receipt?.run_id ?? receipt?.runId ?? '';
+  const group = c.groupCopied || c.groupTextMismatch
+    ? (zh ? `，同岗复用 ${c.groupCopied}（其中按地点规则 ${c.groupLocationRule}；正文不同另判 ${c.groupTextMismatch}）`
+      : `, group copies ${c.groupCopied} (location rule ${c.groupLocationRule}; text differs, judged ${c.groupTextMismatch})`) : '';
+  const gated = c.gateTitle || c.gateLocation || c.gateReopened || c.primaryFinal || c.sampleAsked
+    ? (zh ? `，代码门结案 标题 ${c.gateTitle}、地点 ${c.gateLocation}（规则变更重排 ${c.gateReopened}），初审拒绝直接定案 ${c.primaryFinal}，抽检升级 ${c.sampleAsked}（推翻 ${c.sampleOverturned}）`
+      : `, rule gates title ${c.gateTitle}, location ${c.gateLocation} (re-queued on rule change ${c.gateReopened}), final primary rejections ${c.primaryFinal}, sampled escalations ${c.sampleAsked} (overturned ${c.sampleOverturned})`) : '';
   if (zh) {
-    return `${id}：状态 ${c.status}；抓取 ${known(c.fetched)}，入库 ${known(c.stored)}（只计数 ${known(c.countedOnly)}）；判定 ${c.judged}，合格 ${c.eligible}；剩余待审 ${known(c.dueLeft)}；挂起 ${known(c.holds)}；停止原因 ${reasons}`;
+    return `${id}：状态 ${c.status}；抓取 ${known(c.fetched)}，入库 ${known(c.stored)}（只计数 ${known(c.countedOnly)}）；判定 ${c.judged}，合格 ${c.eligible}${group}${gated}；剩余待审 ${known(c.dueLeft)}；挂起 ${known(c.holds)}；停止原因 ${reasons}`;
   }
-  return `${id}: status ${c.status}; fetched ${known(c.fetched)}, stored ${known(c.stored)} (counted only ${known(c.countedOnly)}); judged ${c.judged}, eligible ${c.eligible}; due left ${known(c.dueLeft)}; holds ${known(c.holds)}; stop reason ${reasons}`;
+  return `${id}: status ${c.status}; fetched ${known(c.fetched)}, stored ${known(c.stored)} (counted only ${known(c.countedOnly)}); judged ${c.judged}, eligible ${c.eligible}${group}${gated}; due left ${known(c.dueLeft)}; holds ${known(c.holds)}; stop reason ${reasons}`;
 }

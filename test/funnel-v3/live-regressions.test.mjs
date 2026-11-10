@@ -3,7 +3,7 @@
 // outputs; every employer, place, requisition, URL and candidate fact below is invented.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { schemaMigrations } from '../../src/storage/database.mjs';
@@ -443,6 +443,10 @@ function olderRelease(db, postingId, change, inputsCode) {
 
 test('[B] a decision-code-only change re-decides from cached judgments with zero judge calls; a prompt/schema change still re-judges (live T7)', async () => {
   await withHome(async ({ home, db }) => {
+    // Same-title grouping (2026-11-09) is off here: the five postings share a title and text on purpose, and each
+    // must be judged and replayed on its own.
+    const policyFile = path.join(home, '.career-journal', 'profile', 'review-policy.json');
+    await writeFile(policyFile, JSON.stringify({ ...JSON.parse(await readFile(policyFile, 'utf8')), grouping: { windowDays: 0 } }));
     const pages = {};
     const answers = {};
     const add = (id, snapshot, judged) => {

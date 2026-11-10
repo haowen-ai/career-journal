@@ -15,15 +15,16 @@ import { companyExcluded } from '../review/excluded.mjs';
 import { companySizeGate } from '../review/company-size.mjs';
 import { createCompanySizeResolver } from '../review/company-size-runtime.mjs';
 import { evaluateLimits, limitCounts } from '../review/limits.mjs';
-import { duplicateOfSubmitted, submittedApplications } from '../review/duplicate.mjs';
+import { duplicateOfSubmitted, submittedApplications, withdrawDuplicateLead } from '../review/duplicate.mjs';
 import { loadUserOverrides, withOverrides } from '../review/overrides.mjs';
 import { deliver, restoredVerdict } from '../review/deliver.mjs';
 import { claimItem } from '../review/lease.mjs';
-import { submittedApplicationIndex, submittedDuplicate } from '../funnel/identity.mjs';
+import { submittedApplicationIndex, submittedDuplicate, submittedKeysOf, identityOptionsOf, suspectIndex, suspectedDuplicates, suspectedFlags, SUSPECTED_FLAG } from '../funnel/identity.mjs';
+import { normalizeText } from '../scan/text.mjs';
 import { configuredDecisionAdapters } from './email.mjs';
 import { profileOption } from './scan.mjs';
 
-const usage = 'Usage: career-journal queue list [--json] [--profile <path>] | queue siblings --id <application> | --url <job link> [--json] [--profile <path>] | queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>] [--actor user|apply|audit] [--code <code> (with --actor audit)] | queue score [--all] [--limit <n>] [--dry-run] [--json] [--profile <path>] | queue rescreen [--decide-sizes] [--apply] [--json]';
+const usage = 'Usage: career-journal queue list [--json] [--profile <path>] | queue siblings --id <application> | --url <job link> [--json] [--profile <path>] | queue verify --id <application> --result ok|skip --reason <text> [--deadline <iso>] [--actor user|apply|audit] [--code <code> (with --actor audit)] | queue score [--all] [--limit <n>] [--dry-run] [--json] [--profile <path>] | queue rescreen [--decide-sizes] [--apply] [--json] | queue rescreen --only dedup [--apply] [--json]';
 const FIT_ORDER = Object.freeze({ high: 0, medium: 1, low: 2 });
 
 const queueSelect = `SELECT id, company, role, job_url jobUrl, status, source, source_id sourceId, location,
@@ -143,19 +144,21 @@ export function programView(subjectId, rows, profile = null) {
   return { representative: representative?.id ?? null, ok: representative?.id === subjectId, note, members };
 }
 
-function programIndex(db) {
+// companyAliases: the alias map of company-overrides.json and the screening policy (gatePolicy), so every spelling of
+// a company is one company here as in the cap (plan 2026-11-10).
+function programIndex(db, companyAliases) {
   const byCompany = new Map();
   for (const row of db.prepare(memberSelect).all()) {
-    const key = companyKey(row.company);
+    const key = companyKey(row.company, companyAliases);
     if (!byCompany.has(key)) byCompany.set(key, []);
     byCompany.get(key).push(row);
   }
-  return (row) => (byCompany.get(companyKey(row.company)) ?? [])
+  return (row) => (byCompany.get(companyKey(row.company, companyAliases)) ?? [])
     .filter((other) => other.id === row.id || titleSimilarity(other.role, row.role) >= DUPLICATE_THRESHOLD);
 }
 
 // The program view of any application, by id or by job link (any status), for picking an apply batch.
-export function programSiblings(db, { id = null, url = null } = {}, profile = null) {
+export function programSiblings(db, { id = null, url = null } = {}, profile = null, { companyAliases } = {}) {
   let subject = id ? db.prepare(`${memberSelect} WHERE id = ?`).get(id) : null;
   if (!subject && url) {
     const requisition = requisitionKey(url);
@@ -164,7 +167,7 @@ export function programSiblings(db, { id = null, url = null } = {}, profile = nu
       || (link && canonicalUrl(row.jobUrl) === link)) ?? null;
   }
   if (!subject) throw new Error('Application not found');
-  const view = programView(subject.id, programIndex(db)(subject), profile);
+  const view = programView(subject.id, programIndex(db, companyAliases)(subject), profile);
   return { id: subject.id, company: subject.company, role: subject.role, ...(view ?? {
     representative: subject.id, ok: true, note: 'no other requisition of this program', members: [programMember(subject, profile)],
   }) };
@@ -172,27 +175,33 @@ export function programSiblings(db, { id = null, url = null } = {}, profile = nu
 
 // With role-direction rules, a lead whose title is out of direction (block list) is flagged and listed after every
 // in-direction lead: leads added by hand never pass the delivery filter. Borderline titles are not demoted here.
-export function listQueue(db, profile = null, { direction = null } = {}) {
+// A lead flagged suspected_duplicate:<application id> (plan 2026-11-10) shows suspectedDuplicateOf and is listed after
+// the clean leads: the coordinator compares its job id and text with those applications before an apply batch.
+export function listQueue(db, profile = null, { direction = null, companyAliases } = {}) {
   const statuses = ['prepared', ...SUBMITTED_STATUSES];
   const companyLoads = new Map();
   for (const { company, count } of db.prepare(`SELECT company, COUNT(*) count FROM applications
     WHERE status IN (${statuses.map(() => '?').join(',')}) GROUP BY company`).all(...statuses)) {
-    const key = companyKey(company);
+    const key = companyKey(company, companyAliases);
     companyLoads.set(key, (companyLoads.get(key) ?? 0) + count);
   }
-  const reviewEvidence = db.prepare(`SELECT r.evidence_json FROM postings p JOIN reviews r ON r.posting_id = p.id
+  const reviewEvidence = db.prepare(`SELECT r.evidence_json, r.flags_json FROM postings p JOIN reviews r ON r.posting_id = p.id
     WHERE p.application_id = ? AND p.merged_into IS NULL ORDER BY r.updated_at DESC, p.id LIMIT 1`);
-  const programOf = programIndex(db);
+  const programOf = programIndex(db, companyAliases);
+  const flagsOf = (value) => { try { const list = JSON.parse(value ?? '[]'); return Array.isArray(list) ? list : []; } catch { return []; } };
   return db.prepare(`${queueSelect} WHERE status = 'lead' AND skip_reason IS NULL`).all()
     .map((row) => {
-      const evidence = JSON.parse(reviewEvidence.get(row.id)?.evidence_json ?? '{}');
+      const reviewRow = reviewEvidence.get(row.id);
+      const evidence = JSON.parse(reviewRow?.evidence_json ?? '{}');
+      const suspected = [...new Set(flagsOf(reviewRow?.flags_json).filter((flag) => String(flag).startsWith(SUSPECTED_FLAG)).map((flag) => flag.slice(SUSPECTED_FLAG.length)))];
       const program = programView(row.id, programOf(row), profile);
       const item = {
         ...row,
         locRank: locationRank(row.location, profile),
-        companyLoad: companyLoads.get(companyKey(row.company)) ?? 0,
+        companyLoad: companyLoads.get(companyKey(row.company, companyAliases)) ?? 0,
         tabHint: tabTitle({ company: row.company, needs: needsFromVerdict(evidence?.needs) }),
         ...(program ? { program: { representative: program.representative, members: program.members }, programOk: program.ok, programNote: program.note } : {}),
+        ...(suspected.length ? { suspectedDuplicateOf: suspected } : {}),
       };
       if (!direction) return item;
       const labelled = Object.hasOwn(evidence, 'function');
@@ -206,7 +215,8 @@ export function listQueue(db, profile = null, { direction = null } = {}) {
         directionReason: out ? `${DIRECTION_CODE}: ${directionNote(result)}` : software ? `${OUT_OF_DIRECTION_CODE}: ${softwareNote(evidence.function)}` : null };
     })
     .sort((left, right) => (left.directionOk === false) - (right.directionOk === false)
-      || (left.programOk === false) - (right.programOk === false) || compareInTimezone(left, right, profile?.timezone));
+      || (left.programOk === false) - (right.programOk === false)
+      || Boolean(left.suspectedDuplicateOf) - Boolean(right.suspectedDuplicateOf) || compareInTimezone(left, right, profile?.timezone));
 }
 
 export const VERIFY_ACTORS = Object.freeze(['user', 'review-worker', 'apply', 'audit']);
@@ -348,9 +358,11 @@ export async function gatePolicy(home) {
   return withOverrides({ ...screening, companyCap: reviewPolicy.companyCap ?? null, direction }, overrides);
 }
 
-export function rescreenLeads(db, { policy = {}, now = new Date().toISOString(), apply = false, owner = 'queue-rescreen' } = {}) {
+export function rescreenLeads(db, { policy = {}, now = new Date().toISOString(), apply = false, owner = 'queue-rescreen', only = null } = {}) {
+  if (only != null && only !== 'dedup') throw new Error('queue rescreen --only takes dedup');
+  if (only === 'dedup') return rescreenDuplicates(db, { policy, now, apply });
   const counts = limitCounts(db);
-  const index = submittedApplicationIndex(db, { companyAliases: policy.companyAliases });
+  const index = submittedApplicationIndex(db, identityOptionsOf(policy));
   const submitted = submittedApplications(db);
   const results = [];
   const leads = db.prepare("SELECT * FROM applications WHERE status='lead' AND COALESCE(skip_owner,'review')='review' ORDER BY company,id").all();
@@ -369,7 +381,7 @@ export function rescreenLeads(db, { policy = {}, now = new Date().toISOString(),
     }
     if (!violation) {
       const record = posting ?? { id: null, company: app.company, title: app.role, url: app.job_url, application_id: app.id };
-      const same = submittedDuplicate(db, posting ?? { company: app.company, title: app.role, url: app.job_url }, { companyAliases: policy.companyAliases, index });
+      const same = submittedDuplicate(db, posting ?? { company: app.company, title: app.role, url: app.job_url }, { ...identityOptionsOf(policy), index });
       const repost = !same && posting ? duplicateOfSubmitted(db, record, { companyAliases: policy.companyAliases, candidates: submitted }) : null;
       if (same && same.applicationId !== app.id) violation = { code: 'already_submitted', detail: same.match, applicationIds: [same.applicationId] };
       else if (repost) violation = { code: 'duplicate_submitted', detail: `${repost.match} ${repost.similarity}`, applicationIds: [repost.applicationId] };
@@ -402,6 +414,112 @@ export function rescreenLeads(db, { policy = {}, now = new Date().toISOString(),
   return { dryRun: !apply, leads: leads.length, violations: results.filter((item) => item.code !== 'company_size_unknown').length, results };
 }
 
+// `queue rescreen --only dedup` (plan 2026-11-10 v4): the duplicate check alone over current leads, for the one-time
+// sweep. No exclusion, size, limit or direction gate runs. Confirmed duplicates (job id / canonical URL against a
+// submitted application: already_submitted; the body rule: duplicate_submitted) are withdrawn with --apply by
+// withdrawDuplicateLead, never through delivery. Suspected duplicates (similar title, no shared key) only get the
+// suspected_duplicate flag written. Two leads sharing a confirmed key are listed as duplicate_lead, never withdrawn.
+// companyVariants lists company spellings where one name is a word prefix of another and neither the alias map nor
+// duplicateCheck.distinctCompanies says whether they are one company.
+const companyWords = (name) => normalizeText(name ?? '').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+export function companyVariants(db, policy = {}) {
+  const aliases = policy.companyAliases;
+  const distinct = (policy.duplicateCheck?.distinctCompanies ?? []).map((pair) => new Set(pair.map((name) => companyKey(name, aliases))));
+  const names = new Map();
+  for (const { company } of db.prepare('SELECT DISTINCT company FROM applications WHERE company IS NOT NULL').all()) {
+    const words = companyWords(company);
+    if (words.length && !names.has(words.join(' '))) names.set(words.join(' '), company);
+  }
+  const pairs = new Map();
+  for (const [joined, company] of names) {
+    const words = joined.split(' ');
+    for (let size = 1; size < words.length; size += 1) {
+      const shorter = names.get(words.slice(0, size).join(' '));
+      if (!shorter) continue;
+      const left = companyKey(shorter, aliases); const right = companyKey(company, aliases);
+      if (!left || !right || left === right) continue;
+      if (distinct.some((set) => set.has(left) && set.has(right))) continue;
+      const key = [left, right].sort().join('\0');
+      if (!pairs.has(key)) pairs.set(key, { shorter, longer: company });
+    }
+  }
+  return [...pairs.values()].sort((a, b) => a.shorter.localeCompare(b.shorter) || a.longer.localeCompare(b.longer));
+}
+
+function rescreenDuplicates(db, { policy = {}, now, apply = false }) {
+  const identity = identityOptionsOf(policy);
+  const check = policy.duplicateCheck ?? null;
+  const index = submittedApplicationIndex(db, identity);
+  const submitted = submittedApplications(db);
+  const leads = db.prepare("SELECT * FROM applications WHERE status='lead' AND COALESCE(skip_owner,'review')='review' ORDER BY company,id").all();
+  const postingOf = db.prepare('SELECT p.*,r.state review_state,r.flags_json FROM postings p LEFT JOIN reviews r ON r.posting_id=p.id WHERE p.application_id=? AND p.merged_into IS NULL ORDER BY (r.posting_id IS NULL),p.created_at LIMIT 1');
+  const results = [];
+  const confirmed = new Set();
+  const rest = [];
+  for (const app of leads) {
+    const posting = postingOf.get(app.id);
+    const fallback = { company: app.company, title: app.role, url: app.job_url };
+    const same = submittedDuplicate(db, posting ?? fallback, { ...identity, index });
+    let violation = null;
+    if (same && same.applicationId !== app.id) violation = { code: 'already_submitted', detail: same.match, applicationIds: [same.applicationId] };
+    else if (posting) {
+      const repost = duplicateOfSubmitted(db, posting, { companyAliases: identity.companyAliases, candidates: submitted });
+      if (repost) violation = { code: 'duplicate_submitted', detail: `${repost.match} ${repost.similarity}`, applicationIds: [repost.applicationId] };
+    }
+    if (!violation) { rest.push({ app, posting, fallback }); continue; }
+    confirmed.add(app.id);
+    const action = apply ? withdrawDuplicateLead(db, { applicationId: app.id, postingId: posting?.review_state ? posting.id : null, violation, now }).action : 'would_withdraw';
+    results.push({ applicationId: app.id, company: app.company, role: app.role, ...violation, action });
+  }
+  // Leads sharing a confirmed key (same company and job id, or same canonical URL): listed, never withdrawn.
+  const owners = new Map();
+  const partners = new Map();
+  for (const { app, posting, fallback } of rest) {
+    const keys = new Set([...(posting ? submittedKeysOf(posting, identity) : []), ...submittedKeysOf(fallback, identity)]);
+    for (const key of keys) {
+      const first = owners.get(key);
+      if (!first) { owners.set(key, app); continue; }
+      if (first.id === app.id || partners.get(app.id)?.has(first.id)) continue;
+      for (const [a, b] of [[app.id, first.id], [first.id, app.id]]) { if (!partners.has(a)) partners.set(a, new Set()); partners.get(a).add(b); }
+      results.push({ applicationId: app.id, company: app.company, role: app.role, code: 'duplicate_lead', detail: key, applicationIds: [first.id], action: 'listed' });
+    }
+  }
+  let flagged = 0;
+  if (check) {
+    const suspects = suspectIndex(db, { companyAliases: identity.companyAliases });
+    for (const { app, posting } of rest) {
+      const list = suspectedDuplicates(db, { company: app.company, title: app.role }, { identityOptions: identity, duplicateCheck: check, index: suspects,
+        exclude: [app.id, ...confirmed, ...(partners.get(app.id) ?? [])] });
+      if (!list.length) continue;
+      flagged += 1;
+      let action = 'would_flag';
+      if (apply) {
+        if (!posting?.review_state) action = 'no_review';
+        else {
+          let current = [];
+          try { current = JSON.parse(db.prepare('SELECT flags_json FROM reviews WHERE posting_id=?').get(posting.id)?.flags_json ?? '[]'); } catch { current = []; }
+          const next = [...new Set([...current, ...suspectedFlags(list)])];
+          if (next.length === current.length) action = 'already_flagged';
+          else {
+            db.exec('BEGIN IMMEDIATE');
+            try {
+              db.prepare('UPDATE reviews SET flags_json=? WHERE posting_id=?').run(JSON.stringify(next), posting.id);
+              db.prepare("INSERT INTO review_log(posting_id,at,stage,kind,payload_json) VALUES (?,?,'deliver','outcome',?)")
+                .run(posting.id, now, JSON.stringify({ action: 'rescreen_dedup_flagged', applicationId: app.id, suspected: list }));
+              db.exec('COMMIT');
+            } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error; }
+            action = 'flagged';
+          }
+        }
+      }
+      results.push({ applicationId: app.id, company: app.company, role: app.role, code: 'suspected_duplicate',
+        detail: list.map((item) => `${item.applicationId} (${item.status}, ${item.similarity})`).join('; '), applicationIds: list.map((item) => item.applicationId), action });
+    }
+  }
+  return { dryRun: !apply, only: 'dedup', leads: leads.length, violations: confirmed.size, flagged, duplicateLeads: results.filter((item) => item.code === 'duplicate_lead').length,
+    results, companyVariants: companyVariants(db, policy), ...(check ? {} : { warnings: ['duplicateCheck missing in company-overrides.json: no suspected-duplicate flags, no configured job-id URL formats'] }) };
+}
+
 // `queue rescreen --decide-sizes`: settle the size of every lead's company that is still unknown, with the same
 // resolver the review run uses, before the gate rules are applied. Decisions land in company-size.json; a failed
 // decision leaves the company unknown (listed as company_size_unknown).
@@ -432,15 +550,24 @@ export async function queueCommand(parsed, io, runtime = {}) {
   const profile = ['verify', 'rescreen'].includes(parsed.subcommand) ? null : await queueProfile(home, parsed);
   if (parsed.subcommand === 'score' && !profile) throw new Error('queue score needs the search profile; complete the profile interview first, or pass --profile <path>.');
   const limit = parsed.subcommand === 'score' ? positiveLimit(parsed.options.limit) : null;
+  // Argument combinations are checked before anything runs (no size decision, no database write).
+  const only = parsed.subcommand === 'rescreen' && parsed.options.only !== undefined ? String(parsed.options.only) : null;
+  if (only !== null && only !== 'dedup') throw new Error(`queue rescreen --only takes dedup. ${usage}`);
+  if (only && parsed.options['decide-sizes'] !== undefined) throw new Error(`--decide-sizes does not go with --only dedup (the dedup sweep decides no company size). ${usage}`);
   const context = await openHomeDatabase(home);
   try {
     if (parsed.subcommand === 'rescreen') {
       let sizeDecisions = null;
       if (parsed.options['decide-sizes'] === true) sizeDecisions = await decideLeadSizes(context.db, home, runtime);
-      const summary = rescreenLeads(context.db, { policy: await gatePolicy(home), apply: parsed.options.apply === true });
+      const summary = rescreenLeads(context.db, { policy: await gatePolicy(home), apply: parsed.options.apply === true, only });
       if (sizeDecisions) summary.sizeDecisions = sizeDecisions;
       if (parsed.options.json) io.out(JSON.stringify(summary, null, 2));
-      else {
+      else if (only) {
+        for (const item of summary.results) io.out([item.action, item.code, item.company, item.role, item.applicationId, item.detail ?? ''].join('\t'));
+        for (const item of summary.companyVariants) io.out(['company_variant', item.shorter, item.longer].join('\t'));
+        for (const warning of summary.warnings ?? []) io.out(`warning: ${warning}`);
+        io.out(`${summary.violations} of ${summary.leads} leads are confirmed duplicates, ${summary.flagged} flagged suspected, ${summary.duplicateLeads} duplicate lead pairs, ${summary.companyVariants.length} company variants${summary.dryRun ? ' (dry run, nothing written; --apply withdraws confirmed duplicates and writes the flags)' : ''}`);
+      } else {
         for (const item of summary.results) io.out([item.action, item.code, item.company, item.role, item.applicationId, item.detail ?? ''].join('\t'));
         if (sizeDecisions) io.out(`company sizes: ${sizeDecisions.decided.length} decided, ${sizeDecisions.failed.length} failed${sizeDecisions.failed.map((item) => `\n  failed\t${item.company}\t${item.error}`).join('')}`);
         io.out(`${summary.violations} of ${summary.leads} leads violate a gate rule${summary.dryRun ? ' (dry run, nothing written; --apply withdraws them)' : ''}`);
@@ -462,7 +589,7 @@ export async function queueCommand(parsed, io, runtime = {}) {
       const id = parsed.options.id ?? parsed.positionals[0] ?? null;
       const url = typeof parsed.options.url === 'string' ? parsed.options.url : null;
       if (!id && !url) throw new Error(usage);
-      const view = programSiblings(context.db, { id, url }, profile);
+      const view = programSiblings(context.db, { id, url }, profile, { companyAliases: (await gatePolicy(home)).companyAliases });
       if (parsed.options.json) io.out(JSON.stringify(view, null, 2));
       else {
         io.out(`${view.company}\t${view.role}\t${view.note}`);
@@ -476,11 +603,12 @@ export async function queueCommand(parsed, io, runtime = {}) {
     }
     if (parsed.subcommand === 'list') {
       const direction = await loadDirectionRules(path.join(path.resolve(home), '.career-journal', 'profile'));
-      const items = listQueue(context.db, { ...profile, timezone: context.config.timezone }, { direction });
+      const items = listQueue(context.db, { ...profile, timezone: context.config.timezone }, { direction, companyAliases: (await gatePolicy(home)).companyAliases });
       if (parsed.options.json) io.out(JSON.stringify(items, null, 2));
       else for (const item of items) {
         io.out([item.fit ?? '-', item.deadlineAt ?? '-', item.location ?? '-', item.company, item.role, item.id].join('\t'));
         if (item.programNote) io.out(`\t${item.programOk === false ? 'SIBLING' : 'program'}: ${item.programNote}`);
+        if (item.suspectedDuplicateOf) io.out(`\tSUSPECTED duplicate of: ${item.suspectedDuplicateOf.join(', ')} (compare job id and text before applying)`);
       }
       return 0;
     }

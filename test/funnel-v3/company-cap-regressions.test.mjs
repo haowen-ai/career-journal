@@ -354,3 +354,20 @@ test('[B] the cap comes from review policy and is not a judge dependency: adding
   assert.equal(reviewOf(db, 'p-free-a').decision, 'eligible');
   assert.equal(reviewOf(db, 'p-free-a').state, 'done');
 });
+
+// 2026-11-10 dedup fix (plan intern-scan/plans/2026-11-10-dedup-fix.md): the aliases of company-overrides.json reach the
+// cap through withOverrides, so every spelling of one company counts toward the same cap (and queue list's company load).
+test('[A] the company cap counts submissions under every alias of a company', async () => {
+  const { withOverrides, emptyOverrides } = await import('../../src/review/overrides.mjs');
+  const { evaluateLimits } = await import('../../src/review/limits.mjs');
+  const db = freshDb();
+  const aliases = { 'Alias Example Holdings, Inc.': 'Alias Example', 'Alias Example Students & Graduates': 'Alias Example' };
+  const policy = withOverrides({ ...SCREENING_POLICY, companyCap: CAP }, { ...emptyOverrides(), aliases });
+  for (const [index, company] of ['Alias Example', 'Alias Example Holdings, Inc.', 'Alias Example Students & Graduates', 'Alias Example', 'Alias Example Holdings, Inc.'].entries()) {
+    submission(db, { company, daysAgo: 10 + index });
+  }
+  const over = evaluateLimits('Alias Example Students & Graduates', { policy, now: T0, db });
+  assert.equal(over?.code, 'company_cap', 'five submissions under three spellings reach the cap');
+  assert.equal(over.count, 5);
+  assert.equal(evaluateLimits('Alias Example', { policy: withOverrides({ ...SCREENING_POLICY, companyCap: CAP }, emptyOverrides()), now: T0, db }), null, 'without the aliases the spellings count apart');
+});

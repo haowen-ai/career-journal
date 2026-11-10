@@ -36,7 +36,7 @@ export function createApplication(db, input, now = new Date().toISOString()) {
           if (!posting.merged_into) { resolved = { postingId: posting.id }; break; }
           id = posting.merged_into;
         }
-      } else resolved = resolvePosting(db, record, { now, companyAliases: input.companyAliases });
+      } else resolved = resolvePosting(db, record, { now, companyAliases: input.companyAliases, jobIdFormats: input.jobIdFormats });
       const posting = db.prepare('SELECT application_id FROM postings WHERE id=?').get(resolved.postingId);
       if (db.prepare("SELECT 1 FROM reviews WHERE posting_id=? AND code='identity_conflict'").get(resolved.postingId)) throw new Error('Application identity conflict');
       if (posting.application_id) {
@@ -46,7 +46,7 @@ export function createApplication(db, input, now = new Date().toISOString()) {
       }
     }
     const application = insertApplication(db, input, now);
-    if (hasPostings && bindApplication(db, application.id, { now, companyAliases: input.companyAliases }).action === 'conflict') throw new Error('Application binding conflict');
+    if (hasPostings && bindApplication(db, application.id, { now, companyAliases: input.companyAliases, jobIdFormats: input.jobIdFormats }).action === 'conflict') throw new Error('Application binding conflict');
     db.exec('RELEASE application_writer');
     return application;
   } catch (error) {

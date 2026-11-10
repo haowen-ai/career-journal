@@ -6,9 +6,13 @@
   "fit": { "adjust": [] },
   "judge": {
     "primary": { "runner": "codex", "model": "", "codexHome": "", "effort": "medium", "timeoutMs": 120000 },
-    "escalation": { "runner": "codex", "model": "", "codexHome": "", "effort": "medium", "timeoutMs": 120000 }
+    "escalation": { "runner": "codex", "model": "", "codexHome": "", "effort": "medium", "timeoutMs": 120000 },
+    "finalRejectionCodes": ["outside_area", "function_out_of_scope", "degree", "graduation", "authorization", "term_or_area"],
+    "escalationSample": 0.05
   },
-  "budgets": { "attempts": null, "fetches": null, "deadlineMin": null, "concurrency": null, "dailyMaxMinutes": null, "quotaCooldownHours": null },
+  "budgets": { "attempts": null, "fetches": null, "deadlineMin": null, "concurrency": null, "concurrencyStart": null, "rateLimitCoolSeconds": null, "rateLimitIncreaseAfter": null, "dailyMaxMinutes": null, "quotaCooldownHours": null, "unavailableRetries": 5, "unavailableStallMinutes": 10 },
+  "grouping": { "windowDays": 30 },
+  "locationGate": { "untrustedHosts": ["amazon.jobs", "careers.fedex.com"] },
   "fetcher": null,
   "retention": { "workPaths": [] }
 }

@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { loadUserOverrides } from './overrides.mjs';
 import { loadDirectionRules } from './direction.mjs';
+import { titleScreenRules } from '../funnel/classify.mjs';
 
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical);
@@ -44,7 +45,12 @@ export async function loadReviewInputs(home) {
   ]);
   // Role-direction rules apply after the verdict; they never enter a dependency hash.
   const direction = await loadDirectionRules(profile);
-  return { facts, policy, screeningPolicy, provenance, profile: searchProfile, rules: { screening, fit }, resume: text === null ? null : { text, hash: dependencyHash(text) }, evalRecord, overrides, direction };
+  // profile/title-screen.json, read and checked as the scan reads it (commands/scan.mjs scanPolicy); the review's
+  // pre-fetch title gate uses its function list only (gates.mjs). Not a judge dependency.
+  let titleScreen = null;
+  try { titleScreen = titleScreenRules(JSON.parse(await readFile(path.join(profile, 'title-screen.json'), 'utf8'))); }
+  catch (error) { if (error.code !== 'ENOENT') throw new Error(`profile/title-screen.json: ${error.message}`, { cause: error }); }
+  return { titleScreen, facts, policy, screeningPolicy, provenance, profile: searchProfile, rules: { screening, fit }, resume: text === null ? null : { text, hash: dependencyHash(text) }, evalRecord, overrides, direction };
 }
 
 export const screeningPolicyParts = (policy) => Object.fromEntries(

@@ -39,11 +39,19 @@ function ownershipClass(row) {
 // --code a,b [--company X] [--since D]   settled automated rejections with those codes (not_eligible or dropped)
 // --leads                                current leads (eligible, application status lead)
 // --posting id[,id]                      explicit settled reviews
+// --posting … --retry-now                also open `due` rows that are backing off (next_due in the future): they are
+//   rescheduled to now, e.g. after a fetcher fix, instead of waiting out the retry delay.
 // since compares the posting's first sighting (reviews.first_seen) with the given date.
-export function rejudgeReviews(db, { codes = null, leads = false, postings = null, company = null, since = null, companyAliases = {}, now, apply = false }) {
+// --reclassified (with --code of scan signal drops only: no_student_signal, out_of_direction) keeps only the rows
+//   whose current source records classify for review under today's scan rules (for example after a new
+//   engagementSignals entry); the rest are counted as still_dropped. `reviewable` is that per-posting predicate.
+//   --flag <name> narrows it to reviews whose new classification carries that flag (e.g. engagement_signal).
+export function rejudgeReviews(db, { codes = null, leads = false, postings = null, company = null, since = null, companyAliases = {}, now, apply = false, reviewable = null, retryNow = false }) {
   const selectors = [codes ? 'code' : null, leads ? 'leads' : null, postings ? 'posting' : null].filter(Boolean);
-  if (selectors.length !== 1) throw new Error('Usage: career-journal review rejudge (--code <code>[,…] | --leads | --posting <id>[,…]) [--company <name>] [--since <date>] [--apply]');
+  if (selectors.length !== 1) throw new Error('Usage: career-journal review rejudge (--code <code>[,…] | --leads | --posting <id>[,…]) [--company <name>] [--since <date>] [--reclassified [--flag <name>]] [--apply]');
   if (since !== null && !Number.isFinite(Date.parse(since))) throw new Error('--since requires a date');
+  if (retryNow && !postings) throw new Error('--retry-now needs --posting');
+  if (reviewable && !(codes && codes.every((code) => SIGNAL_DROP_CODES.includes(code)))) throw new Error(`--reclassified needs --code with scan signal drops only (${SIGNAL_DROP_CODES.join(', ')})`);
   const where = codes ? `r.state='done' AND r.decision IN ('not_eligible','dropped') AND r.code IN (SELECT value FROM json_each(:list))`
     : leads ? `r.state='done' AND r.decision='eligible' AND a.status='lead'`
       : `r.posting_id IN (SELECT value FROM json_each(:list))`;
@@ -61,8 +69,10 @@ export function rejudgeReviews(db, { codes = null, leads = false, postings = nul
     // An open row in an exploration lane is never scheduled when exploration.share is 0, so an explicit
     // --posting may still move it to the normal lane; other open rows are already queued.
     const exploring = ['no_student_signal', 'out_of_direction'].includes(row.lane) && row.state === 'due';
-    const skip = ownershipClass({ ...row, now_iso: now }) ?? (postings && !['done', 'held'].includes(row.state) && !exploring ? 'already_open' : null);
+    const backingOff = retryNow && row.state === 'due';
+    const skip = ownershipClass({ ...row, now_iso: now }) ?? (postings && !['done', 'held'].includes(row.state) && !exploring && !backingOff ? 'already_open' : null);
     if (skip) { bump(report.skipped, skip); continue; }
+    if (reviewable && !reviewable(row.posting_id)) { bump(report.skipped, 'still_dropped'); continue; }
     chosen.push(row);
     report.selected += 1;
     bump(report.byCode, row.decision === 'eligible' ? 'lead' : row.code ?? row.decision ?? 'none');
@@ -94,6 +104,22 @@ export function rejudgeReviews(db, { codes = null, leads = false, postings = nul
     });
   }
   return report;
+}
+
+// `review rejudge --reclassified`: does the posting's current record set classify for review under today's scan rules?
+// Same records and rule as `review reclassify` (the most complete source decides; a signal drop needs every source to
+// agree); a posting closed on every source stays dropped.
+export function scanReviewable(db, { policy, profile, flag = null }) {
+  const reader = currentRecordReader(db);
+  const { latest } = latestSightings(db);
+  const listed = db.prepare('SELECT listed FROM postings WHERE id=?');
+  return (postingId) => {
+    const observations = reader.records(reader.members(postingId), latest, { fallback: true });
+    if (!observations.length) return false;
+    if (!listed.get(postingId)?.listed && observations.every((item) => !item.listed)) return false;
+    const result = classifyPosting(observations, { policy, profile });
+    return result.kind === 'review' && (!flag || result.flags.includes(flag));
+  };
 }
 
 // Same rule as `review reclassify`: the most complete source decides, and a signal drop needs every source to agree.

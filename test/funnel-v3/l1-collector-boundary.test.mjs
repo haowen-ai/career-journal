@@ -55,7 +55,8 @@ test('[L1] the certain drop/reuse codes fire only on certain facts', async () =>
 });
 
 for (const [name, overrides] of [
-  ['Simplify foreign-only list (partial completeness)', { source: 'simplify', locations: ['London, United Kingdom'], completeness: { locations: 'partial', arrangement: 'unknown', description: 'tags', employment_type: 'absent' } }],
+  // Changed 2026-11-09: a Simplify foreign-only list now drops as outside_countries (see below); one with an unresolved place stays.
+  ['Simplify foreign list with an unresolved place (partial completeness)', { source: 'simplify', locations: ['London, United Kingdom', 'Prague'], completeness: { locations: 'partial', arrangement: 'unknown', description: 'tags', employment_type: 'absent' } }],
   ['Greenhouse primary London plus office Seattle', { locations: ['London, United Kingdom', 'Seattle, WA'] }],
   ['Lever Full-time commitment with summer intern in the description', { employmentType: 'Full-time', title: 'Analyst', description: LONG('Our summer intern program runs June to August 2027.'), completeness: { locations: 'complete', arrangement: 'known', description: 'full', employment_type: 'explicit' } }],
   ['Workday timeType Full time intern', { title: 'Data Science Intern', employmentType: null, categories: ['Full time'] }],
@@ -75,6 +76,13 @@ for (const [name, overrides] of [
     assert.equal(result.kind, 'review', JSON.stringify(result));
   });
 }
+
+// User decision 2026-11-09: a listing whose every location resolves outside the search countries never reaches review.
+test('[L1] dropped as outside_countries: Simplify foreign-only list (partial completeness)', async () => {
+  const { classifyRole } = await classify();
+  const result = classifyRole(record({ source: 'simplify', locations: ['London, United Kingdom'], completeness: { locations: 'partial', arrangement: 'unknown', description: 'tags', employment_type: 'absent' } }), { policy: SCREENING_POLICY, profile: PROFILE });
+  assert.deepEqual([result.kind, result.code], ['drop', 'outside_countries'], JSON.stringify(result));
+});
 
 // User decision 2026-10-30: 691 judged no-signal roles gave 0 eligible, so a student search drops them at scan.
 for (const [name, overrides] of [

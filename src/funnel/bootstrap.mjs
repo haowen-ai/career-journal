@@ -1,4 +1,4 @@
-import { bindApplication } from './identity.mjs';
+import { bindApplication, identityOptionsOf } from './identity.mjs';
 import { SUBMITTED_STATUSES } from './contract.mjs';
 import { applicationOwnership } from '../review/ownership.mjs';
 import { releaseHolds } from '../review/release-holds.mjs';
@@ -9,7 +9,7 @@ export function bootstrapExisting(db, { provenance, now, policy = {}, companyAli
   try {
     counts.requeued += releaseHolds(db, { now, provenance, codes: ['provenance_unknown'] }).requeued;
     for (const app of db.prepare('SELECT * FROM applications ORDER BY created_at,id').all()) {
-      const binding = bindApplication(db, app.id, { now, companyAliases });
+      const binding = bindApplication(db, app.id, { now, ...identityOptionsOf(policy, companyAliases) });
       if (binding.action === 'created') counts.postings += 1;
       const id = binding.postingId;
       const existing = db.prepare('SELECT * FROM reviews WHERE posting_id=?').get(id);

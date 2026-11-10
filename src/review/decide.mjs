@@ -114,10 +114,16 @@ function remoteEvidence(text, remote) {
   return Boolean(remote && /^(?:us|state:[A-Z]{2}|none|non_us)$/.test(remote.scope) && findQuote(text, remote.quote));
 }
 
+// The year/summer inference below is an internship heuristic (an undated internship seen in the autumn is next summer's).
+// A posting with no internship wording (a contract, fixed-term or part-time role kept by engagementSignals) may start
+// now, so its term is never inferred under an internship search: it needs a quoted year or stays unclear.
+const INTERNSHIP_WORDING = /\b(?:interns?|internships?|winternships?|co[- ]?ops?|apprentice(?:s|ship|ships)?|placements?|working students?|student researchers?|fellow(?:s|ship|ships)?|residency|summer\s+(?:analysts?|associates?)|(?:graduate|university|campus)\s+program(?:me)?s?)\b/i;
+
 function inferTerm(text, term, firstSeen, jobType) {
   const yearUnknown = !/\b\d{4}\b/.test(term?.quote ?? '') && !titleYears(text).length;
   // An unsupported model year cannot bypass the first-seen inference window.
   if (yearUnknown && term?.year != null) term = { ...term, year: null };
+  if (jobType === 'internship' && !INTERNSHIP_WORDING.test(text)) return { term, inferred: false };
   const observed = new Date(firstSeen);
   if (!Number.isFinite(observed.getTime()) || observed.getUTCMonth() < 7) return { term, inferred: false };
   const year = observed.getUTCFullYear() + 1;

@@ -33,12 +33,20 @@ export { companyExcluded };
 //       limits (src/review/limits.mjs). A rolling-window entry replaces the default cap for that company;
 //       'active' counts applications in progress; 'cycle' counts submissions since cycleStart. max 0 is an
 //       exclusion: the company joins excludedCompanies.
+//     duplicateCheck { jobIdUrlFormats[], flagTitleNoiseWords[], flagSimilarity, leadFlagSimilarity, distinctCompanies[[a, b]] }
+//       (plan 2026-11-10 dedup fix). jobIdUrlFormats: verified job-id URL shapes, each { host | hostSuffix, path, param?, id? }
+//       (host equals the URL host without www.; path is a regular expression for the URL path whose first group is the
+//       id, or, with param, the query parameter holding the id, checked by the id expression). A hit adds a
+//       company_req identity alias (src/funnel/identity.mjs). The noise words and thresholds only mark suspected
+//       duplicates (flag suspected_duplicate:<application id>); they never withdraw or merge. distinctCompanies are
+//       name pairs that are different companies (not reported as company variants by queue rescreen --only dedup).
+//       Without this block no configured format is read and nothing is flagged; the scan receipt warns.
 //   profile/company-size.json { large[], small[], defenseExcluded[], decided[] } (src/review/company-size.mjs);
 //     defenseExcluded joins the user exclusion like excludedCompanies.
 export const EXEMPT_FILE = 'location-exempt-brands.json';
 export const COMPANY_FILE = 'company-overrides.json';
 export const emptyOverrides = () => ({ locationExempt: { brands: [], windows: null }, reallowedCompanies: [], activeCaps: [], liftedSkipReasons: [], excludedCompanies: [], excludedCompanyPatterns: [],
-  aliases: {}, limits: [], companySizes: null });
+  aliases: {}, limits: [], companySizes: null, duplicateCheck: null });
 const WINDOW = /^(?:\d+d|active|cycle)$/;
 
 const US_CODES = new Set('AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC AS GU MP PR VI UM'.split(' '));
@@ -78,6 +86,43 @@ function limitList(value) {
     ...(typeof item.note === 'string' ? { note: item.note } : {}) }));
 }
 
+function duplicateCheckBlock(value) {
+  if (value === undefined || value === null) return null;
+  const fail = (detail) => { throw new Error(`Cannot load ${COMPANY_FILE}: duplicateCheck ${detail}`); };
+  if (typeof value !== 'object' || Array.isArray(value)) fail('must be an object');
+  const regex = (pattern, field) => {
+    if (typeof pattern !== 'string' || !pattern) fail(`${field} must be a non-empty regular expression`);
+    try { new RegExp(pattern); } catch (error) { fail(`${field} ${JSON.stringify(pattern)}: ${error.message}`); }
+    return pattern;
+  };
+  const formats = value.jobIdUrlFormats ?? [];
+  if (!Array.isArray(formats)) fail('jobIdUrlFormats must be a list');
+  const jobIdUrlFormats = formats.map((item, index) => {
+    const field = `jobIdUrlFormats[${index}]`;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) fail(`${field} must be an object`);
+    const host = typeof item.host === 'string' && item.host.trim() ? item.host.trim().toLowerCase().replace(/^www\./, '') : null;
+    const hostSuffix = typeof item.hostSuffix === 'string' && item.hostSuffix.trim() ? item.hostSuffix.trim().toLowerCase() : null;
+    if (Boolean(host) === Boolean(hostSuffix)) fail(`${field} needs exactly one of host or hostSuffix`);
+    const path = regex(item.path, `${field}.path`);
+    if (item.param !== undefined && (typeof item.param !== 'string' || !item.param.trim())) fail(`${field}.param must be a non-empty string`);
+    const id = item.id === undefined ? null : regex(item.id, `${field}.id`);
+    if (!item.param && !/\((?!\?)/.test(path)) fail(`${field}.path needs a capturing group for the id (or give param)`);
+    return { ...(host ? { host } : { hostSuffix }), path, ...(item.param ? { param: item.param.trim() } : {}), ...(id ? { id } : {}) };
+  });
+  const words = names(value.flagTitleNoiseWords, 'duplicateCheck.flagTitleNoiseWords', COMPANY_FILE);
+  const share = (field, fallback) => {
+    const number = value[field] ?? fallback;
+    if (typeof number !== 'number' || !Number.isFinite(number) || number < 0 || number > 1) fail(`${field} must be a number between 0 and 1`);
+    return number;
+  };
+  const pairs = value.distinctCompanies ?? [];
+  if (!Array.isArray(pairs) || !pairs.every((pair) => Array.isArray(pair) && pair.length >= 2 && pair.every((name) => typeof name === 'string' && name.trim()))) {
+    fail('distinctCompanies must be a list of lists of at least two company names');
+  }
+  return { jobIdUrlFormats, flagTitleNoiseWords: words, flagSimilarity: share('flagSimilarity', 0.6), leadFlagSimilarity: share('leadFlagSimilarity', 1),
+    distinctCompanies: pairs.map((pair) => pair.map((name) => name.trim())) };
+}
+
 export async function loadUserOverrides(profileDir, { sizes = true } = {}) {
   const result = emptyOverrides();
   const exempt = await readOptional(path.join(profileDir, EXEMPT_FILE));
@@ -105,6 +150,7 @@ export async function loadUserOverrides(profileDir, { sizes = true } = {}) {
     // max 0 is an exclusion, not a limit.
     for (const item of limits.filter((limit) => limit.max === 0)) if (!result.excludedCompanies.includes(item.company)) result.excludedCompanies.push(item.company);
     result.limits = limits.filter((limit) => limit.max > 0);
+    result.duplicateCheck = duplicateCheckBlock(company.duplicateCheck);
   }
   if (sizes) {
     const size = await readSizeFile(profileDir);
@@ -127,7 +173,9 @@ export function withOverrides(screeningPolicy = {}, overrides) {
     userExcludedCompanies: [...kept(screeningPolicy.userExcludedCompanies), ...kept(o.excludedCompanies)],
     overrideExcludedCompanies: kept(o.excludedCompanies), overrideExcludedPatterns: o.excludedCompanyPatterns ?? [],
     reallowedCompanies: o.reallowedCompanies ?? [], activeCaps: o.activeCaps ?? [], liftedSkipReasons: o.liftedSkipReasons ?? [],
-    companyAliases: aliases, limits: o.limits ?? [], companySizes: o.companySizes ?? null };
+    companyAliases: aliases, limits: o.limits ?? [], companySizes: o.companySizes ?? null,
+    // Identity options for every posting-identity call (src/funnel/identity.mjs): aliases plus verified job-id URL formats.
+    duplicateCheck: o.duplicateCheck ?? null, identityOptions: { companyAliases: aliases, jobIdFormats: o.duplicateCheck?.jobIdUrlFormats ?? [] } };
 }
 
 export function locationExempt(company, overrides, aliases = {}) {

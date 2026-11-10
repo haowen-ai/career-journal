@@ -100,13 +100,17 @@ test('[A] a season term tag and a winternship are student signals', async () => 
   assert.equal(classifyRole(record({ title: 'Women\'s Winternship', description: '' }), options).kind, 'review');
 });
 
-test('[A] a partial location list never counts as outside the search countries', async () => {
+// Changed 2026-11-09 (user): every listed location outside the search countries drops at ingest whatever the
+// completeness; a location that does not resolve, or remote wording, keeps the record for review.
+test('[A] a location list that resolves wholly outside the search countries drops, a partial one included', async () => {
   const { classifyRole } = await classify();
   const overseas = { title: 'Data Science Intern', locations: ['Berlin, Germany'], remote: false, workplaceType: 'On-site' };
   const known = { locations: 'complete', arrangement: 'known', description: 'full', employment_type: 'absent' };
   const options = { policy: SCREENING_POLICY, profile: PROFILE };
   assert.equal(classifyRole(record({ ...overseas, completeness: known }), options).code, 'outside_countries');
-  assert.equal(classifyRole(record({ ...overseas, completeness: { ...known, locations: 'partial' } }), options).kind, 'review', 'a partial list can hide a US office');
+  assert.equal(classifyRole(record({ ...overseas, completeness: { ...known, locations: 'partial' } }), options).code, 'outside_countries', 'a partial list decides too');
+  assert.equal(classifyRole(record({ ...overseas, locations: ['Berlin, Germany', 'Prague'], completeness: known }), options).kind, 'review', 'an unresolved place keeps it');
+  assert.equal(classifyRole(record({ ...overseas, workplaceType: 'Remote', completeness: known }), options).kind, 'review', 'remote wording keeps it');
 });
 
 test('[A] the new drop codes are part of the contract', async () => {

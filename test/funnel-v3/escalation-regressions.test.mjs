@@ -127,23 +127,24 @@ const asked = (adapter) => adapter.calls.length;
 
 // ------------------------------------------------------------------ E1
 
-test('[B] a primary-tier not_eligible from code-verified geography (outside_area) or term (outside_window) is final with zero escalation calls; a degree not_eligible with no second opinion configured still escalates (escalation E1)', async () => {
+test('[B] a primary-tier not_eligible from code-verified geography (outside_area) or term (outside_window) is final with zero escalation calls; a quoted degree not_eligible with no second opinion configured is final too (escalation E1, amendment G2)', async () => {
   const db = freshDb();
   const q = queue(db, { 'p-outside-area': 'area', 'p-outside-window': 'window', 'p-degree-guard': 'degree' });
   const { receipt, called } = await review(db, q);
 
   assert.deepEqual(called('primary').sort(), ['p-degree-guard', 'p-outside-area', 'p-outside-window'], 'every posting is judged once at the primary tier');
-  assert.deepEqual(called('escalation'), ['p-degree-guard'],
-    `only the degree rejection escalates; code-verified outside_area/outside_window is final at the primary tier: escalated ${JSON.stringify(called('escalation'))}`);
+  assert.deepEqual(called('escalation'), [],
+    `code-verified outside_area/outside_window and the quoted degree rejection are final at the primary tier: escalated ${JSON.stringify(called('escalation'))}`);
   assert.deepEqual(outcome(db, 'p-outside-area'), POSTINGS.area.final, 'outside_area is delivered as a final not_eligible');
   assert.deepEqual(outcome(db, 'p-outside-window'), POSTINGS.window.final, 'outside_window is delivered as a final not_eligible');
-  assert.deepEqual(outcome(db, 'p-degree-guard'), POSTINGS.degree.final, 'the degree rejection is decided at the escalation tier, as today');
-  for (const id of ['p-outside-area', 'p-outside-window']) {
+  assert.deepEqual(outcome(db, 'p-degree-guard'), POSTINGS.degree.final, 'the quoted degree rejection is delivered as a final not_eligible');
+  assert.equal(receipt.counts.primary_final, 1, 'the degree rejection is counted as a final primary rejection');
+  for (const id of ['p-outside-area', 'p-outside-window', 'p-degree-guard']) {
     assert.equal(reviewOf(db, id).hold_owner, null, `${id} is not held`);
     assert.equal(reviewOf(db, id).paid_attempts, 1, `${id} paid for one primary call only`);
   }
-  assert.equal(receipt.counts.escalations, 1, `one escalation attempt in the receipt: ${JSON.stringify(receipt.counts)}`);
-  assert.equal(receipt.counts.attempts, 4, `three primary attempts and one escalation attempt: ${JSON.stringify(receipt.counts)}`);
+  assert.equal(receipt.counts.escalations, 0, `no escalation attempt in the receipt: ${JSON.stringify(receipt.counts)}`);
+  assert.equal(receipt.counts.attempts, 3, `three primary attempts only: ${JSON.stringify(receipt.counts)}`);
   assert.equal(receipt.counts.secondOpinion, undefined, 'without a configured second opinion the receipt has no second-opinion counts');
 });
 

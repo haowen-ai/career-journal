@@ -612,7 +612,10 @@ test('[B] escalation quota keeps the primary verdict and escalates next run with
   const q = queue();
   const negative = q.add(db, { id: 'p-neg', snapshot: 'undergradOnly' });
   const positive = q.add(db, { id: 'p-pos' });
-  const answers = { 'p-neg': { output: JUDGMENTS.undergradOnly }, 'p-pos': { output: JUDGMENTS.eligible } };
+  // Amendment G2: a quoted final-code rejection (degree) is final at the primary tier, so the escalation path is
+  // exercised with a rejection whose code is not in judge.finalRejectionCodes (requirement).
+  const nonFinal = judgment({ criteria: [{ ...JUDGMENTS.undergradOnly.criteria[0], key: 'requirement' }] });
+  const answers = { 'p-neg': { output: nonFinal }, 'p-pos': { output: JUDGMENTS.eligible } };
   const primary = fakeJudge({ tier: 'primary', answers });
   const escalation = fakeJudge({ tier: 'escalation', answers: () => ({ status: 'quota', error: 'rate limit reached' }) });
   await runReview(runOptions(db, { pages: q.pages, judges: { primary, escalation } }));
@@ -623,7 +626,7 @@ test('[B] escalation quota keeps the primary verdict and escalates next run with
   assert.notEqual(reviewOf(db, negative).decision, 'not_eligible');
 
   const primary2 = fakeJudge({ tier: 'primary', answers });
-  const escalation2 = fakeJudge({ tier: 'escalation', answers: { 'p-neg': { output: JUDGMENTS.undergradOnly } } });
+  const escalation2 = fakeJudge({ tier: 'escalation', answers: { 'p-neg': { output: nonFinal } } });
   await runReview(runOptions(db, { now: at(1), runId: 'review-2', pages: q.pages, judges: { primary: primary2, escalation: escalation2 } }));
   assert.equal(callsFor(primary2, negative), 0, 'the logged primary output is reused');
   assert.equal(escalation2.calls.length, 1);
@@ -1110,7 +1113,10 @@ test('[B] the eval scorer applies the gate after escalation', async () => {
     evalCase({ id: 'g2', snapshot: SNAPSHOTS.undergradOnly, title: 'Analytics Intern', expected: 'not_eligible' }),
     evalCase({ id: 'g3', snapshot: SNAPSHOTS.undergradOnly, title: 'Analytics Intern', expected: 'eligible' }),
   ];
-  const primary = { g1: { output: JUDGMENTS.eligible }, g2: { output: JUDGMENTS.undergradOnly }, g3: { output: JUDGMENTS.undergradOnly } };
+  // Amendment G2: g2's quoted degree rejection is final at the primary tier; g3 rejects with a non-final code
+  // (requirement), so it still escalates and the escalation can overturn it.
+  const nonFinal = judgment({ criteria: [{ ...JUDGMENTS.undergradOnly.criteria[0], key: 'requirement' }] });
+  const primary = { g1: { output: JUDGMENTS.eligible }, g2: { output: JUDGMENTS.undergradOnly }, g3: { output: nonFinal } };
   await withSetDir(async (directory) => {
     await writeSet(directory, { cases });
     const rescued = await runEval({ setDir: directory, concurrency: 1, judges: {
@@ -1122,7 +1128,7 @@ test('[B] the eval scorer applies the gate after escalation', async () => {
     assert.equal(rescued.pass, true);
     const confirmed = await runEval({ setDir: directory, concurrency: 1, judges: {
       primary: fakeJudge({ tier: 'primary', answers: byMarker(primary) }),
-      escalation: fakeJudge({ tier: 'escalation', answers: byMarker({ g2: { output: JUDGMENTS.undergradOnly }, g3: { output: JUDGMENTS.undergradOnly } }) }),
+      escalation: fakeJudge({ tier: 'escalation', answers: byMarker({ g2: { output: JUDGMENTS.undergradOnly }, g3: { output: nonFinal } }) }),
     } });
     assert.equal(confirmed.metrics.falseRejects, 1);
     assert.equal(confirmed.pass, false);

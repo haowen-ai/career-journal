@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { FETCH_BATCH_MIN, JUDGE_TIME_SHARE } from '../funnel/contract.mjs';
-import { aliasesFor, reconcileAliases, providerRequisition, resolveIdentityConflicts } from '../funnel/identity.mjs';
+import { aliasesFor, reconcileAliases, providerRequisition, resolveIdentityConflicts, identityOptionsOf } from '../funnel/identity.mjs';
 import { createBudget, recoverLost } from './budget.mjs';
 import { acquireRunLease, heartbeat, finishRun, claimItem, assertFence, atomic } from './lease.mjs';
 import { activeCooldown, setCooldown } from './cooldown.mjs';
@@ -33,6 +33,9 @@ import { JevError, jevFailure } from './second-opinion.mjs';
 import { needsConversionProof } from './conversion.mjs';
 import { autoReopenAllowed } from './reopen-policy.mjs';
 import { MANUAL_HOLD_CODES } from './backlog.mjs';
+import { createRateControl, isRateLimited, isUnavailable, rateControlSettings, rateLimitBackoffMs, RATE_LIMIT_STALL_MS, unavailableSettings } from './rate-control.mjs';
+import { groupKey, groupSources, groupTextSimilarity, groupVerdict, groupWindowDays, locationGateSettings, postingLocations, postingText } from './grouping.mjs';
+import { applyRuleGates, browserAtOnce, DEFAULT_BROWSER_AT_ONCE, escalationRouting, escalationSampled, rejectionQuote, replanRuleSettled } from './gates.mjs';
 export { scheduleRefresh } from './freshness.mjs';
 
 const DAY = 86400000;
@@ -40,7 +43,8 @@ const DAY = 86400000;
 export const JEV_FAILURE_STREAK = 20;
 export const ADAPTER_FAILURE_STREAK = 3;
 // Fetch failures that go to the browser on the first try (redesign B5): 'challenge' is a bot wall.
-export const BROWSER_AT_ONCE = Object.freeze(['http_403', 'challenge', 'wrong_posting', 'too_short']);
+// The default list; the run reads review policy fetcher.browserAtOnce (see browserAtOnce in gates.mjs).
+export const BROWSER_AT_ONCE = DEFAULT_BROWSER_AT_ONCE;
 // Decide once: the automatic re-queue passes select only open work (reopen-policy.mjs), never the
 // whole settled history. The SQL narrows the scan; autoReopenAllowed stays the single rule.
 // Expects reviews r and the ownership joins (applications a) in the enclosing query.
@@ -86,10 +90,22 @@ async function verifyForcedVerdict({ verdict, output, inputs, snapshotText, firs
 }
 
 // Shared with eval: decide retains its conservative primary-tier L2 contract.
-export async function reviewPrimaryVerdict({ verdict, inputs, snapshotText, firstSeen, secondOpinion, counts }) {
+// Amendment G2: a primary rejection is final when its code is in judge.finalRejectionCodes and the verdict carries the
+// posting quote for it (rejectionQuote); judge.escalationSample of those, chosen by the posting id, still escalate
+// (returned as sampled). Missing facts, unclear requirements, user review, unquoted rejections, eligible and unclear
+// verdicts take the path below unchanged. A configured second opinion keeps its branch intact: it is asked as before.
+export async function reviewPrimaryVerdict({ verdict, inputs, snapshotText, firstSeen, secondOpinion, counts, judgment = null, postingId = null }) {
   const rejection = verdict.primaryRejection === true;
   const final = () => ({ ...verdict, decision: rejection ? 'not_eligible' : verdict.decision, escalate: false });
   if (rejection && verdict.codeVerified) return { verdict: final(), asked: false };
+  // With a second opinion configured (judge.secondOpinion), its existing branch below decides rejections unchanged.
+  if (rejection && !inputs.policy.judge?.secondOpinion) {
+    const routing = escalationRouting(inputs.policy);
+    if (routing.finalCodes.has(verdict.code) && rejectionQuote({ verdict, judgment, snapshotText })) {
+      if (escalationSampled(postingId, routing.sample)) return { verdict: { ...verdict, escalate: true }, asked: false, sampled: true };
+      return { verdict: final(), asked: false, primaryFinal: true };
+    }
+  }
   const config = inputs.policy.judge?.secondOpinion;
   if (!config || !rejection && verdict.decision !== 'eligible') return { verdict, asked: false };
   if (!secondOpinion) return { verdict: { ...verdict, escalate: true }, asked: false };
@@ -221,7 +237,8 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   resolveCompanySizes = null, hooks = {} }) {
   // `now` is the frozen run time used for ordering and leases; wallStarted/wallFinished are the real clock.
   const receipt = { schema: 1, kind: 'review', run_id: runId, parent_run_id: parentRunId, started: now, finished: null, wallStarted: wallClock(), wallFinished: null, status: 'ok', stop_reason: null,
-    previous_run_interrupted: false, counts: { attempts: 0, attempts_lost: 0, escalations: 0, fetched: 0, judged: 0, eligible: 0 }, sampling: { judged: 0, found: 0 },
+    previous_run_interrupted: false, counts: { attempts: 0, attempts_lost: 0, escalations: 0, fetched: 0, judged: 0, eligible: 0,
+      gate_title: 0, gate_location: 0, gate_reopened: 0, primary_final: 0, escalation_sample: { asked: 0, overturned: 0 }, unavailable_retries: 0 }, sampling: { judged: 0, found: 0 },
     breaches: [], external_holds: [], awaiting_user: [], awaiting_user_summary: [], model_decided: [], backlog: {}, warnings: [], errors: [] };
   const lease = acquireRunLease(db, { kind: 'review', owner, runId, parentRunId, now });
   if (!lease) return { ...receipt, status: 'busy' };
@@ -249,6 +266,26 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   receipt.counts.attempts_lost = recovered.lost;
   db.prepare("UPDATE reviews SET state='due',lease_owner=NULL,lease_until=NULL,lease_generation=lease_generation+1 WHERE state='leased' AND (lease_until<=? OR ?)").run(now, lease.previousRunInterrupted ? 1 : 0);
   let current = await inputs();
+  // Adaptive judge concurrency (rate-control.mjs): `concurrency` is the ceiling, the run starts lower and slows
+  // down on rate limits. An invalid setting stops the run before any dispatch (below, once halt exists).
+  let rateSettingsError = null;
+  let rateSettings;
+  try { rateSettings = rateControlSettings(current.policy?.budgets); } catch (error) { rateSettingsError = error.message; rateSettings = rateControlSettings({}); }
+  // Transient network failures (rate-control.mjs unavailableSettings): retried per posting, stall budget for the run.
+  let network;
+  try { network = unavailableSettings(current.policy?.budgets); } catch (error) { rateSettingsError ??= error.message; network = unavailableSettings({}); }
+  let unavailableSince = null;
+  let lastUnavailable = '';
+  const unavailableUsed = new Map();
+  // Whether the run has had only unavailable answers for the stall budget; if so it halts (once halt exists).
+  const unavailableStalled = (detail = null) => {
+    if (detail) lastUnavailable = detail;
+    if (unavailableSince === null || clock() - unavailableSince < network.stallMs) return false;
+    halt('network_unavailable', `Judge API unavailable for ${network.stallMs / 60000} minutes with no successful answer (${lastUnavailable})`);
+    return true;
+  };
+  const rate = createRateControl({ max: concurrency, ...rateSettings, clock });
+  const pause = sleep ?? ((ms) => new Promise((resolve) => { setTimeout(resolve, ms); }));
   // eval_stale is a release check reported by `doctor` (reviewEvalStatus), not a nightly receipt warning (B9).
   if (usesJevSplit(current.policy)) { receipt.jev = jevCounts(); jev ??= createJevSplit(current.policy); }
   const comparison = dependencyComparison(db, current);
@@ -265,7 +302,20 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     noteError(message);
   };
   const runtimeDeps = {};
-  try {
+  if (rateSettingsError) halt('invalid_config', rateSettingsError);
+  let groupWindow = 0;
+  let browserKinds = DEFAULT_BROWSER_AT_ONCE;
+  try { groupWindow = groupWindowDays(current.policy); groupTextSimilarity(current.policy); escalationRouting(current.policy); locationGateSettings(current.policy); browserKinds = browserAtOnce(current.policy); } catch (error) { halt('invalid_config', error.message); }
+  // Inputs are refreshed during the run; a list that turns invalid mid-run keeps the last valid one, with a warning.
+  // refreshInputs calls this on every refresh, so the use site always reads the latest valid list.
+  const refreshBrowserKinds = () => {
+    try { browserKinds = browserAtOnce(current.policy); }
+    catch (error) {
+      const warning = `${error.message}; kept the last valid list (${browserKinds.join(', ')})`;
+      if (!receipt.warnings.includes(warning)) receipt.warnings.push(warning);
+    }
+  };
+  if (!halted) try {
     for (const tier of ['primary','escalation']) {
       const request = await buildJudgeRequest({ posting: {}, snapshot: { text: '' }, sections: [], inputs: current, adapter: judges[tier], tier });
       runtimeDeps[tier] = request.deps.parts;
@@ -305,10 +355,16 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   applyCompanyExclusion(db, { now, policy: deliveryPolicy(current), owner });
   applyCompanyCap(db, { now, policy: deliveryPolicy(current), owner });
   applyRoleDirection(db, { now, policy: deliveryPolicy(current), owner });
+  // Amendment G: pre-fetch rule gates on due reviews (after the company cap, before grouping and fetch). A rule
+  // settlement whose configuration changed is re-queued first, so the gates decide it again under today's rules.
+  receipt.counts.gate_reopened = replanRuleSettled(db, { now, inputs: current }).requeued;
+  const gated = applyRuleGates(db, { now, inputs: current, owner });
+  receipt.counts.gate_title = gated.title;
+  receipt.counts.gate_location = gated.location;
   // Redesign C9: identity holds written before C9 get an outcome (bound when authoritative ids prove one
   // requisition, otherwise judged on their own), and recovery-created system_failure holds are re-queued once;
   // a second one stays held and is reported as an external failure of this night.
-  atomic(db, () => resolveIdentityConflicts(db, { now, companyAliases: deliveryPolicy(current).companyAliases }));
+  atomic(db, () => resolveIdentityConflicts(db, { now, ...identityOptionsOf(deliveryPolicy(current)) }));
   const systemFailures = requeueSystemFailures(db, { now });
   if (systemFailures.external.length) {
     receipt.external_failures = systemFailures.external.map(({ postingId, error }) => ({ postingId, error: redact(String(error)).slice(0, 300) }));
@@ -328,6 +384,102 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   const { explorationTarget } = scheduler;
   const explored = new Set();
   const markSeen = (row) => { seen.add(row.posting_id); if (explorationLane(row)) explored.add(row.posting_id); };
+  // Same-title grouping (grouping.mjs): one posting at many locations is judged once. A member waits while its
+  // group's representative is fetched and judged, then takes a location-independent decision without a fetch or
+  // a model call; a location-dependent decision settles a member only through the cheap location rule.
+  const groupAliases = current.screeningPolicy?.companyAliases ?? {};
+  const sources = groupSources(db, { now, windowDays: groupWindow, state: inputState(current), aliases: groupAliases });
+  const groupKeys = new Map();
+  const members = new Map();
+  const memberOf = (id) => {
+    if (!members.has(id)) {
+      const posting = db.prepare('SELECT company,title FROM postings WHERE id=?').get(id);
+      const locations = posting ? postingLocations(db, id) : [];
+      members.set(id, { company: posting?.company ?? null, locations,
+        key: posting ? groupKey(posting.company, posting.title, { locations, aliases: groupAliases }) : null });
+    }
+    return members.get(id);
+  };
+  const keyOf = (id) => (groupWindow ? memberOf(id).key : null);
+  // Each group's sources change only when a member settles; a member is tried once per change.
+  const groupVersion = new Map();
+  const tried = new Map();
+  const representatives = new Map();
+  const resolvedGroups = new Set();
+  const deferred = new Map();
+  // Source texts are read once per run; a member's own text is read when it is tried (after its fetch).
+  const sourceTexts = new Map();
+  const sourceTextOf = (id) => {
+    if (!sourceTexts.has(id)) sourceTexts.set(id, postingText(db, id));
+    return sourceTexts.get(id);
+  };
+  const textMismatched = new Set();
+  const stateCache = new WeakMap();
+  receipt.counts.group_copied = 0;
+  receipt.counts.group_location_rule = 0;
+  receipt.counts.group_text_mismatch = 0;
+  receipt.counts.group_text_mismatch_reasons = {};
+  // Only a fetched member is compared: the copy needs its own posting text to match the source's.
+  function settleByGroup(row) {
+    const id = row.posting_id;
+    const key = keyOf(id);
+    if (!key || explorationLane(row) || ['scan', 'fetch'].includes(row.stage)) return false;
+    const version = groupVersion.get(key) ?? 0;
+    if (tried.get(id) === version) return false;
+    tried.set(id, version);
+    const posting = memberOf(id);
+    if (sizeUnknown.has(posting.company)) return false;
+    // Each source is re-read and rechecked against today's inputs at copy time (inputs may change during a run).
+    if (!stateCache.has(current)) stateCache.set(current, inputState(current));
+    const state = stateCache.get(current);
+    const candidates = sources.find(key).filter((source) => source.postingId !== id)
+      .map((source) => sources.current(source.postingId, state)).filter(Boolean);
+    if (!candidates.length) return false;
+    const text = postingText(db, id);
+    if (!text) return false;
+    // The location decision uses only the member's current record (text.places), never older observations.
+    const found = groupVerdict({ sources: candidates, locations: text.places, text, sourceText: sourceTextOf,
+      policy: current.policy, company: posting.company, overrides: current.overrides, aliases: groupAliases });
+    if (found?.mismatch) {
+      // Judged on its own: recorded on the posting (review log) and counted by reason in the receipt.
+      if (!textMismatched.has(id)) {
+        textMismatched.add(id);
+        receipt.counts.group_text_mismatch += 1;
+        receipt.counts.group_text_mismatch_reasons[found.code] = (receipt.counts.group_text_mismatch_reasons[found.code] ?? 0) + 1;
+        logReview(db, id, { now, stage: 'judge', kind: 'outcome', payload: { groupMismatch: { code: found.code, from: found.from } } });
+      }
+      return false;
+    }
+    if (!found) return false;
+    const fence = claimItem(db, id, { owner, now }); if (!fence) return false;
+    const groupCopy = { from: found.source.postingId, title: found.source.title, decision: found.source.decision, code: found.source.code,
+      judgedAt: found.source.judgedAt, rule: found.rule };
+    // The same input dependencies a judged delivery saves, so a later change of facts, rules, areas or windows
+    // re-plans the copy like any other settled review; the source's model runtime parts come along.
+    const sourceDeps = parseJson(db.prepare('SELECT dep_hashes_json FROM reviews WHERE posting_id=?').get(found.source.postingId)?.dep_hashes_json);
+    const ownDeps = parseJson(row.dep_hashes_json);
+    const dependencies = { ...ownDeps, inputs: state, stageStartedAt: now, snapshot: text.snapshotHash, invalidated: false,
+      ...(sourceDeps.runtime ? { runtime: sourceDeps.runtime } : {}), ...(sourceDeps.decisionRuntime ? { decisionRuntime: sourceDeps.decisionRuntime } : {}),
+      groupCopy: { from: found.source.postingId } };
+    delete dependencies.releasedHold;
+    let committed;
+    atomic(db, () => {
+      deliver(db, { postingId: id, verdict: found.verdict, fence, now, policy: deliveryPolicy(current) });
+      db.prepare('UPDATE reviews SET dep_hashes_json=? WHERE posting_id=?').run(JSON.stringify(dependencies), id);
+      committed = db.prepare('SELECT state,decision,evidence_json FROM reviews WHERE posting_id=?').get(id);
+      if (committed.state === 'due') return;
+      const evidence = parseJson(committed.evidence_json);
+      evidence.groupCopy = groupCopy;
+      db.prepare('UPDATE reviews SET evidence_json=? WHERE posting_id=?').run(JSON.stringify(evidence), id);
+      logReview(db, id, { now, stage: 'judge', kind: 'outcome', payload: { groupCopy } });
+    });
+    markSeen(row);
+    if (committed.state === 'due') return true;
+    receipt.counts.group_copied += 1;
+    if (found.rule === 'location') receipt.counts.group_location_rule += 1;
+    if (committed.decision === 'eligible' && committed.state === 'done') receipt.counts.eligible += 1;
+    return true;
+  }
   let explorationSpent = 0;
   const explorationReserved = () => {
     // Failed sample fetches consume admission slots, but cannot spend attempts
@@ -350,7 +502,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     assertFence(db, id, fence);
     db.prepare("UPDATE reviews SET state='due',stage=COALESCE(?,stage),next_due=?,lease_owner=NULL,lease_until=NULL WHERE posting_id=?").run(stage ?? null, nextDue, id);
   });
-  const refreshInputs = async () => { current = await inputs(); return current; };
+  const refreshInputs = async () => { current = await inputs(); refreshBrowserKinds(); return current; };
   async function commitVerdict(id, fence, verdict, dependencies, { fresh = false } = {}) {
     atomic(db, () => {
       hooks.insideDeliver?.({ postingId: id });
@@ -403,13 +555,14 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         // Redesign B5: a page that will not become readable by retrying (forbidden, bot wall, another posting,
         // a stub) is browser work at once; network errors and 5xx keep the retry path.
         const failKind = result.httpStatus === 403 ? 'http_403' : validation.reason;
-        if (review.attempts >= 3 || BROWSER_AT_ONCE.includes(failKind)) deliver(db, { postingId: id, fence, now, policy: deliveryPolicy(current), verdict: { decision: 'unclear', code: 'browser_review', question: `Open the official posting: ${url}` } });
+        if (review.attempts >= 3 || browserKinds.includes(failKind)) deliver(db, { postingId: id, fence, now, policy: deliveryPolicy(current), verdict: { decision: 'unclear', code: 'browser_review', question: `Open the official posting: ${url}` } });
         else release(id, fence, { stage: 'fetch', nextDue: new Date(Date.parse(now) + (unavailable ? [1,3,7][Math.min(review.attempts - 1,2)] : 1) * DAY).toISOString() });
         db.prepare('UPDATE reviews SET last_error=? WHERE posting_id=?').run(validation.reason, id);
         markSeen(row); return;
       }
       db.prepare("UPDATE postings SET availability='open',updated_at=? WHERE id=?").run(now, id);
-      const reconciliation = reconcileAliases(db, id, aliasesFor({ company: posting.company, url: result.finalUrl ?? url, requisitionId: result.requisitionId }, { companyAliases: current.screeningPolicy.companyAliases }), { now, fence, companyAliases: current.screeningPolicy.companyAliases });
+      const identity = identityOptionsOf(deliveryPolicy(current));
+      const reconciliation = reconcileAliases(db, id, aliasesFor({ company: posting.company, url: result.finalUrl ?? url, requisitionId: result.requisitionId }, identity), { now, fence, ...identity });
       if (reconciliation.action !== 'added') { markSeen(row); return; }
       const hash = dependencyHash({ text: result.text, title: result.title, requisitionId: result.requisitionId, locations: result.locations, jsonLd: result.jsonLd });
       db.prepare(`INSERT INTO snapshots(id,posting_id,content_hash,fetched_at,final_url,http_status,method,identity_ok,fields_json,sections_json,text)
@@ -463,7 +616,34 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     // The streak resets only when the posting completes (every Jev stage answered); an intermediate answer inside a
     // posting whose later Jev stage fails is not a recovery.
     if (halted) { release(id, fence, { stage: 'judge' }); return; }
-    async function dispatchJudge(tier, request, { forced = false, question = null } = {}) {
+    // A rate-limited answer (429/529) is retried on this posting after a backoff that honors retry-after; the
+    // controller halves the effective concurrency. It decides nothing and never feeds the adapter breaker.
+    async function dispatchJudge(tier, request, options) {
+      let retry = false;
+      for (let streak = 1; ; streak += 1) {
+        const outcome = await dispatchOnce(tier, request, { ...options, retry });
+        if (!outcome?.rateLimited && !outcome?.unavailable) return outcome;
+        if (halted) return null;
+        retry = false;
+        const left = duration - (clock() - start);
+        let wait = rateLimitBackoffMs({ retryAfterMs: outcome.retryAfterMs, streak });
+        if (outcome.unavailable) {
+          // One retry allowance per posting for the whole run, shared by every tier.
+          const used = (unavailableUsed.get(id) ?? 0) + 1;
+          unavailableUsed.set(id, used);
+          // Out of retries for this posting: it stays due for a later run; the breaker is not fed.
+          if (used > network.retries) { noteError(`Judge API unavailable for ${id} after ${network.retries} retries: ${outcome.error}`); return null; }
+          // Never sleep past the stall deadline.
+          if (unavailableSince !== null) wait = Math.min(wait, Math.max(0, network.stallMs - (clock() - unavailableSince)));
+          retry = true;
+        }
+        await pause(Math.max(0, Math.min(wait, left)));
+        tick();
+        // Checked after the pause, before dispatching again: a success elsewhere may not reset an expired stall.
+        if (outcome.unavailable && unavailableStalled()) return null;
+      }
+    }
+    async function dispatchOnce(tier, request, { forced = false, question = null, retry = false } = {}) {
       const adapter = judges[tier];
       const depsHash = dependencyHash(request.deps.parts);
       if (expired()) { receipt.stop_reason = 'deadline'; return null; }
@@ -474,6 +654,13 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       // Higher lanes may continue next run after exploration has been served.
       const reserved = explorationLane(row) ? 0 : explorationReserved();
       if (reserved > 0 && spending.remaining() <= reserved * (1 + maxRetries)) return null;
+      // One API slot under the effective concurrency; held until the adapter answers.
+      await rate.acquire();
+      let slot = true;
+      const freeSlot = () => { if (slot) { slot = false; rate.release(); } };
+      try {
+      if (expired()) { receipt.stop_reason = 'deadline'; return null; }
+      if (halted) return null;
       const attempt = atomic(db, () => {
         assertFence(db, id, fence);
         const reservedAttempt = spending.reserve({ postingId: id, stage: 'judge', runner: adapter.runner, model: adapter.model, tier, now });
@@ -484,6 +671,8 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         return reservedAttempt;
       });
       if (!attempt) { receipt.stop_reason ??= 'budget'; return null; }
+      // A network retry is counted when it is actually dispatched.
+      if (retry) receipt.counts.unavailable_retries += 1;
       if (!forced && tier === 'escalation' && opinionAsked) receipt.counts.secondOpinion.escalated += 1;
       if (explorationLane(row)) explorationSpent += 1;
       const outputPath = path.join(attemptDir, `${attempt.id}.json`); attempt.outputPath = outputPath;
@@ -501,7 +690,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       let result;
       try { result = await adapter.judge(request, { attemptId: attempt.id, outputPath, signal: controller.signal }); }
       catch (error) { result = { status: 'error', error: error.message, transportRetries: 0 }; }
-      finally { clearTimeout(timer); }
+      finally { clearTimeout(timer); freeSlot(); }
       tick();
       await hooks.afterResponse?.({ attempt, outputPath, result });
       if (forced && result?.status === 'ok' && !validForcedDecision(result.output)) {
@@ -519,11 +708,36 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
           if (explorationLane(row)) explorationSpent += result.transportRetries ?? 0;
         });
         adapterStreak = null;
+        unavailableSince = null;
+        rate.success();
         await hooks.afterLlmLog?.({ attempt });
         return output;
       } else {
-        spending.markFailed(attempt.id, { error: redact(String(result.error ?? result.status)), transportRetries: result.transportRetries, now });
-        if (explorationLane(row)) explorationSpent += result.transportRetries ?? 0;
+        if (isUnavailable(result)) {
+          // A network failure reached no model: it is recorded but does not use the attempt budget.
+          spending.markUnavailable(attempt.id, { error: redact(String(result.error ?? result.status)), now });
+          if (explorationLane(row)) explorationSpent -= 1;
+        } else {
+          spending.markFailed(attempt.id, { error: redact(String(result.error ?? result.status)), transportRetries: result.transportRetries, now });
+          if (explorationLane(row)) explorationSpent += result.transportRetries ?? 0;
+        }
+        if (isUnavailable(result)) {
+          const error = redact(String(result.error ?? result.status));
+          const at = clock();
+          unavailableSince ??= at;
+          logReview(db, id, { now, stage: 'judge', kind: 'error', attemptId: attempt.id, payload: { error, tier, status: result.status, code: result.errorCode,
+            unavailable: true, retryAfterMs: result.retryAfterMs ?? null, wallFinishedAt: wallClock() } });
+          unavailableStalled(`${result.errorCode}: ${error}`);
+          return { unavailable: true, retryAfterMs: result.retryAfterMs ?? null, error };
+        }
+        if (result.status !== 'quota' && isRateLimited(result)) {
+          const error = redact(String(result.error ?? result.status));
+          const { stalled } = rate.rateLimited();
+          logReview(db, id, { now, stage: 'judge', kind: 'error', attemptId: attempt.id, payload: { error, tier, status: result.status, code: result.errorCode,
+            rateLimited: true, retryAfterMs: result.retryAfterMs ?? null, effectiveConcurrency: rate.effective, wallFinishedAt: wallClock() } });
+          if (stalled) halt('rate_limited', `Judge API still rate-limited after ${RATE_LIMIT_STALL_MS / 60000} minutes at concurrency 1 (${result.errorCode}): ${error}`);
+          return { rateLimited: true, retryAfterMs: result.retryAfterMs ?? null };
+        }
         if (result.status === 'quota') {
           setCooldown(db, `judge:${tier}`, { until: new Date(Date.parse(now) + (stageInputs.policy.budgets?.quotaCooldownHours ?? 6) * 3600000).toISOString(), reason: 'quota' });
           receipt.stop_reason = 'quota'; if (tier === 'primary') primaryStopped = true;
@@ -540,6 +754,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         }
         return null;
       }
+      } finally { freeSlot(); }
     }
     let final;
     // The judge's function label for the role-direction filter at delivery (not part of the decision).
@@ -547,6 +762,8 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     // The primary tier's fit when it escalated: the escalation may not deliver a higher fit (fit.mjs).
     let primaryFit;
     let opinionAsked = false;
+    // Amendment G3: a final primary rejection picked for the escalation sample (counted once the escalation answers).
+    let sampledEscalation = false;
     let jevProbabilities;
     // Whether the final verdict comes from judgments made under today's dependencies. A replay of an older
     // judgment under new decision code cannot release a question hold (deliver keeps it held).
@@ -596,6 +813,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       }
       if (!output) output = await dispatchJudge(tier, request);
       if (!output) break;
+      if (tier === 'escalation' && sampledEscalation) receipt.counts.escalation_sample.asked += 1;
       if (typeof output.function?.value === 'string') functionLabel = output.function.value;
       decisionRuntime[tier] = request.deps.parts;
       const decisionArgs = { snapshotText: snapshot.text, judgment: output, facts: stageInputs.facts, policy: stageInputs.policy, tier,
@@ -611,9 +829,10 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         if (stageInputs.policy.judge?.secondOpinion) receipt.counts.secondOpinion ??= { asked: 0, agreed: 0, escalated: 0, errors: 0 };
         if (halted) { release(id, fence, { stage: 'judge' }); return; }
         const result = await reviewPrimaryVerdict({ verdict: final, inputs: stageInputs, snapshotText: snapshot.text,
-          firstSeen: posting.first_seen, secondOpinion, counts: receipt.counts.secondOpinion });
+          firstSeen: posting.first_seen, secondOpinion, counts: receipt.counts.secondOpinion, judgment: output, postingId: id });
         if (result.failure) { jevFailed(result.failure, 'second_opinion'); return; }
-        final = result.verdict; opinionAsked = result.asked;
+        final = result.verdict; opinionAsked = result.asked; sampledEscalation = result.sampled === true;
+        if (result.primaryFinal) receipt.counts.primary_final += 1;
       }
       if (tier === 'primary' && final.escalate) { primaryFit = final.fit ?? null; final = null; continue; }
       if (tier === 'escalation' && final.decision === 'unclear' && MODEL_HOLD_CODES.includes(final.code) && !explorationLane(row)) {
@@ -648,7 +867,16 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
       delete committedDependencies.releasedHold;
       await commitVerdict(id, fence, final, committedDependencies, { fresh });
       jevStreak.postings = 0;
+      // The sampled escalation overturned the primary's final rejection when it ended eligible.
+      if (sampledEscalation && final.decision === 'eligible') receipt.counts.escalation_sample.overturned += 1;
       const committed = db.prepare('SELECT state,decision,code,flags_json,evidence_json FROM reviews WHERE posting_id=?').get(id);
+      if (committed.state !== 'due' && keyOf(id)) {
+        sources.note(id);
+        // The representative's decision is the one the waiting members are tried against; later members of a
+        // resolved group become sources too but do not re-try every other member.
+        if (!resolvedGroups.has(keyOf(id))) groupVersion.set(keyOf(id), (groupVersion.get(keyOf(id)) ?? 0) + 1);
+        resolvedGroups.add(keyOf(id));
+      }
       // Nightly summary counts: a delivered verdict is a judged posting; an eligible one that is a visible lead counts as eligible.
       if (committed.state !== 'due') {
         receipt.counts.judged = (receipt.counts.judged ?? 0) + 1;
@@ -721,12 +949,32 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         if (budget === 0) { receipt.stop_reason = 'budget'; break; }
         tick();
         const fetchingAllowed = canFetch();
-        const { rows: available, pending } = scheduler.refill({ seen, fetching, queued: queue, policy: current.policy,
+        // A deferred member returns to the schedule once its representative is no longer on its way.
+        const representativeBusy = (rep) => fetching.has(rep) || judging.has(rep) || !seen.has(rep) && queue.includes(rep)
+          && (fetchingAllowed || !needsFetch(db.prepare('SELECT stage FROM reviews WHERE posting_id=?').get(rep) ?? {}));
+        for (const id of deferred.keys()) if (!representativeBusy(representatives.get(keyOf(id)))) deferred.delete(id);
+        const { rows: refilled, pending } = scheduler.refill({ seen: deferred.size ? new Set([...seen, ...deferred.keys()]) : seen, fetching, queued: queue, policy: current.policy,
           explorationLeft: Math.max(0, explorationTarget - explored.size), fetchAllowed: fetchingAllowed,
-          limit: Math.max(queue.length, Math.min(fetchAhead, Math.max(1, spending.remaining()) + fetching.size)) });
+          // Members waiting for their representative hold fetch-ahead slots: a big group does not pull the whole
+          // backlog into fetching while its one judgment is pending.
+          limit: Math.max(queue.length, Math.min(fetchAhead, Math.max(1, spending.remaining()) + fetching.size) - deferred.size) });
         if (expired()) {
           if (pending || fetching.size) receipt.stop_reason = 'deadline';
           break;
+        }
+        const available = [];
+        const picked = new Set();
+        for (const row of refilled) {
+          const id = row.posting_id;
+          const key = !explorationLane(row) && !fetching.has(id) ? keyOf(id) : null;
+          if (!key) { available.push(row); continue; }
+          const rep = representatives.get(key);
+          const busy = rep && rep !== id && (picked.has(rep) || representativeBusy(rep));
+          // Members fetch in parallel (HTTP only); a fetched member waits for the representative's decision.
+          if (busy && !resolvedGroups.has(key) && !needsFetch(row)) { deferred.set(id, row); continue; }
+          if (settleByGroup(row)) continue;
+          if (!resolvedGroups.has(key) && !busy) { representatives.set(key, id); picked.add(id); }
+          available.push(row);
         }
         const rows = new Map(available.map((row) => [row.posting_id, row]));
         // Keep the admitted order as slots refill: rebuilding the due list must
@@ -742,7 +990,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         let started = 0;
         if (usesJevSplit(current.policy) || !primaryStopped || receipt.stop_reason === 'quota') {
           for (const row of candidates) {
-            if (judging.size >= concurrency || expired() || halted) break;
+            if (judging.size >= rate.effective || expired() || halted) break;
             if (fetching.has(row.posting_id) || needsFetch(row)) {
               // Preserve paid order while fetching is available. Once fetching
               // stops, drain already-fetched work until the actual deadline.
@@ -780,6 +1028,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     }
     if (poolFailure) throw poolFailure.error;
     receipt.counts.attempts = db.prepare('SELECT COUNT(*) n FROM attempts WHERE run_id=?').get(runId).n;
+    receipt.concurrency = rate.stats();
     receipt.counts.escalations = db.prepare("SELECT COUNT(*) n FROM attempts WHERE run_id=? AND tier='escalation'").get(runId).n;
     const pending = db.prepare("SELECT * FROM reviews WHERE state IN ('due','held','failed')").all().filter(reviewable);
     const maxWaitNights = current.policy.serviceTargets?.maxWaitNights ?? 7;

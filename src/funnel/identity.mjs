@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { companyKey, titleSimilarity, titleContainment } from '../scan/dedupe.mjs';
+import { companyKey, titleSimilarity, titleContainment, titleTokens } from '../scan/dedupe.mjs';
 import { SUBMITTED_STATUSES } from './contract.mjs';
 import { autoReopenAllowed } from '../review/reopen-policy.mjs';
 
@@ -52,8 +52,40 @@ export function providerRequisition(value) {
   return null;
 }
 
+// Identity options of a policy (withOverrides output): company aliases plus the verified job-id URL formats of
+// company-overrides.json duplicateCheck.jobIdUrlFormats. A policy without them (tests, older callers) has aliases only.
+export function identityOptionsOf(policy = {}, companyAliases = undefined) {
+  return { companyAliases: companyAliases ?? policy?.identityOptions?.companyAliases ?? policy?.companyAliases,
+    jobIdFormats: policy?.identityOptions?.jobIdFormats ?? policy?.duplicateCheck?.jobIdUrlFormats ?? [] };
+}
+
+const compiled = new Map();
+const pattern = (source) => { if (!compiled.has(source)) compiled.set(source, new RegExp(source)); return compiled.get(source); };
+// The job id of a URL in a verified, configured format (plan 2026-11-10: Google "/results/<id>-<slug>", Qualcomm
+// "?pid=<id>", Eightfold "/careers/job/<id>"), or null. Only configured hosts count: no generic guessing in code.
+export function configuredJobId(value, jobIdFormats = []) {
+  if (!jobIdFormats?.length) return null;
+  const url = parseUrl(value);
+  if (!url) return null;
+  const host = url.hostname.toLowerCase().replace(/^www\./, '');
+  const path = url.pathname.replace(/\/+$/, '') || '/';
+  for (const format of jobIdFormats) {
+    const hostOk = format.host ? host === String(format.host).toLowerCase().replace(/^www\./, '') : Boolean(format.hostSuffix) && host.endsWith(String(format.hostSuffix).toLowerCase());
+    if (!hostOk) continue;
+    const match = pattern(format.path).exec(path);
+    if (!match) continue;
+    if (format.param) {
+      const id = url.searchParams.get(format.param)?.trim();
+      if (id && (!format.id || pattern(format.id).test(id))) return id;
+      continue;
+    }
+    if (match[1]) return match[1];
+  }
+  return null;
+}
+
 const shaped = (id) => /^[A-Za-z]{0,4}[-_]?\d{3,}(?:-\d+)?$/.test(id) ? id.toUpperCase() : id;
-export function aliasesFor(record, { companyAliases } = {}) {
+export function aliasesFor(record, { companyAliases, jobIdFormats } = {}) {
   const aliases = [];
   const add = (kind, alias) => { if (!aliases.some((item) => item.alias === alias)) aliases.push({ alias, kind }); };
   const req = providerRequisition(record.url);
@@ -65,7 +97,7 @@ export function aliasesFor(record, { companyAliases } = {}) {
   }
   if (req) add('req', `req:${req.provider}:${req.tenant || '-'}:${req.id}`);
   const company = companyKey(record.company ?? '', companyAliases);
-  const ids = [req?.id, record.requisitionId, record.externalId].filter((id) => id != null && id !== '' && !String(id).startsWith('posting:'));
+  const ids = [req?.id, record.requisitionId, record.externalId, configuredJobId(record.url, jobIdFormats)].filter((id) => id != null && id !== '' && !String(id).startsWith('posting:'));
   for (const id of ids) {
     const normalized = req?.provider === 'generic' && id === req.id ? id : shaped(String(id));
     add('company_req', `company_req:${company}:${normalized}`);
@@ -198,7 +230,7 @@ function decisiveApplication(db, ...ids) {
     .filter(Boolean).sort((a, b) => rank(b) - rank(a))[0];
 }
 
-function resolveApplicationDuplicates(db, postings, now, companyAliases) {
+function resolveApplicationDuplicates(db, postings, now, identity) {
   const winner = decisiveApplication(db, ...postings.map((posting) => posting.application_id));
   const canonical = postings.find((posting) => posting.application_id === winner.id);
   const code = reusedApplication(db, canonical);
@@ -209,7 +241,7 @@ function resolveApplicationDuplicates(db, postings, now, companyAliases) {
     if (code) markReview(db, posting.id, { now, state: 'done', decision: 'reused', code });
   }
   if (code) {
-    const group = duplicateGroups(db, { companyAliases }).find((item) => item.applicationIds.includes(winner.id));
+    const group = duplicateGroups(db, identity).find((item) => item.applicationIds.includes(winner.id));
     for (const id of group?.postingIds ?? []) {
       if (db.prepare('SELECT code FROM reviews WHERE posting_id=?').get(id)?.code !== 'identity_conflict') {
         markReview(db, id, { now, state: 'done', decision: 'reused', code });
@@ -218,7 +250,7 @@ function resolveApplicationDuplicates(db, postings, now, companyAliases) {
   }
 }
 
-export function reconcileAliases(db, postingId, aliases, { now, fence, classification, companyAliases, candidates, linkSiblings = true } = {}) {
+export function reconcileAliases(db, postingId, aliases, { now, fence, classification, companyAliases, jobIdFormats, candidates, linkSiblings = true } = {}) {
   const originalId = postingId;
   if (fence) {
     const row = db.prepare('SELECT lease_owner,lease_generation FROM reviews WHERE posting_id=?').get(postingId);
@@ -245,7 +277,7 @@ export function reconcileAliases(db, postingId, aliases, { now, fence, classific
     const target = targets[0];
     if (currentPosting.application_id && target.application_id && currentPosting.application_id !== target.application_id) {
       for (const a of aliases) if (!owned(db, a.alias)) db.prepare('INSERT INTO posting_aliases (alias,posting_id,kind,created_at) VALUES (?,?,?,?)').run(a.alias, postingId, a.kind, now);
-      resolveApplicationDuplicates(db, [target, currentPosting], now, companyAliases);
+      resolveApplicationDuplicates(db, [target, currentPosting], now, { companyAliases, jobIdFormats });
       return { action: 'added', postingId };
     }
     const app = decisiveApplication(db, target.application_id, currentPosting.application_id);
@@ -322,10 +354,10 @@ export function postingCandidates(db, { companyAliases } = {}) {
   return candidates;
 }
 
-export function resolvePosting(db, record, { now, companyAliases, candidates, classification, applicationId } = {}) {
+export function resolvePosting(db, record, { now, companyAliases, jobIdFormats, candidates, classification, applicationId } = {}) {
   candidates ??= postingCandidates(db, { companyAliases });
   if (classification) classification = { ...classification, listed: record.listed !== false };
-  const aliases = aliasesFor(record, { companyAliases });
+  const aliases = aliasesFor(record, { companyAliases, jobIdFormats });
   const matches = aliases.map((item) => ({ ...item, posting: owned(db, item.alias) })).filter((item) => item.posting);
   let postingId; let created = false; let matchedBy = null;
   if (matches.length) {
@@ -339,10 +371,10 @@ export function resolvePosting(db, record, { now, companyAliases, candidates, cl
     if (separate && !sibling) {
       conflict(db, postingId, hit.posting.id, now, classification);
       for (const item of aliases) if (!owned(db, item.alias)) db.prepare('INSERT INTO posting_aliases (alias,posting_id,kind,created_at) VALUES (?,?,?,?)').run(item.alias, postingId, item.kind, now);
-    } else reconcileAliases(db, postingId, aliases, { now, classification, companyAliases, candidates, linkSiblings: false });
+    } else reconcileAliases(db, postingId, aliases, { now, classification, companyAliases, jobIdFormats, candidates, linkSiblings: false });
   } else {
     postingId = newPosting(db, record, now); created = true;
-    reconcileAliases(db, postingId, aliases, { now, classification, companyAliases, candidates, linkSiblings: false });
+    reconcileAliases(db, postingId, aliases, { now, classification, companyAliases, jobIdFormats, candidates, linkSiblings: false });
   }
   const posting = effective(db, postingId);
   const company = companyKey(record.company ?? '', companyAliases);
@@ -370,13 +402,13 @@ function applicationRecord(app) {
 
 // Submission dedupe is deliberately separate from posting identity: different
 // ATS postings (I2) keep their ids even when the user has submitted the program.
-const programTitle = (value) => String(value ?? '').normalize('NFKD').toLowerCase()
-  .replace(/\band\b/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
-
-function submissionKeys(record, companyAliases) {
-  const company = companyKey(record.company, companyAliases);
+// Plan 2026-11-10 (root cause 5): only a confirmed key (same company and job id, or same canonical URL) settles a
+// posting as already submitted. A same-company same-title hit is never a settlement, whatever ids either side
+// carries: it is flagged suspected_duplicate:<application id> (suspectedDuplicates below) and reviewed as usual.
+function submissionKeys(record, identity = {}) {
+  const company = companyKey(record.company, identity.companyAliases);
   if (!company) return [];
-  const aliases = aliasesFor(record, { companyAliases });
+  const aliases = aliasesFor(record, identity);
   const keys = aliases.filter(({ kind }) => kind === 'company_req').map(({ alias }) => alias);
   const url = parseUrl(record.url);
   // Custom career sites put the job id either immediately after /job(s)/ or
@@ -396,37 +428,100 @@ function submissionKeys(record, companyAliases) {
   return keys;
 }
 
-export function submittedApplicationIndex(db, { companyAliases } = {}) {
-  const identities = new Map(); const programs = new Map();
-  const apps = db.prepare(`SELECT * FROM applications WHERE status IN (${SUBMITTED_STATUSES.map(() => '?').join(',')})
-    OR COALESCE(applied_at,'')<>'' ORDER BY created_at,id`).all(...SUBMITTED_STATUSES);
+const SUBMITTED_SQL = `status IN (${SUBMITTED_STATUSES.map(() => '?').join(',')}) OR COALESCE(applied_at,'')<>''`;
+export function submittedApplicationIndex(db, { companyAliases, jobIdFormats } = {}) {
+  const identities = new Map();
+  const apps = db.prepare(`SELECT * FROM applications WHERE ${SUBMITTED_SQL} ORDER BY created_at,id`).all(...SUBMITTED_STATUSES);
   for (const app of apps) {
-    const record = applicationRecord(app);
-    for (const key of submissionKeys(record, companyAliases)) if (!identities.has(key)) identities.set(key, app.id);
-    const company = companyKey(app.company, companyAliases); const title = programTitle(app.role);
-    if (company && title && !programs.has(`${company}:${title}`)) programs.set(`${company}:${title}`, app.id);
+    for (const key of submissionKeys(applicationRecord(app), { companyAliases, jobIdFormats })) if (!identities.has(key)) identities.set(key, app.id);
   }
-  return { identities, programs };
+  return { identities };
 }
 
-export function submittedDuplicate(db, record, { companyAliases, index } = {}) {
-  index ??= submittedApplicationIndex(db, { companyAliases });
+// Keys of a record that would identify it against submitted applications (confirmed keys only).
+export function submittedKeysOf(record, identity = {}) {
   if (!record.url && record.canonical_url) record = { ...record, url: /^https?:/.test(record.canonical_url) ? record.canonical_url : `https://${record.canonical_url}` };
-  const key = submissionKeys(record, companyAliases).find((item) => index.identities.has(item));
-  if (key) return { applicationId: index.identities.get(key), match: 'same_requisition' };
-  const company = companyKey(record.company, companyAliases); const title = programTitle(record.title);
-  const applicationId = company && title && index.programs.get(`${company}:${title}`);
-  return applicationId ? { applicationId, match: 'same_program' } : null;
+  return submissionKeys(record, identity);
 }
 
-export function bindApplication(db, applicationId, { now, companyAliases } = {}) {
+export function submittedDuplicate(db, record, { companyAliases, jobIdFormats, index } = {}) {
+  index ??= submittedApplicationIndex(db, { companyAliases, jobIdFormats });
+  const key = submittedKeysOf(record, { companyAliases, jobIdFormats }).find((item) => index.identities.has(item));
+  return key ? { applicationId: index.identities.get(key), match: 'same_requisition' } : null;
+}
+
+// ----------------------------------------------------------------------------- suspected duplicates
+// Plan 2026-11-10: a same-company posting whose title equals or resembles a submitted application's (Jaccard >=
+// duplicateCheck.flagSimilarity) or another lead's (>= leadFlagSimilarity), with no shared job id or canonical URL,
+// is only flagged: the posting is reviewed as usual and the coordinator compares it before an apply batch. Titles are
+// compared as titleTokens without the configured noise words, years, and the words of both company names. Callers do
+// not ask about a posting already settled as a confirmed duplicate. Returns [] without a duplicateCheck block.
+const OPEN_LEAD_STATUSES = ['lead', 'prepared'];
+export function suspectIndex(db, { companyAliases } = {}) {
+  const byCompany = new Map();
+  const rows = db.prepare(`SELECT id,company,role,status,applied_at FROM applications WHERE ${SUBMITTED_SQL} OR status IN (${OPEN_LEAD_STATUSES.map(() => '?').join(',')}) ORDER BY created_at,id`)
+    .all(...SUBMITTED_STATUSES, ...OPEN_LEAD_STATUSES);
+  for (const row of rows) {
+    const key = companyKey(row.company, companyAliases);
+    if (!key) continue;
+    if (!byCompany.has(key)) byCompany.set(key, []);
+    byCompany.get(key).push({ ...row, submitted: SUBMITTED_STATUSES.includes(row.status) || Boolean(row.applied_at) });
+  }
+  return { byCompany };
+}
+
+export function flagTitleTokens(title, { noise = [], companies = [] } = {}) {
+  const drop = new Set([...noise.flatMap((word) => [...titleTokens(word)]), ...companies.flatMap((name) => [...titleTokens(name)])]);
+  return new Set([...titleTokens(title)].filter((token) => !drop.has(token) && !/^(?:19|20)\d\d$/.test(token)));
+}
+const jaccard = (a, b) => {
+  if (!a.size || !b.size) return 0;
+  let shared = 0;
+  for (const token of a) if (b.has(token)) shared += 1;
+  return shared / (a.size + b.size - shared);
+};
+
+// An identical normalised title (titleTokens, before noise removal) is always 1. When either side's filtered word set is
+// empty (a title made only of noise words and a year, "Summer Internship Program 2027"), the unfiltered normalised
+// titles are compared instead, so such a title is never invisible to the check.
+const sameSet = (a, b) => a.size === b.size && [...a].every((item) => b.has(item));
+export function flagSimilarity(left, right, { noise = [], companies = [] } = {}) {
+  const rawLeft = titleTokens(left); const rawRight = titleTokens(right);
+  if (rawLeft.size && sameSet(rawLeft, rawRight)) return 1;
+  const a = flagTitleTokens(left, { noise, companies }); const b = flagTitleTokens(right, { noise, companies });
+  return a.size && b.size ? jaccard(a, b) : jaccard(rawLeft, rawRight);
+}
+
+export function suspectedDuplicates(db, record, { identityOptions = {}, duplicateCheck, index, exclude = [] } = {}) {
+  if (!duplicateCheck) return [];
+  const companyAliases = identityOptions.companyAliases;
+  const key = companyKey(record.company ?? '', companyAliases);
+  if (!key || !record.title) return [];
+  index ??= suspectIndex(db, { companyAliases });
+  const skip = new Set(exclude.filter(Boolean));
+  const noise = duplicateCheck.flagTitleNoiseWords ?? [];
+  const result = [];
+  for (const app of index.byCompany.get(key) ?? []) {
+    if (skip.has(app.id)) continue;
+    if (!app.submitted && !OPEN_LEAD_STATUSES.includes(app.status)) continue;
+    const companies = [record.company ?? '', app.company ?? ''];
+    const similarity = flagSimilarity(record.title, app.role, { noise, companies });
+    const threshold = app.submitted ? duplicateCheck.flagSimilarity ?? 0.6 : duplicateCheck.leadFlagSimilarity ?? 1;
+    if (similarity > 0 && similarity >= threshold) result.push({ applicationId: app.id, status: app.status, similarity: Math.round(similarity * 1000) / 1000 });
+  }
+  return result.sort((a, b) => b.similarity - a.similarity || String(a.applicationId).localeCompare(String(b.applicationId)));
+}
+export const SUSPECTED_FLAG = 'suspected_duplicate:';
+export const suspectedFlags = (list) => list.map((item) => `${SUSPECTED_FLAG}${item.applicationId}`);
+
+export function bindApplication(db, applicationId, { now, companyAliases, jobIdFormats } = {}) {
   const app = db.prepare('SELECT * FROM applications WHERE id=?').get(applicationId);
   if (!app) throw new Error('Application not found');
   const record = applicationRecord(app);
-  const aliases = aliasesFor(record, { companyAliases });
+  const aliases = aliasesFor(record, { companyAliases, jobIdFormats });
   const prior = db.prepare('SELECT id FROM postings WHERE application_id=? AND merged_into IS NULL').get(applicationId);
   const explicit = app.external_id?.startsWith('posting:') ? effective(db, app.external_id.slice(8)) : null;
-  const resolved = prior || explicit ? { postingId: prior?.id ?? explicit.id, created: false } : resolvePosting(db, record, { now, companyAliases, applicationId });
+  const resolved = prior || explicit ? { postingId: prior?.id ?? explicit.id, created: false } : resolvePosting(db, record, { now, companyAliases, jobIdFormats, applicationId });
   let postingId = resolved.postingId;
   let created = resolved.created;
   const initial = effective(db, postingId);
@@ -438,16 +533,16 @@ export function bindApplication(db, applicationId, { now, companyAliases } = {})
     && !differentAtsIds(authority(db, posting.id), aliases) && !contradicts(authority(db, posting.id), aliases)).map((posting) => [posting.id, posting])).values()];
   if (duplicates.length) {
     for (const a of aliases) if (!owned(db, a.alias)) db.prepare('INSERT INTO posting_aliases (alias,posting_id,kind,created_at) VALUES (?,?,?,?)').run(a.alias, postingId, a.kind, now);
-    resolveApplicationDuplicates(db, [...duplicates, effective(db, postingId)], now, companyAliases);
+    resolveApplicationDuplicates(db, [...duplicates, effective(db, postingId)], now, { companyAliases, jobIdFormats });
     return { postingId, action: created ? 'created' : 'bound' };
   }
-  const reconciled = reconcileAliases(db, postingId, aliases, { now, companyAliases });
+  const reconciled = reconcileAliases(db, postingId, aliases, { now, companyAliases, jobIdFormats });
   if (reconciled.action === 'quarantined') return { postingId, action: 'conflict' };
   postingId = effective(db, postingId).id;
   return { postingId, action: created ? 'created' : 'bound' };
 }
 
-export function duplicateGroups(db, { since, companyAliases } = {}) {
+export function duplicateGroups(db, { since, companyAliases, jobIdFormats } = {}) {
   const apps = db.prepare('SELECT * FROM applications').all();
   const parents = new Map(apps.map((app) => [app.id, app.id]));
   const root = (id) => { while (parents.get(id) !== id) id = parents.get(id); return id; };
@@ -457,7 +552,7 @@ export function duplicateGroups(db, { since, companyAliases } = {}) {
     const ids = db.prepare('SELECT id FROM postings WHERE application_id=?').all(app.id).map((p) => effective(db, p.id)?.id).filter(Boolean);
     if (app.external_id?.startsWith('posting:') && effective(db, app.external_id.slice(8))) ids.push(effective(db, app.external_id.slice(8)).id);
     postings.set(app.id, [...new Set(ids)]);
-    const aliases = aliasesFor(applicationRecord(app), { companyAliases });
+    const aliases = aliasesFor(applicationRecord(app), { companyAliases, jobIdFormats });
     for (const id of ids) aliases.push(...db.prepare('SELECT alias,kind FROM posting_aliases WHERE posting_id=?').all(id));
     for (const item of aliases.filter((a) => ['req', 'company_req', 'url'].includes(a.kind))) {
       if (keys.has(item.alias)) parents.set(root(app.id), root(keys.get(item.alias)));
@@ -480,7 +575,7 @@ export function duplicateGroups(db, { since, companyAliases } = {}) {
 // Startup reconciliation of identity holds written before C9: when the authoritative ids prove one
 // requisition (same tenant id, with or without a prefix) the held posting is bound to its partner (a
 // settled partner keeps its decision); otherwise both stay separate and the held one is judged on its own.
-export function resolveIdentityConflicts(db, { now, companyAliases } = {}) {
+export function resolveIdentityConflicts(db, { now, companyAliases, jobIdFormats } = {}) {
   const result = { bound: [], separated: [] };
   for (const row of db.prepare("SELECT posting_id FROM reviews WHERE state='held' AND code='identity_conflict'").all()) {
     const id = row.posting_id;
@@ -490,7 +585,7 @@ export function resolveIdentityConflicts(db, { now, companyAliases } = {}) {
     const same = partners.find((partner) => authority(db, partner.id).some((item) => own.includes(canonicalId(item.alias))));
     if (same) {
       const aliases = db.prepare('SELECT alias,kind FROM posting_aliases WHERE posting_id=?').all(same.id);
-      const outcome = reconcileAliases(db, id, aliases, { now, companyAliases, linkSiblings: false });
+      const outcome = reconcileAliases(db, id, aliases, { now, companyAliases, jobIdFormats, linkSiblings: false });
       if (outcome.action === 'bound') { result.bound.push({ postingId: id, boundTo: same.id }); continue; }
     }
     markReview(db, id, { now, state: 'due' });
