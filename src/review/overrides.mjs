@@ -192,6 +192,11 @@ export function usPlace(place) {
   return Boolean(code && US_CODES.has(code));
 }
 
+// Whether a location-exempt brand's exemption covers this work window (the same rule exemptVerdict uses).
+export function locationExemptInWindow(company, window, { policy, overrides, aliases = {} }) {
+  return locationExempt(company, overrides, aliases) && exemptWindow(window, policy, overrides);
+}
+
 function exemptWindow(window, policy, overrides) {
   const listed = overrides?.locationExempt?.windows;
   if (listed) return listed.includes(window.id);

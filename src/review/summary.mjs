@@ -37,7 +37,7 @@ export function nightlyCounts(receipt) {
     groupCopied: sum(reviews, (item) => item.counts?.group_copied), groupLocationRule: sum(reviews, (item) => item.counts?.group_location_rule),
     groupTextMismatch: sum(reviews, (item) => item.counts?.group_text_mismatch),
     // Amendment G: pre-fetch rule gates, re-queued rule settlements, final primary rejections and the escalation sample.
-    gateTitle: sum(reviews, (item) => item.counts?.gate_title), gateLocation: sum(reviews, (item) => item.counts?.gate_location),
+    gateTitle: sum(reviews, (item) => item.counts?.gate_title), gateLocation: sum(reviews, (item) => item.counts?.gate_location), gateTerm: sum(reviews, (item) => item.counts?.gate_term),
     gateReopened: sum(reviews, (item) => item.counts?.gate_reopened), primaryFinal: sum(reviews, (item) => item.counts?.primary_final),
     sampleAsked: sum(reviews, (item) => item.counts?.escalation_sample?.asked), sampleOverturned: sum(reviews, (item) => item.counts?.escalation_sample?.overturned),
     dueTotal: lastReview?.backlog?.due ?? null,
@@ -57,9 +57,9 @@ export function nightlySummary(receipt, { lang = 'en' } = {}) {
   const group = c.groupCopied || c.groupTextMismatch
     ? (zh ? `，同岗复用 ${c.groupCopied}（其中按地点规则 ${c.groupLocationRule}；正文不同另判 ${c.groupTextMismatch}）`
       : `, group copies ${c.groupCopied} (location rule ${c.groupLocationRule}; text differs, judged ${c.groupTextMismatch})`) : '';
-  const gated = c.gateTitle || c.gateLocation || c.gateReopened || c.primaryFinal || c.sampleAsked
-    ? (zh ? `，代码门结案 标题 ${c.gateTitle}、地点 ${c.gateLocation}（规则变更重排 ${c.gateReopened}），初审拒绝直接定案 ${c.primaryFinal}，抽检升级 ${c.sampleAsked}（推翻 ${c.sampleOverturned}）`
-      : `, rule gates title ${c.gateTitle}, location ${c.gateLocation} (re-queued on rule change ${c.gateReopened}), final primary rejections ${c.primaryFinal}, sampled escalations ${c.sampleAsked} (overturned ${c.sampleOverturned})`) : '';
+  const gated = c.gateTitle || c.gateLocation || c.gateTerm || c.gateReopened || c.primaryFinal || c.sampleAsked
+    ? (zh ? `，代码门结案 标题 ${c.gateTitle}、地点 ${c.gateLocation}${c.gateTerm ? `、学期地点 ${c.gateTerm}` : ''}（规则变更重排 ${c.gateReopened}），初审拒绝直接定案 ${c.primaryFinal}，抽检升级 ${c.sampleAsked}（推翻 ${c.sampleOverturned}）`
+      : `, rule gates title ${c.gateTitle}, location ${c.gateLocation}${c.gateTerm ? `, term and place ${c.gateTerm}` : ''} (re-queued on rule change ${c.gateReopened}), final primary rejections ${c.primaryFinal}, sampled escalations ${c.sampleAsked} (overturned ${c.sampleOverturned})`) : '';
   if (zh) {
     return `${id}：状态 ${c.status}；抓取 ${known(c.fetched)}，入库 ${known(c.stored)}（只计数 ${known(c.countedOnly)}）；判定 ${c.judged}，合格 ${c.eligible}${group}${gated}；剩余待审 ${known(c.dueLeft)}；挂起 ${known(c.holds)}；停止原因 ${reasons}`;
   }

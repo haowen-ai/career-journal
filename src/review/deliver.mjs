@@ -336,7 +336,7 @@ export function deliver(db, { postingId, verdict, fence, now, policy = {}, fresh
     // Suspected-duplicate flags are recomputed at each delivery that checks them (a duplicateCheck block present).
     const recheck = Boolean(policy.duplicateCheck);
     db.prepare('UPDATE reviews SET flags_json=? WHERE posting_id=?')
-      .run(JSON.stringify([...new Set([...parseJson(review.flags_json, []).filter((flag) => !['term_inferred', 'model_decided', 'disputed', 'jev_decided', 'hold_kept', 'title_rule', 'location_rule', 'automated', RELIST_FLAG, EVIDENCE_FLAG].includes(flag)
+      .run(JSON.stringify([...new Set([...parseJson(review.flags_json, []).filter((flag) => !['term_inferred', 'model_decided', 'disputed', 'jev_decided', 'hold_kept', 'title_rule', 'location_rule', 'term_location_rule', 'automated', RELIST_FLAG, EVIDENCE_FLAG].includes(flag)
         && !(recheck && String(flag).startsWith(SUSPECTED_FLAG))), ...(value.flags ?? [])])]), postingId);
     db.prepare(`UPDATE reviews SET state=?,decision=?,code=?,evidence_json=?,deadline_json=?,hold_owner=?,hold_since=?,next_due=?,stage='deliver',
       lease_owner=NULL,lease_until=NULL,updated_at=? WHERE posting_id=? AND lease_owner=? AND lease_generation=?`)

@@ -90,10 +90,16 @@ function withoutGraduation(title) {
   }
   return text;
 }
-function termPairs(title) {
+// The words of each title segment (graduation clauses cut), the unit the pair rule works on. Exported with the
+// season and year tokens for the review's pre-fetch term gate (review/gates.mjs), which needs the same segments.
+export function termSegments(title) {
+  return withoutGraduation(String(title ?? '')).split(/[,;|()[\]]|\s+[-–—/]\s+|\s+[-–—](?=\S)|(?<=\S)[-–—]\s+/)
+    .map((segment) => segment.replace(/\/(?!\d)/g, ' ').split(/\s+/).map((word) => word.replace(/^[^\w]+|[^\w]+$/g, '')).filter(Boolean));
+}
+export { SEASON_TOKEN, YEAR_TOKEN };
+export function termPairs(title) {
   const pairs = [];
-  for (const segment of withoutGraduation(title).split(/[,;|()[\]]|\s+[-–—/]\s+|\s+[-–—](?=\S)|(?<=\S)[-–—]\s+/)) {
-    const words = segment.replace(/\/(?!\d)/g, ' ').split(/\s+/).map((word) => word.replace(/^[^\w]+|[^\w]+$/g, '')).filter(Boolean);
+  for (const words of termSegments(title)) {
     const seasons = words.flatMap((word, index) => SEASON_TOKEN.test(word) ? [{ index, season: word.toLowerCase() }] : []);
     if (!seasons.length) continue;
     words.forEach((word, index) => {

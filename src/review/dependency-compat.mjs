@@ -17,7 +17,7 @@ const LEGACY_CODE = new Set([
 
 // Review policy keys introduced after P1 (when policy hashes became screening-only). No legacy full-policy hash
 // can contain them, so they are left out when reconstructing those hashes; they never change a judge dependency.
-export const POST_P1_POLICY_KEYS = Object.freeze([['fetcher', 'browserAtOnce']]);
+export const POST_P1_POLICY_KEYS = Object.freeze([['fetcher', 'browserAtOnce'], ['termLocationGate', 'enabled']]);
 
 // Every legacy shape the policy could have had without its later keys. A section left empty may have been absent,
 // null or {} in the legacy policy, so all three are reconstructed.

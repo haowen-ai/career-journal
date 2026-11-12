@@ -327,7 +327,7 @@ export function sourceOf(row, state = null) {
   const flags = parseJson(row.flags_json, []);
   // A rule settlement (gates.mjs) is never a source: it was decided from the title or the places alone.
   if (evidence.groupCopy || flags.includes(GROUP_FLAG) || evidence.provenance === 'automated' || evidence.ruleGate
-    || flags.includes('title_rule') || flags.includes('location_rule')) return null;
+    || flags.includes('title_rule') || flags.includes('location_rule') || flags.includes('term_location_rule')) return null;
   const stored = parseJson(row.dep_hashes_json).inputs;
   if (state) {
     if (!stored) return null;

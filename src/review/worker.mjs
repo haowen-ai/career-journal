@@ -35,7 +35,7 @@ import { autoReopenAllowed } from './reopen-policy.mjs';
 import { MANUAL_HOLD_CODES } from './backlog.mjs';
 import { createRateControl, isRateLimited, isUnavailable, rateControlSettings, rateLimitBackoffMs, RATE_LIMIT_STALL_MS, unavailableSettings } from './rate-control.mjs';
 import { groupKey, groupSources, groupTextSimilarity, groupVerdict, groupWindowDays, locationGateSettings, postingLocations, postingText } from './grouping.mjs';
-import { applyRuleGates, browserAtOnce, DEFAULT_BROWSER_AT_ONCE, escalationRouting, escalationSampled, rejectionQuote, replanRuleSettled } from './gates.mjs';
+import { applyRuleGates, browserAtOnce, DEFAULT_BROWSER_AT_ONCE, escalationRouting, escalationSampled, rejectionQuote, replanRuleSettled, termLocationGateSettings } from './gates.mjs';
 export { scheduleRefresh } from './freshness.mjs';
 
 const DAY = 86400000;
@@ -305,7 +305,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   if (rateSettingsError) halt('invalid_config', rateSettingsError);
   let groupWindow = 0;
   let browserKinds = DEFAULT_BROWSER_AT_ONCE;
-  try { groupWindow = groupWindowDays(current.policy); groupTextSimilarity(current.policy); escalationRouting(current.policy); locationGateSettings(current.policy); browserKinds = browserAtOnce(current.policy); } catch (error) { halt('invalid_config', error.message); }
+  try { groupWindow = groupWindowDays(current.policy); groupTextSimilarity(current.policy); escalationRouting(current.policy); locationGateSettings(current.policy); termLocationGateSettings(current.policy); browserKinds = browserAtOnce(current.policy); } catch (error) { halt('invalid_config', error.message); }
   // Inputs are refreshed during the run; a list that turns invalid mid-run keeps the last valid one, with a warning.
   // refreshInputs calls this on every refresh, so the use site always reads the latest valid list.
   const refreshBrowserKinds = () => {
@@ -361,6 +361,8 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   const gated = applyRuleGates(db, { now, inputs: current, owner });
   receipt.counts.gate_title = gated.title;
   receipt.counts.gate_location = gated.location;
+  receipt.counts.gate_term = gated.term;
+  receipt.counts.gate_term_held = gated.termHeld;
   // Redesign C9: identity holds written before C9 get an outcome (bound when authoritative ids prove one
   // requisition, otherwise judged on their own), and recovery-created system_failure holds are re-queued once;
   // a second one stays held and is reported as an external failure of this night.
@@ -555,7 +557,7 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
         // Redesign B5: a page that will not become readable by retrying (forbidden, bot wall, another posting,
         // a stub) is browser work at once; network errors and 5xx keep the retry path.
         const failKind = result.httpStatus === 403 ? 'http_403' : validation.reason;
-        if (review.attempts >= 3 || browserKinds.includes(failKind)) deliver(db, { postingId: id, fence, now, policy: deliveryPolicy(current), verdict: { decision: 'unclear', code: 'browser_review', question: `Open the official posting: ${url}` } });
+        if (review.attempts >= 3 || browserKinds.includes(failKind)) deliver(db, { postingId: id, fence, now, policy: deliveryPolicy(current), verdict: { decision: 'unclear', code: 'browser_review', question: `Open the official posting: ${url}`, holdOrigin: 'fetch_failure', fetchFailure: failKind } });
         else release(id, fence, { stage: 'fetch', nextDue: new Date(Date.parse(now) + (unavailable ? [1,3,7][Math.min(review.attempts - 1,2)] : 1) * DAY).toISOString() });
         db.prepare('UPDATE reviews SET last_error=? WHERE posting_id=?').run(validation.reason, id);
         markSeen(row); return;
