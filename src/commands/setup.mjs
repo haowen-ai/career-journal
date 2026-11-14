@@ -8,6 +8,7 @@ import { assertPublicEmailAddress, configureEmailAccount, listEmailAccounts, ema
 import { upsertTask, listTasks, automationSetupState, taskEmailAccountIds } from '../automation/registry.mjs';
 import { validSecretReference } from '../secrets/reference.mjs';
 import { assertHomeOutsideCheckout } from '../runtime/home.mjs';
+import { CAREER_OPS_PINNED_VERSION } from '../config/careerops-version.mjs';
 
 const DAILY_AUTOMATIONS = Object.freeze({
   'mail-sync': { time: '20:00', notificationPolicy: 'actionable' },
@@ -136,7 +137,7 @@ export async function setup(home, answers = {}) {
       : { ...config.jev, accessState: answers.jev.accessState, mode: 'off' };
   }
   if (answers.careerOps?.root !== undefined) {
-    config.careerOps ??= { root: null, pinnedVersion: '1.32.0', entrypoint: 'career-journal-adapter.mjs' };
+    config.careerOps ??= { root: null, pinnedVersion: CAREER_OPS_PINNED_VERSION, entrypoint: 'career-journal-adapter.mjs' };
     config.careerOps.root = answers.careerOps.root ? String(answers.careerOps.root) : null;
   }
   config.materials ??= { ruleFiles: [] };

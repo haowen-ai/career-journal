@@ -35,7 +35,7 @@ Agent 会自动完成下载、项目配置、邮箱接入、本机时区检测�
 
 ## 为 Agent 工作流设计
 
-仓库内的说明会指导兼容的 Agent 完成整个配置流程。除了 Codex 和 Claude Code，也支持其他能够读取仓库说明并创建定时任务的编程 Agent。简历和求职信可以接入独立开源项目 [CareerOps](https://github.com/career-ops-hq/career-ops)，同时使用 CAREER JOURNAL 内置的美式简历规则。
+仓库内的说明会指导兼容的 Agent 完成整个配置流程。除了 Codex 和 Claude Code，也支持其他能够读取仓库说明并创建定时任务的编程 Agent。简历和求职信可以接入[CareerOps](https://github.com/haowen-ai/career-ops)（基于独立开源项目 [career-ops-hq/career-ops](https://github.com/career-ops-hq/career-ops) 的分叉，MIT 许可证，增加了更多招聘网站抓取器和共享公司目录），同时使用 CAREER JOURNAL 内置的美式简历规则。
 
 ## 文档
 

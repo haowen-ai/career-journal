@@ -35,7 +35,7 @@ The Agent handles cloning, setup, mailbox configuration, local time-zone detecti
 
 ## Built for Agent workflows
 
-The repository tells a compatible Agent how to configure the workspace from end to end. It supports Codex and Claude Code as well as other coding Agents that can read repository instructions and create scheduled jobs. Resume and cover-letter work can route through the independent [CareerOps](https://github.com/career-ops-hq/career-ops) project plus CAREER JOURNAL's built-in U.S. resume rules.
+The repository tells a compatible Agent how to configure the workspace from end to end. It supports Codex and Claude Code as well as other coding Agents that can read repository instructions and create scheduled jobs. Resume and cover-letter work can route through [CareerOps](https://github.com/haowen-ai/career-ops) (a fork of the independent MIT-licensed [career-ops-hq/career-ops](https://github.com/career-ops-hq/career-ops) project that adds job-board providers and a shared company catalog) plus CAREER JOURNAL's built-in U.S. resume rules.
 
 ## Documentation
 

@@ -8,6 +8,7 @@ import { openHomeDatabase } from '../../src/runtime/home.mjs';
 import { createApplication } from '../../src/commands/application.mjs';
 import { materialCommand } from '../../src/commands/material.mjs';
 import { memoryIO } from '../../test-utils/helpers.mjs';
+import { CAREER_OPS_PINNED_VERSION } from '../../src/config/careerops-version.mjs';
 
 test('material prepare validates, hashes, and archives the generated draft', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'career-journal-material-'));
@@ -15,7 +16,7 @@ test('material prepare validates, hashes, and archives the generated draft', asy
   const careerOps = path.join(root, 'career-ops');
   try {
     await import('node:fs/promises').then(({ mkdir }) => mkdir(careerOps, { recursive: true }));
-    await writeFile(path.join(careerOps, 'package.json'), JSON.stringify({ name: 'career-ops', version: '1.32.0' }));
+    await writeFile(path.join(careerOps, 'package.json'), JSON.stringify({ name: 'career-ops', version: CAREER_OPS_PINNED_VERSION }));
     await writeFile(path.join(careerOps, 'career-journal-adapter.mjs'), `import { readFile, writeFile } from 'node:fs/promises';
 let text=''; for await (const chunk of process.stdin) text += chunk; const request=JSON.parse(text);
 await writeFile(request.requestedOutput, '%PDF generated');

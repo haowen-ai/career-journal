@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { CAREER_OPS_PINNED_VERSION } from '../../src/config/careerops-version.mjs';
 
 const files = [
   '.agents/skills/career-journal/SKILL.md',
@@ -91,7 +92,7 @@ test('CareerOps routing skill keeps facts and submitted evidence gated', async (
 
 test('dependency manifest pins CareerOps and makes Jev primary for semantic decisions', async () => {
   const text = await readFile('config/dependency-manifest.yml', 'utf8');
-  assert.match(text, /career-ops[^]*version: "1\.32\.0"/);
+  assert.match(text, new RegExp(`career-ops[^]*version: "${CAREER_OPS_PINNED_VERSION.replace(/\./g, '\\.')}"`));
   assert.match(text, /jev[^]*required: false/);
   assert.match(text, /access_state: user-configured/);
   assert.match(text, /role: primary-semantic-decision-engine/);

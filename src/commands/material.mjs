@@ -3,6 +3,7 @@ import path from 'node:path';
 import { openHomeDatabase } from '../runtime/home.mjs';
 import { runCareerOps } from '../integrations/careerops.mjs';
 import { archiveArtifact } from '../domain/artifacts.mjs';
+import { CAREER_OPS_PINNED_VERSION } from '../config/careerops-version.mjs';
 
 async function resolveRuleFiles(request, config, runtimeRoot, requestFile) {
   const builtIn = path.join(runtimeRoot, 'config', 'material-rules', 'us-resume-default.md');
@@ -31,7 +32,7 @@ export async function materialCommand(parsed, io, runtime = {}) {
       const configured = context.config.careerOps ?? {};
       const result = await runCareerOps(request, {
         root: parsed.options['careerops-root'] ?? configured.root ?? process.env.CAREER_OPS_ROOT,
-        pinnedVersion: configured.pinnedVersion ?? '1.32.0',
+        pinnedVersion: configured.pinnedVersion ?? CAREER_OPS_PINNED_VERSION,
         entrypoint: configured.entrypoint,
       });
       const artifact = await archiveArtifact(context.db, {

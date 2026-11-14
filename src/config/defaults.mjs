@@ -1,3 +1,4 @@
+import { CAREER_OPS_PINNED_VERSION } from './careerops-version.mjs';
 export const CONFIG_SCHEMA_VERSION = 1;
 
 export function defaultConfig(now = new Date().toISOString(), timezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC') {
@@ -17,7 +18,7 @@ export function defaultConfig(now = new Date().toISOString(), timezone = Intl.Da
       mode: 'off',
       threshold: 0.8,
     },
-    careerOps: { root: null, pinnedVersion: '1.32.0', entrypoint: 'career-journal-adapter.mjs' },
+    careerOps: { root: null, pinnedVersion: CAREER_OPS_PINNED_VERSION, entrypoint: 'career-journal-adapter.mjs' },
     materials: { ruleFiles: [] },
     automation: { setupState: 'not-configured' },
   };
