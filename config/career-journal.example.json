@@ -32,7 +32,7 @@
   },
   "careerOps": {
     "root": null,
-    "pinnedVersion": "1.32.0-cj.1",
+    "pinnedVersion": "1.40.0-cj.1",
     "entrypoint": "career-journal-adapter.mjs"
   },
   "materials": {
