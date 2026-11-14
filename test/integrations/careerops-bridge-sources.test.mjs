@@ -99,3 +99,41 @@ test('when every entry is enabled: false the scan reports CareerOps as disabled,
   const legacy = parseCareerOpsRaw({ ok: true, roles: [] });
   assert.equal(legacy.sources[0].detail, 'legacy display-line bridge', 'a bridge with no partition list is still treated as legacy');
 });
+
+// CareerOps 1.40 marks a partly read list in a structured shape; the fork and older providers use a
+// boolean or a legacy tag. Every one of them must make the partition partial (plan 2026-11-13 step 3a).
+const partialWith = (tag) => {
+  const provider = { id: 'demo', fetch: async () => Object.assign([job(1), job(2)], tag) };
+  return collect([{ name: 'Cut Co', careers_url: 'https://cut.example.test/jobs' }], provider);
+};
+
+test('boolean jobs.truncated === true makes the partition partial', async () => {
+  const [part] = (await partialWith({ truncated: true })).partitions;
+  assert.deepEqual([part.status, part.truncated, part.count, part.truncationReason], ['partial', true, 2, 'incomplete']);
+});
+
+test('structured jobs.truncated = { reason, fetched, total } makes the partition partial and keeps the reason', async () => {
+  const [part] = (await partialWith({ truncated: { reason: 'page-cap', fetched: 2, total: 9 } })).partitions;
+  assert.deepEqual([part.status, part.truncated, part.truncationReason], ['partial', true, 'page-cap']);
+});
+
+test('peoplesoftIncomplete makes the partition partial', async () => {
+  const [part] = (await partialWith({ peoplesoftIncomplete: true })).partitions;
+  assert.equal(part.status, 'partial');
+});
+
+test('a legacy <name>Truncated tag, boolean or reason string, makes the partition partial', async () => {
+  assert.equal((await partialWith({ jibeapplyTruncated: true })).partitions[0].status, 'partial');
+  const [part] = (await partialWith({ workdayTruncated: 'transient' })).partitions;
+  assert.deepEqual([part.status, part.truncationReason], ['partial', 'transient']);
+});
+
+test('a partial partition carries its company and careers page for the browser read', async () => {
+  const [part] = (await partialWith({ truncated: { reason: 'page-cap' } })).partitions;
+  assert.deepEqual([part.company, part.careersUrl], ['Cut Co', 'https://cut.example.test/jobs']);
+});
+
+test('markers that are not truncation (keywordSearch, workdayNoDateSkip, a false tag) leave the list ok', async () => {
+  const [part] = (await partialWith({ keywordSearch: { mode: 'keywords', terms: 2, truncated: true }, workdayNoDateSkip: true, oraclecloudTruncated: false })).partitions;
+  assert.deepEqual([part.status, part.truncated, 'careersUrl' in part], ['ok', false, false]);
+});

@@ -133,7 +133,7 @@ async function browserListCommand(parsed, io, runtime) {
     }
     if (parsed.options.json) io.out(redact(JSON.stringify(result, null, 2)));
     else if (parsed.subcommand === 'failed-lists') io.out(redact(result.lists.length
-      ? result.lists.map((item) => `${item.partition}\t${item.careersUrl ?? '(no URL recorded)'}\t${item.error ?? ''}`).join('\n')
+      ? result.lists.map((item) => `${item.partition}\t${item.careersUrl ?? '(no URL recorded)'}\t${item.status === 'partial' ? item.note : item.error ?? ''}`).join('\n')
       : result.scanRunning ? `A scan run is still running (${result.scanRunId}); read the lists after it has finished.`
       : result.wholeScanFailed ? 'The whole CareerOps step failed in the latest scan; there is no single company list to read.' : 'No company list is waiting for a browser read.'));
     else io.out(redact(`${result.sources[0].partition}: ${result.sources[0].status} ${result.sources[0].count} (${result.sources[0].detail})`));

@@ -13,7 +13,7 @@ import { collectCareerOpsRaw } from '../../src/integrations/careerops-scan-bridg
 import { parseCareerOpsRaw } from '../../src/scan/sources/careerops.mjs';
 
 import { assessSourceHealth } from '../../src/funnel/health.mjs';
-import { BROWSER_LIST_DETAIL, attachBrowserList, failedLists } from '../../src/scan/browser-list.mjs';
+import { BROWSER_LIST_DETAIL, PARTIAL_LIST_NOTE, attachBrowserList, failedLists } from '../../src/scan/browser-list.mjs';
 import { memoryIO } from '../../test-utils/helpers.mjs';
 import { readFixture } from '../../test-utils/scan-fixtures.mjs';
 
@@ -272,3 +272,59 @@ test('a list that failed after printing a cap warning is still a failed list, so
   assert.equal(parsed.sources[0].status, 'error');
   assert.equal(parsed.sources[0].detail, 'HTTP 500');
 });
+
+// A list read only in part (page cap, a failed later page) also gets a browser read (user 2026-11-13);
+// the rows the scan did fetch stay stored and are not overwritten by the browser rows.
+const CUT = 'demo:Cut Co';
+const cutJob = (i) => ({ id: `c-${i}`, source: 'careerops', sourceId: `c-${i}`, partition: CUT, company: 'Cut Co', title: `Finance Intern ${i}`,
+  url: `https://cut.example.test/jobs/${i}`, locations: ['Boston, MA'], description: 'Summer 2027 internship for students. Full provider text.', listed: true, completeness: {} });
+async function scanWithPartial(home) {
+  const { db } = await openHomeDatabase(home);
+  try {
+    return await runScan({ db, profile: await loadScanProfile(home), runId: 'scan-night-1', now: '2026-11-08T03:00:00.000Z', collect: async () => ({
+      sources: [
+        { source: 'careerops', partition: WALLED, status: 'error', count: 0, rawCount: 0, truncated: false, detail: 'HTTP 403 Forbidden', company: 'Walled Co', careersUrl: 'https://careers.walled.example.test/search' },
+        { source: 'careerops', partition: CUT, status: 'partial', count: 2, rawCount: 2, truncated: true, company: 'Cut Co', careersUrl: 'https://cut.example.test/search' },
+        { source: 'careerops', partition: HEALTHY, status: 'ok', count: 2, rawCount: 2, truncated: false },
+      ],
+      batches: [{ source: 'careerops', partition: CUT, records: [cutJob(1), cutJob(2)], rawCount: 2 }, { source: 'careerops', partition: HEALTHY, records: [job(1), job(2)], rawCount: 2 }],
+      careerOpsPartitions: [WALLED, CUT, HEALTHY],
+    }) });
+  } finally { db.close(); }
+}
+
+test('failed-lists also names a partial list, marked as partly read with its fetched rows kept', async () => fixture(async (home) => {
+  await scanWithPartial(home);
+  const state = await json(['scan', 'failed-lists', '--home', home]);
+  assert.equal(state.wholeScanFailed, false);
+  assert.deepEqual(state.lists.map((item) => item.partition), [CUT, WALLED]);
+  const cut = state.lists.find((item) => item.partition === CUT);
+  assert.deepEqual([cut.status, cut.note, cut.company, cut.careersUrl, cut.error], ['partial', PARTIAL_LIST_NOTE, 'Cut Co', 'https://cut.example.test/search', null]);
+  assert.equal('status' in state.lists.find((item) => item.partition === WALLED), false, 'a failed list keeps its old shape');
+  const text = (await cli(['scan', 'failed-lists', '--home', home])).stdout;
+  assert.match(text, new RegExp(`${CUT}\\thttps://cut.example.test/search\\t${PARTIAL_LIST_NOTE}`));
+}));
+
+test('attach accepts a partial list and adds only the postings the scan missed; fetched rows are not overwritten', async () => fixture(async (home) => {
+  await scanWithPartial(home);
+  const before = await (async () => { const { db } = await openHomeDatabase(home);
+    try { return db.prepare("SELECT rowid,fields_json FROM observations WHERE partition=? ORDER BY rowid").all(CUT).map((row) => ({ ...row })); } finally { db.close(); } })();
+  assert.equal(before.length, 2);
+  const file = await rowsFile(home, [
+    { title: 'Finance Intern 1', url: 'https://cut.example.test/jobs/1?utm_source=search', location: 'Boston, MA' },
+    { title: 'Finance Intern 3', url: 'https://cut.example.test/jobs/3', location: 'Boston, MA' },
+    { title: 'Finance Intern 3', url: 'https://cut.example.test/jobs/3', location: 'Chicago, IL' },
+  ]);
+  const summary = await json(['scan', 'attach', '--home', home, '--partition', CUT, '--file', file], '2026-11-08T04:00:00.000Z');
+  assert.equal(summary.sources[0].status, 'partial');
+  assert.equal(summary.sources[0].known, 1, 'the posting the scan already fetched is recognised');
+  assert.equal(summary.counts.raw, 1, 'only the missed posting is ingested');
+  const { db } = await openHomeDatabase(home);
+  try {
+    const after = db.prepare("SELECT rowid,fields_json FROM observations WHERE partition=? ORDER BY rowid").all(CUT).map((row) => ({ ...row }));
+    assert.deepEqual(after.slice(0, 2), before, 'the fetched rows are untouched');
+    assert.deepEqual(after.slice(2).map((row) => JSON.parse(row.fields_json).url), ['https://cut.example.test/jobs/3']);
+    assert.deepEqual(JSON.parse(after[2].fields_json).locations, ['Boston, MA', 'Chicago, IL']);
+  } finally { db.close(); }
+  assert.deepEqual((await json(['scan', 'failed-lists', '--home', home])).lists.map((item) => item.partition), [WALLED], 'the partial list leaves the queue');
+}));

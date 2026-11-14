@@ -1,7 +1,8 @@
 // Browser fallback for company lists the scan could not fetch (user 2026-11-09).
 //
 // A scan records a CareerOps entry whose list could not be read as a partition with status
-// `error`. The nightly reviewer opens that company's careers page in a browser, searches it for
+// `error`, and one that was read only in part (a page cap, a failed later page) as `partial`
+// (user 2026-11-13: partial lists get a browser read too). The nightly reviewer opens that company's careers page in a browser, searches it for
 // student roles, and hands the rows it read to `scan attach`. The rows are ingested like any other
 // batch and judged by the same code; nothing here decides eligibility.
 //
@@ -15,6 +16,8 @@ import { redact } from '../runtime/redact.mjs';
 import { parseCareerOpsRoles } from './sources/careerops.mjs';
 
 export const BROWSER_LIST_DETAIL = 'browser read: student titles only';
+// Shown with a partial list: the roles the scan did read are already stored and stay as they are.
+export const PARTIAL_LIST_NOTE = '部分读取，已抓结果保留';
 // Same freshness rule as a scan's own start check (src/scan/run.mjs startRun).
 const RUNNING_FRESH_MS = 600_000;
 const SOURCE = 'careerops';
@@ -35,7 +38,7 @@ export function failedLists(db, { now = new Date().toISOString() } = {}) {
     AND NOT (${isBrowserRun}) AND EXISTS (SELECT 1 FROM run_sources s WHERE s.run_id=r.run_id AND s.source=?)
     ORDER BY r.started_at DESC LIMIT 1`).get(SOURCE);
   if (!scan) return { scanRunId: null, scanRunning: false, wholeScanFailed: false, lists: [] };
-  const failed = db.prepare("SELECT partition,detail FROM run_sources WHERE run_id=? AND source=? AND status='error' ORDER BY partition").all(scan.run_id, SOURCE);
+  const failed = db.prepare("SELECT partition,status,detail FROM run_sources WHERE run_id=? AND source=? AND status IN ('error','partial') ORDER BY partition").all(scan.run_id, SOURCE);
   const settled = new Set(db.prepare(`SELECT s.partition FROM run_sources s JOIN runs r ON r.run_id=s.run_id
     WHERE s.source=? AND json_valid(r.receipt_json) AND json_extract(r.receipt_json,'$.forScanRunId')=?`).all(SOURCE, scan.run_id).map((row) => row.partition));
   let reported = [];
@@ -47,12 +50,14 @@ export function failedLists(db, { now = new Date().toISOString() } = {}) {
     scanFinishedAt: scan.finished_at,
     scanRunning: false,
     // The whole CareerOps step failed: there is no per-company list to read by hand.
-    wholeScanFailed: failed.some((row) => row.partition === 'all'),
+    wholeScanFailed: failed.some((row) => row.partition === 'all' && row.status === 'error'),
     lists: failed.filter((row) => row.partition !== 'all' && !settled.has(row.partition)).map((row) => ({
       partition: row.partition,
       company: receipt.get(row.partition)?.company ?? nameOf(row.partition),
       careersUrl: receipt.get(row.partition)?.careersUrl ?? null,
-      error: row.detail || null,
+      error: row.status === 'error' ? row.detail || null : null,
+      // A partial list: read the page for what the scan missed; rows it already stored are kept.
+      ...(row.status === 'partial' ? { status: 'partial', note: PARTIAL_LIST_NOTE, ...(row.detail ? { detail: row.detail } : {}) } : {}),
     })),
   };
 }
@@ -85,7 +90,8 @@ function closeRun(db, { runId, status, partitionStatus, partition, count, quaran
 
 // A posting the journal already knows (any identity alias of the row is owned) keeps its record:
 // a browser row holds less than what a provider read, so storing it would look like a content
-// change and send a settled or held review back to the start.
+// change and send a settled or held review back to the start. For a partial list this is the
+// merge: the rows the scan fetched stay, and only postings it missed are added.
 function isKnown(db, record, identity) {
   if (record.invalid) return false;
   const owned = db.prepare('SELECT 1 FROM posting_aliases WHERE alias=?');

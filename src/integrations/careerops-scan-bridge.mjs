@@ -176,6 +176,25 @@ const CAP_LINE = /\btruncat(?:ed|ion)\b|\bpartial (?:result|census)|\b(?:page|re
 const entryScope = new AsyncLocalStorage();
 
 // The first http(s) address an entry names, careers page first.
+// A provider says it read only part of a list in one of three shapes (CareerOps 1.40
+// lib/board-truncation.mjs and its older forks): the canonical `jobs.truncated`, either `true` or
+// a structured `{ reason, fetched?, total? }`; or a legacy tag such as `workdayTruncated`,
+// `peoplesoftIncomplete` or `capDetected` whose value is `true`, a reason string or an object.
+// Returns the reason, or null when the list is complete. `keywordSearch` is a marker, not a tag.
+const LEGACY_TRUNCATION_TAG = /^[a-z][A-Za-z0-9]*(?:Truncated|Incomplete|Partial)$|^(?:partial|capDetected)$/;
+export function providerTruncation(jobs) {
+  if (!Array.isArray(jobs)) return null;
+  const reasonOf = (value) => (typeof value === 'string' && value ? value
+    : value && typeof value === 'object' && typeof value.reason === 'string' && value.reason ? value.reason : 'incomplete');
+  const canonical = jobs.truncated;
+  if (canonical === true || (canonical && typeof canonical === 'object')) return reasonOf(canonical);
+  for (const [key, value] of Object.entries(jobs)) {
+    if (!LEGACY_TRUNCATION_TAG.test(key) || !value) continue;
+    if (value === true || typeof value === 'string' || typeof value === 'object') return value === true ? 'incomplete' : reasonOf(value);
+  }
+  return null;
+}
+
 export function entryUrl(entry = {}) {
   for (const key of ['careers_url', 'api', 'url', 'board_url', 'feed_url']) {
     try { const url = new URL(String(entry[key])); if (/^https?:$/.test(url.protocol)) return url.href; } catch { /* not a URL */ }
@@ -280,7 +299,8 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
       const ceiling = search ? null : providerCeiling(provider.id, entry, portals);
       if (ceiling != null && jobs.length >= ceiling) scope.capDetected = true;
       const capDetected = scope.capDetected;
-      const truncated = capDetected || Object.entries(jobs).some(([key, value]) => /(?:truncated|partial|capDetected)$/i.test(key) && value === true);
+      const truncationReason = providerTruncation(jobs);
+      const truncated = capDetected || truncationReason != null;
       const roles = [];
       for (const job of jobs) {
         const role = { ...job, company: job?.company ?? entry.name, partition,
@@ -299,6 +319,9 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
         await writeFile(path.join(spoolDir, spoolFile), JSON.stringify(roles));
       } else rolesByEntry[index] = roles;
       partitions[index] = { partition, status: truncated ? 'partial' : 'ok', count: jobs.length, rawCount: jobs.length, truncated, capDetected, attempts, elapsedMs: elapsed(),
+        ...(truncationReason ? { truncationReason } : {}),
+        // A partial list also gets a browser read (src/scan/browser-list.mjs); it needs the same pointers.
+        ...(truncated && entry.name ? { company: String(entry.name) } : {}), ...(truncated && entryUrl(entry) ? { careersUrl: entryUrl(entry) } : {}),
         ...(capDetected && ceiling != null && jobs.length >= ceiling ? { ceiling } : {}), ...(spoolFile ? { spoolFile } : {}),
         // Source health keeps keyword counts and whole-board counts apart by this detail prefix.
         ...(search ? searchMeta(search) : {}) };
