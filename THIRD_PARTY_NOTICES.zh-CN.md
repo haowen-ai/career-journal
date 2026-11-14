@@ -9,7 +9,7 @@ CAREER JOURNAL 会对它所集成的独立开源成果保留完整署名。在�
 - 项目：[career-ops](https://github.com/career-ops-hq/career-ops)
 - 作者与维护者：Santiago Fernández de Valderrama 及贡献者
 - 许可证：MIT；原文保存于 `LICENSES/career-ops-MIT.txt`
-- 在本项目中的用途：锁定版本的可选集成、申请材料路由 Skill、能力检查和适配器契约
+- 在本项目中的用途：锁定版本的可选集成（从分叉 [haowen-ai/career-ops](https://github.com/haowen-ai/career-ops) 安装，分叉保留原 MIT 许可证，增加了招聘网站抓取器和共享公司目录）、公司官网岗位扫描、申请材料路由 Skill、能力检查和适配器契约
 - 商标：`career-ops` 名称和品牌受其独立商标政策管理。CAREER JOURNAL 只在说明兼容性和开源归属时使用该名称
 
 本仓库没有复制 career-ops 的源代码。只有在需要其申请材料工作流时，用户才需要单独安装它。
@@ -44,6 +44,14 @@ CAREER JOURNAL 2.0 的岗位扫描只在用户自己的电脑上、在扫描时�
 ### CareerOps 门户扫描（用户自选开启）
 
 CareerOps 门户扫描通过上面所述的 career-ops 集成运行，沿用其 MIT 许可证和署名；只有用户自己开启且已安装 CareerOps 时才会运行。
+
+## Anthropic TypeScript SDK
+
+- 项目：[anthropic-sdk-typescript](https://github.com/anthropics/anthropic-sdk-typescript)（npm 包 `@anthropic-ai/sdk`）
+- 作者：Anthropic, PBC
+- 许可证：Apache-2.0；原文保存于 `LICENSES/anthropic-sdk-typescript-Apache-2.0.txt`
+- 在本项目中的用途：唯一的运行时 npm 依赖，用户配置 API 密钥后用于调用 Claude 做岗位筛选
+- 随它从 npm 安装（未复制进本仓库）：@opentelemetry/api（Apache-2.0）、@babel/runtime、@stablelib/base64、json-schema-to-ts、standardwebhooks、ts-algebra（MIT）、fast-sha256（Unlicense）
 
 ## Tabler Icons
 

@@ -135,12 +135,13 @@ export async function checkRelease(root) {
 
   try {
     const notices = await read('THIRD_PARTY_NOTICES.md');
-    check('attribution', /career-ops-hq\/career-ops/.test(notices) && /Santiago Fernández de Valderrama/.test(notices) && /typesafe-ai\/skills/.test(notices) && /TypeSafe AI/.test(notices) && /tabler\/tabler-icons/.test(notices), 'CareerOps, TypeSafe, and Tabler attribution');
+    check('attribution', /career-ops-hq\/career-ops/.test(notices) && /Santiago Fernández de Valderrama/.test(notices) && /typesafe-ai\/skills/.test(notices) && /TypeSafe AI/.test(notices) && /tabler\/tabler-icons/.test(notices) && /anthropic-sdk-typescript/.test(notices) && /haowen-ai\/career-ops/.test(notices), 'CareerOps (and fork), TypeSafe, Tabler, and Anthropic SDK attribution');
   } catch (error) { check('attribution', false, error.message); }
 
   const licenseFiles = ['LICENSE', 'LICENSES/career-ops-MIT.txt', 'LICENSES/typesafe-ai-skills-MIT.txt', 'LICENSES/tabler-icons-MIT.txt'];
   const licenses = await Promise.all(licenseFiles.map(async (file) => (await readable(path.join(root, file))) && /MIT License/.test(await read(file))));
-  check('licenses', licenses.every(Boolean), licenseFiles.join(', '));
+  const apache = await readable(path.join(root, 'LICENSES/anthropic-sdk-typescript-Apache-2.0.txt')) && /Apache License/.test(await read('LICENSES/anthropic-sdk-typescript-Apache-2.0.txt'));
+  check('licenses', licenses.every(Boolean) && apache, [...licenseFiles, 'LICENSES/anthropic-sdk-typescript-Apache-2.0.txt'].join(', '));
   check('changelog', /### Added/.test(changelog) && /### Changed/.test(changelog) && /### Fixed/.test(changelog) && /### Security/.test(changelog), 'required changelog sections');
 
   try {

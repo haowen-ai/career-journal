@@ -46,6 +46,18 @@ The repository tells a compatible Agent how to configure the workspace from end 
 - [Product requirements](docs/superpowers/specs/2026-09-19-job-search-ops-prd-design.en.md)
 - [Release history](CHANGELOG.md)
 
+## Acknowledgements
+
+CAREER JOURNAL builds on other people's work. Thank you to:
+
+- [career-ops](https://github.com/career-ops-hq/career-ops) by Santiago Fernández de Valderrama and contributors (MIT). Role scans of company career sites and the resume and cover-letter workflow use career-ops through the [haowen-ai/career-ops](https://github.com/haowen-ai/career-ops) fork, which adds job-board providers and a shared company catalog. The career-ops name belongs to its project and is used here only to describe compatibility and origin.
+- [Anthropic TypeScript SDK](https://github.com/anthropics/anthropic-sdk-typescript) (Apache-2.0), used for Claude-based screening.
+- [TypeSafe Agent Skills](https://github.com/typesafe-ai/skills) by TypeSafe AI (MIT), the guidance for the optional Jev adapter.
+- [Tabler Icons](https://github.com/tabler/tabler-icons) by Paweł Kuna and contributors (MIT), the dashboard icons.
+- The public job-board APIs of Greenhouse, Lever, and Ashby, and the [SimplifyJobs](https://github.com/SimplifyJobs) internship lists (opt-in), read live on your machine.
+
+Full notices and license texts: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [LICENSES](LICENSES).
+
 ## Open source
 
 CAREER JOURNAL is released under the [MIT License](LICENSE). Third-party projects and preserved license texts are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [LICENSES](LICENSES).

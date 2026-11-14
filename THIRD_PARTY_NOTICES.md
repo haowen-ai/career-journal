@@ -9,7 +9,7 @@ CAREER JOURNAL preserves credit for the independent work it integrates with. Inc
 - Project: [career-ops](https://github.com/career-ops-hq/career-ops)
 - Author and maintainer: Santiago Fernández de Valderrama and contributors
 - License: MIT; preserved in `LICENSES/career-ops-MIT.txt`
-- Use here: pinned optional integration, material-routing Skill, capability checks, and adapter contract
+- Use here: pinned optional integration (installed from the fork [haowen-ai/career-ops](https://github.com/haowen-ai/career-ops), which keeps the original MIT license and adds job-board providers and a shared company catalog), company career-site role scans, material-routing Skill, capability checks, and adapter contract
 - Trademark: the career-ops name and brand are governed by its separate trademark policy. CAREER JOURNAL uses the name only to describe compatibility and attribution
 
 No career-ops source code is copied into this repository. Users install it separately when they want its material workflow.
@@ -44,6 +44,14 @@ No SimplifyJobs data is bundled, cached in this repository, mirrored, or redistr
 ### CareerOps portal scans (opt-in)
 
 CareerOps portal scans run through the career-ops integration described above, under its MIT licence and attribution, only when the user turns them on and CareerOps is installed.
+
+## Anthropic TypeScript SDK
+
+- Project: [anthropic-sdk-typescript](https://github.com/anthropics/anthropic-sdk-typescript) (npm `@anthropic-ai/sdk`)
+- Author: Anthropic, PBC
+- License: Apache-2.0; preserved in `LICENSES/anthropic-sdk-typescript-Apache-2.0.txt`
+- Use here: the only runtime npm dependency, used to call Claude for role screening when the user configures an API key
+- Installed with it from npm (not copied into this repository): @opentelemetry/api (Apache-2.0), @babel/runtime, @stablelib/base64, json-schema-to-ts, standardwebhooks, ts-algebra (MIT), fast-sha256 (Unlicense)
 
 ## Tabler Icons
 

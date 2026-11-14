@@ -46,6 +46,18 @@ Agent 会自动完成下载、项目配置、邮箱接入、本机时区检测�
 - [产品需求文档](docs/superpowers/specs/2026-09-19-job-search-ops-prd-design.md)
 - [版本更新记录](CHANGELOG.zh-CN.md)
 
+## 致谢
+
+CAREER JOURNAL 建立在别人的成果之上，感谢：
+
+- [career-ops](https://github.com/career-ops-hq/career-ops)，作者 Santiago Fernández de Valderrama 及贡献者（MIT）。公司官网岗位扫描和简历、求职信工作流通过分叉 [haowen-ai/career-ops](https://github.com/haowen-ai/career-ops) 使用 career-ops，分叉增加了招聘网站抓取器和共享公司目录。career-ops 名称归原项目所有，这里只用于说明兼容性和来源。
+- [Anthropic TypeScript SDK](https://github.com/anthropics/anthropic-sdk-typescript)（Apache-2.0），用于基于 Claude 的岗位筛选。
+- [TypeSafe Agent Skills](https://github.com/typesafe-ai/skills)，作者 TypeSafe AI（MIT），可选 Jev 接入的使用说明。
+- [Tabler Icons](https://github.com/tabler/tabler-icons)，作者 Paweł Kuna 及贡献者（MIT），仪表盘图标。
+- Greenhouse、Lever、Ashby 的公开招聘接口，以及 [SimplifyJobs](https://github.com/SimplifyJobs) 实习列表（需手动开启），都在你自己的电脑上实时读取。
+
+完整声明和许可证原文见 [第三方项目说明](THIRD_PARTY_NOTICES.zh-CN.md) 和 [LICENSES](LICENSES)。
+
 ## 开源说明
 
 CAREER JOURNAL 使用 [MIT License](LICENSE) 发布。项目使用的第三方开源成果及其许可证见 [第三方项目说明](THIRD_PARTY_NOTICES.zh-CN.md) 和 [LICENSES](LICENSES)。
