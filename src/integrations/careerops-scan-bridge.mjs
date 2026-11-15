@@ -24,7 +24,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nativeListingId } from '../scan/listing-key.mjs';
-import { createFamilyLimiter, familyOf, parseScanFamilies } from './scan-families.mjs';
+import { createFamilyLimiter, familyOf, familyOfRequest, parseScanFamilies } from './scan-families.mjs';
 
 export const WIDE_TITLE_FILTER = Object.freeze([
   'word:intern', 'word:interns', 'stem:internship', 'co-op', 'word:coop', 'stem:apprentice',
@@ -302,8 +302,11 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
   // Lanes per family (filled before the first lane starts); a family with one lane is never limited.
   const familyLanes = new Map();
   const shared = (family) => family != null && (familyLanes.get(family)?.size ?? 0) > 1;
+  // A split provider's request family comes from the real request host, which the lane count cannot know in advance:
+  // it is always budgeted. Any other family only when it has more than one lane.
+  const splitFamily = (family) => family != null && family.includes('|') && families.splitByHost.has(family.slice(0, family.indexOf('|')));
   const limiter = families ? createFamilyLimiter({ now, delay,
-    requestsPerMinute: (family) => (shared(family) ? families.requestsPerMinute.get(family) ?? families.requestsPerMinuteDefault : Infinity) }) : null;
+    requestsPerMinute: (family) => (splitFamily(family) || shared(family) ? families.requestsPerMinute.get(family) ?? families.requestsPerMinuteDefault : Infinity) }) : null;
   const originalError = console.error;
   console.error = (...args) => {
     const scope = entryScope.getStore();
@@ -324,7 +327,8 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
       const resolved = await resolveProvider(entry, providers);
       provider = resolved?.provider ?? resolved;
       if (typeof provider === 'string') provider = providers.get?.(provider) ?? providers[provider];
-      if (families) family = familyOf(provider?.id ?? resolved?.id ?? resolved?.providerId ?? null, entry, families.splitByHost);
+      const providerId = provider?.id ?? resolved?.id ?? resolved?.providerId ?? null;
+      if (families) family = familyOf(providerId, entry, families.splitByHost);
       if (!provider?.fetch) throw new Error('No provider for configured entry');
       partition = `${provider.id ?? resolved.id ?? resolved.providerId ?? 'unknown'}:${entry.name ?? entry.board ?? entry.url ?? ''}`;
       const request = withKeywordDefaults(entry, portals, provider.id ?? resolved.id ?? resolved.providerId ?? null);
@@ -336,7 +340,8 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
         try {
           // The request budget wraps the timed methods: a wait for a slot never counts against the request timeout.
           const timed = withEntryTimeout(await makeHttpCtx(request, portals), request);
-          const ctx = limiter && shared(family) ? withRequestBudget(timed, family, limiter, (ms) => { rateWaitMs += ms; }) : timed;
+          const ctx = limiter && (shared(family) || families.splitByHost.has(String(providerId)))
+            ? withRequestBudget(timed, (url) => familyOfRequest(providerId, url, families.splitByHost, family), limiter, (ms) => { rateWaitMs += ms; }) : timed;
           if (known?.size) ctx.isKnownListing = (job) => known.has(nativeListingId(job));
           const bound = earlyStopBound(provider.id ?? resolved.id ?? null, partition, { known: knownListings, watermarks, earlyStop });
           if (bound != null) ctx.earlyStopBeforeMs = bound;
@@ -409,31 +414,35 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
         for (let lane = queue.shift(); lane; lane = queue.shift()) for (const index of lane) await fetchEntry(entries[index], index);
       }));
     } else {
-      // Each lane's family is its first resolvable entry's; an entry that cannot be resolved here is its own family.
-      const laneFamily = new Map();
+      // The families of each lane's entries (one host can serve entries of several); an entry that cannot be resolved
+      // here has no family. A lane holds a place in every family it contains, for as long as it runs.
+      const laneFamilies = new Map();
       for (const [key, lane] of lanes) {
+        const set = new Set();
         for (const index of lane) {
           const family = familyOf(await providerIdOf(entries[index], providers, resolveProvider), entries[index], families.splitByHost);
           if (family == null) continue;
+          set.add(family);
           if (!familyLanes.has(family)) familyLanes.set(family, new Set());
           familyLanes.get(family).add(key);
-          if (!laneFamily.has(lane)) laneFamily.set(lane, family);
         }
+        laneFamilies.set(lane, [...set]);
       }
-      const cap = (lane) => { const family = laneFamily.get(lane); return shared(family) ? families.lanes.get(family) ?? families.lanesDefault : Infinity; };
+      const cap = (family) => (shared(family) ? families.lanes.get(family) ?? families.lanesDefault : Infinity);
       const running = new Map();
+      const fits = (lane) => laneFamilies.get(lane).every((family) => (running.get(family) ?? 0) < cap(family));
       let finished = null;
       const nextFinish = () => (finished ??= Promise.withResolvers()).promise;
       await Promise.all(Array.from({ length: limit }, async () => {
         while (queue.length) {
-          // The first lane (longest first) whose family has room. None: some lane of each full family is running, so wait for one to end.
-          const at = queue.findIndex((lane) => (running.get(laneFamily.get(lane)) ?? 0) < cap(lane));
+          // The first lane (longest first) with room in all its families. None: every lane waiting has a full family,
+          // and a full family has a lane running (caps are at least 1), so wait for a lane to end.
+          const at = queue.findIndex(fits);
           if (at < 0) { await nextFinish(); continue; }
           const [lane] = queue.splice(at, 1);
-          const family = laneFamily.get(lane);
-          running.set(family, (running.get(family) ?? 0) + 1);
+          for (const family of laneFamilies.get(lane)) running.set(family, (running.get(family) ?? 0) + 1);
           try { for (const index of lane) await fetchEntry(entries[index], index); } finally {
-            running.set(family, running.get(family) - 1);
+            for (const family of laneFamilies.get(lane)) running.set(family, running.get(family) - 1);
             const waiting = finished;
             finished = null;
             waiting?.resolve();
@@ -447,12 +456,12 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
 
 // Every ctx request method of one entry takes a slot of its family's request budget first (plan v6 r3/r5). Pages,
 // retries (fetchJsonWithRetry calls ctx.fetchJson per attempt) and detail fetches all go through these methods.
-function withRequestBudget(ctx, family, limiter, onWait) {
+function withRequestBudget(ctx, familyFor, limiter, onWait) {
   const wrapped = { ...ctx };
   for (const name of ['fetchJson', 'fetchText', 'fetchResponse']) {
     if (typeof ctx?.[name] !== 'function') continue;
     wrapped[name] = async (...args) => {
-      const slot = await limiter.acquire(family);
+      const slot = await limiter.acquire(familyFor(args[0]));
       if (slot.waitedMs > 0) onWait(slot.waitedMs);
       try { return await ctx[name](...args); } finally { slot.release(); }
     };

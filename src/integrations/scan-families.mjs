@@ -33,7 +33,7 @@ export function parseScanFamilies(value) {
   if (value === undefined || value === null) return null;
   if (!isPlainObject(value)) throw problem('must be an object');
   for (const key of Object.keys(value)) if (!KEYS.has(key)) throw problem(`unknown key ${key}`);
-  const split = value.splitByHost ?? [];
+  const split = value.splitByHost === undefined ? [] : value.splitByHost;
   if (!Array.isArray(split) || split.some((id) => typeof id !== 'string' || !id)) throw problem('splitByHost must be a list of provider ids');
   const lanes = limits(value.lanes, 'lanes');
   const rate = limits(value.requestsPerMinute, 'requestsPerMinute');
@@ -49,14 +49,23 @@ function requestHost(entry = {}) {
   return null;
 }
 
+const hostFamily = (id, host) => { const labels = host.split('.'); return `${id}|${labels.length > 2 ? labels.slice(1).join('.') : host}`; };
+
+// The family an entry is scheduled under. For a split provider this is a guess from the entry's URLs (used for lane
+// caps only); its request budget follows each request's real host (familyOfRequest).
 export function familyOf(providerId, entry, splitByHost = new Set()) {
   if (!providerId) return null;
   const id = String(providerId);
   if (!splitByHost.has(id)) return id;
   const host = requestHost(entry);
-  if (!host) return id;
-  const labels = host.split('.');
-  return `${id}|${labels.length > 2 ? labels.slice(1).join('.') : host}`;
+  return host ? hostFamily(id, host) : id;
+}
+
+// The family one request is budgeted under: a split provider by the host the request really goes to.
+export function familyOfRequest(providerId, url, splitByHost, fallback) {
+  const id = providerId == null ? null : String(providerId);
+  if (!id || !splitByHost.has(id)) return fallback;
+  try { return hostFamily(id, new URL(String(url)).host.toLowerCase()); } catch { return fallback; }
 }
 
 // Sliding-window request budget per family. A slot is held from the moment it is granted until the call that

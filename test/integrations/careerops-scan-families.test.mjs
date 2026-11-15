@@ -196,3 +196,62 @@ test('requests: a provider retry is another request and takes another slot', asy
   assert.ok(calls[2] >= 60_000);
   assert.deepEqual(result.partitions.map((p) => p.status), ['ok', 'ok']);
 });
+
+test('lanes: a host lane holding entries of two families counts against both caps (Codex code review r1-1)', async () => {
+  const running = new Map();
+  const peak = new Map();
+  const make = (id) => ({ id, fetch: async () => {
+    running.set(id, (running.get(id) ?? 0) + 1); peak.set(id, Math.max(peak.get(id) ?? 0, running.get(id)));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    running.set(id, running.get(id) - 1);
+    return [];
+  } });
+  const p1 = make('p1');
+  const p2 = make('p2');
+  const resolveProvider = async (item) => (item.name.startsWith('B') || item.name.startsWith('C') ? { provider: p2, id: 'p2' } : { provider: p1, id: 'p1' });
+  // Lane shared.test: A (p1) then B (p2). Lane c.test: C (p2). Lane d.test: D (p1).
+  const entries = [entry('A', 'shared.test'), entry('B', 'shared.test'), entry('C', 'c.test'), entry('D', 'd.test')];
+  const result = await collect(entries, p1, { providers: { p1, p2 }, resolveProvider, concurrency: 3, families: parseScanFamilies({ lanes: { default: 1 } }) });
+  assert.equal(peak.get('p2'), 1);
+  assert.equal(peak.get('p1'), 1);
+  assert.equal(result.partitions.filter((p) => p.status === 'ok').length, 4);
+});
+
+test('requests: a split provider is budgeted by the host it really requests, not by its careers page (Codex code review r1-2)', async () => {
+  const time = fakeTime();
+  const calls = [];
+  const wd = { id: 'wd', fetch: async (item, ctx) => { await ctx.fetchJson(item.tenantApi); return []; } };
+  const entries = [
+    { name: 'A', careers_url: 'https://brand-a.example.com/careers', tenantApi: 'https://a.wd1.myworkdayjobs.com/wday/cxs/a/x/jobs' },
+    { name: 'B', careers_url: 'https://brand-b.example.org/careers', api: 'https://not-workday.example.org/feed', tenantApi: 'https://b.wd1.myworkdayjobs.com/wday/cxs/b/y/jobs' },
+  ];
+  const makeHttpCtx = async () => ({ fetchJson: async (url) => { calls.push([url, time.now()]); return {}; } });
+  const pending = collect(entries, wd, { providers: { wd }, resolveProvider: async () => ({ provider: wd, id: 'wd' }), makeHttpCtx, concurrency: 2,
+    families: parseScanFamilies({ splitByHost: ['wd'], requestsPerMinute: { 'wd|wd1.myworkdayjobs.com': 1 } }), now: time.now, delay: time.delay });
+  await time.advance(10);
+  assert.equal(calls.length, 1, 'both tenants are on wd1: one request in the first minute');
+  await time.advance(60_000);
+  await pending;
+  assert.equal(calls.length, 2);
+  assert.ok(calls[1][1] >= 60_000);
+});
+
+test('requests: a split provider family missing from the config gets the default budget, even with one lane', async () => {
+  const time = fakeTime();
+  let calls = 0;
+  const wd = { id: 'wd', fetch: async (item, ctx) => { for (let i = 0; i < 3; i += 1) await ctx.fetchJson(`https://t.wd9.myworkdayjobs.com/p${i}`); return []; } };
+  const pending = collect([entry('A')], wd, { providers: { wd }, resolveProvider: async () => ({ provider: wd, id: 'wd' }),
+    makeHttpCtx: async () => ({ fetchJson: async () => { calls += 1; return {}; } }),
+    families: parseScanFamilies({ splitByHost: ['wd'], requestsPerMinute: { default: 2 } }), now: time.now, delay: time.delay });
+  await time.advance(10);
+  assert.equal(calls, 2);
+  await time.advance(60_000);
+  await pending;
+  assert.equal(calls, 3);
+});
+
+test('scanFamilies config: an explicit null list or map is rejected, not read as empty (Codex code review r1-3)', () => {
+  for (const bad of [{ splitByHost: null }, { lanes: null }, { requestsPerMinute: null }]) {
+    assert.throws(() => parseScanFamilies(bad), /scanFamilies/, JSON.stringify(bad));
+  }
+});
