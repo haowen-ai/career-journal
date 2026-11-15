@@ -89,3 +89,16 @@ test('without known listings no file is written', async () => {
   }, { knownListings: null });
   assert.equal(seenConfig.knownListingsFile, undefined);
 });
+
+for (const status of ['ceiling', 'page_failed']) {
+  test(`a provider collection status of ${status} makes the list partial even without jobs.truncated (Codex review 11/15)`, async () => {
+    const provider = { id: 'taleo', fetch: async () => {
+      const jobs = [job('A1')];
+      Object.defineProperty(jobs, 'collection', { value: { status }, enumerable: false });
+      return jobs;
+    } };
+    const result = await collectCareerOpsRaw({ portals: { tracked_companies: [{ name: 'Acme' }] }, providers: { taleo: provider },
+      resolveProvider: async () => ({ provider, id: 'taleo' }), makeHttpCtx: async () => ({}), sleep: async () => {} });
+    assert.deepEqual([result.partitions[0].status, result.partitions[0].truncated, result.partitions[0].collection], ['partial', true, status]);
+  });
+}

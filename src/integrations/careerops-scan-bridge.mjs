@@ -278,7 +278,7 @@ export function searchMeta(search) {
 // `ctx.isKnownListing(job)` and may skip per-listing detail requests for known ones (plan 2026-11-14 v2 step 2).
 // It must still return every listing of the list: the journal skips known rows itself and health counts the list.
 // `watermarks` / `earlyStop` (readIncrementalInput): a configured provider also gets ctx.earlyStopBeforeMs and may stop
-// paging early; its `jobs.collection.status` (complete | early_stopped | page_failed | ceiling) is reported as the
+// paging early; its `jobs.collection.status` (complete | early_stopped | page_failed | ceiling | unverified) is reported as the
 // partition's `collection`, with `collectionMode` early_stopped or full.
 export async function collectCareerOpsRaw({ portals, providers, resolveProvider, makeHttpCtx, sleep = defaultSleep, retryDelaysMs = RETRY_DELAYS_MS,
   concurrency = 1, spoolDir, onPartition, knownListings = new Map(), watermarks = new Map(), earlyStop = null }) {
@@ -335,7 +335,9 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
       const capDetected = scope.capDetected;
       const truncationReason = providerTruncation(jobs);
       const collection = typeof jobs.collection?.status === 'string' ? jobs.collection.status : null;
-      const truncated = capDetected || truncationReason != null;
+      // A provider that says it hit a ceiling or a failed page has an incomplete list even without jobs.truncated
+      // (Codex review 11/15): it must reach failStreak and the browser read like any other partial list.
+      const truncated = capDetected || truncationReason != null || collection === 'ceiling' || collection === 'page_failed';
       const roles = [];
       for (const job of jobs) {
         const role = { ...job, company: job?.company ?? entry.name, partition,
