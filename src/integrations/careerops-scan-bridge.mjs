@@ -24,6 +24,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nativeListingId } from '../scan/listing-key.mjs';
+import { createFamilyLimiter, familyOf, parseScanFamilies } from './scan-families.mjs';
 
 export const WIDE_TITLE_FILTER = Object.freeze([
   'word:intern', 'word:interns', 'stem:internship', 'co-op', 'word:coop', 'stem:apprentice',
@@ -284,14 +285,25 @@ export function searchMeta(search) {
 // partition's `collection`, with `collectionMode` early_stopped or full.
 // `laneWeights` (Map entry name → elapsed ms of the previous scan): hosts start longest lane first (plan v4), so a slow
 // host does not start last and set the wall time; hosts without a weight follow in configured order. Order only.
+// `families` (parseScanFamilies, plan v6): hosts of one provider (Workday: one cluster) share a pool; a pool with more than one
+// lane runs at most `lanes` lanes at once and sends at most `requestsPerMinute` requests in any 60 s (src/integrations/scan-families.mjs).
+// Limits only delay: every lane still runs, and every failure is still reported. Each partition then also reports its
+// `family`, `startedMs` (since the scan began) and `rateWaitMs`. Without `families` nothing changes.
 export async function collectCareerOpsRaw({ portals, providers, resolveProvider, makeHttpCtx, sleep = defaultSleep, retryDelaysMs = RETRY_DELAYS_MS,
-  concurrency = 1, spoolDir, onPartition, knownListings = new Map(), watermarks = new Map(), earlyStop = null, laneWeights = new Map() }) {
+  concurrency = 1, spoolDir, onPartition, knownListings = new Map(), watermarks = new Map(), earlyStop = null, laneWeights = new Map(),
+  families = null, now = Date.now, delay = defaultSleep }) {
   // `enabled: false` turns an entry off (CareerOps's own scan skips it too); it then leaves the
   // configured inventory, so its partition is retired instead of failing every night.
   const entries = [...(portals.tracked_companies ?? []), ...(portals.job_boards ?? [])].filter((entry) => entry?.enabled !== false);
   const rolesByEntry = entries.map(() => []);
   const partitions = new Array(entries.length);
   const configuredPartitions = new Array(entries.length);
+  const scanStartedAt = performance.now();
+  // Lanes per family (filled before the first lane starts); a family with one lane is never limited.
+  const familyLanes = new Map();
+  const shared = (family) => family != null && (familyLanes.get(family)?.size ?? 0) > 1;
+  const limiter = families ? createFamilyLimiter({ now, delay,
+    requestsPerMinute: (family) => (shared(family) ? families.requestsPerMinute.get(family) ?? families.requestsPerMinuteDefault : Infinity) }) : null;
   const originalError = console.error;
   console.error = (...args) => {
     const scope = entryScope.getStore();
@@ -303,12 +315,16 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
     let provider;
     let partition = `unknown:${entry.name ?? entry.board ?? entry.url ?? ''}`;
     let attempts = 0;
+    let family = null;
+    let rateWaitMs = 0;
     const startedAt = performance.now();
     const elapsed = () => Math.round(performance.now() - startedAt);
+    const familyMeta = () => (families ? { family, startedMs: Math.round(startedAt - scanStartedAt), ...(rateWaitMs ? { rateWaitMs } : {}) } : {});
     try {
       const resolved = await resolveProvider(entry, providers);
       provider = resolved?.provider ?? resolved;
       if (typeof provider === 'string') provider = providers.get?.(provider) ?? providers[provider];
+      if (families) family = familyOf(provider?.id ?? resolved?.id ?? resolved?.providerId ?? null, entry, families.splitByHost);
       if (!provider?.fetch) throw new Error('No provider for configured entry');
       partition = `${provider.id ?? resolved.id ?? resolved.providerId ?? 'unknown'}:${entry.name ?? entry.board ?? entry.url ?? ''}`;
       const request = withKeywordDefaults(entry, portals, provider.id ?? resolved.id ?? resolved.providerId ?? null);
@@ -318,7 +334,9 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
         attempts += 1;
         scope.capDetected = false;
         try {
-          const ctx = withEntryTimeout(await makeHttpCtx(request, portals), request);
+          // The request budget wraps the timed methods: a wait for a slot never counts against the request timeout.
+          const timed = withEntryTimeout(await makeHttpCtx(request, portals), request);
+          const ctx = limiter && shared(family) ? withRequestBudget(timed, family, limiter, (ms) => { rateWaitMs += ms; }) : timed;
           if (known?.size) ctx.isKnownListing = (job) => known.has(nativeListingId(job));
           const bound = earlyStopBound(provider.id ?? resolved.id ?? null, partition, { known: knownListings, watermarks, earlyStop });
           if (bound != null) ctx.earlyStopBeforeMs = bound;
@@ -366,11 +384,11 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
         ...(capDetected && ceiling != null && jobs.length >= ceiling ? { ceiling } : {}), ...(spoolFile ? { spoolFile } : {}),
         // Source health keeps keyword counts and whole-board counts apart by this detail prefix.
         ...(search ? searchMeta(search) : {}),
-        ...(collection ? { collection, collectionMode: collection === 'early_stopped' ? 'early_stopped' : 'full' } : {}) };
+        ...(collection ? { collection, collectionMode: collection === 'early_stopped' ? 'early_stopped' : 'full' } : {}), ...familyMeta() };
     } catch (error) {
       // The company and its careers page travel with a failed list, for the browser read that follows it.
       partitions[index] = { partition, status: 'error', count: 0, rawCount: 0, error: error.message, truncated: scope.capDetected, capDetected: scope.capDetected, attempts, elapsedMs: elapsed(),
-        ...(entry.name ? { company: String(entry.name) } : {}), ...(entryUrl(entry) ? { careersUrl: entryUrl(entry) } : {}) };
+        ...(entry.name ? { company: String(entry.name) } : {}), ...(entryUrl(entry) ? { careersUrl: entryUrl(entry) } : {}), ...familyMeta() };
     } finally { configuredPartitions[index] = partition; }
     onPartition?.(partitions[index]);
   });
@@ -386,11 +404,69 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
     // Array.prototype.sort is stable: equal weights (and every unweighted lane) keep the configured order.
     const queue = [...lanes.values()].map((lane) => [lane, weight(lane)]).sort((a, b) => b[1] - a[1]).map(([lane]) => lane);
     const limit = Math.max(1, Math.min(positive(concurrency) ?? 1, queue.length || 1));
-    await Promise.all(Array.from({ length: limit }, async () => {
-      for (let lane = queue.shift(); lane; lane = queue.shift()) for (const index of lane) await fetchEntry(entries[index], index);
-    }));
+    if (!families) {
+      await Promise.all(Array.from({ length: limit }, async () => {
+        for (let lane = queue.shift(); lane; lane = queue.shift()) for (const index of lane) await fetchEntry(entries[index], index);
+      }));
+    } else {
+      // Each lane's family is its first resolvable entry's; an entry that cannot be resolved here is its own family.
+      const laneFamily = new Map();
+      for (const [key, lane] of lanes) {
+        for (const index of lane) {
+          const family = familyOf(await providerIdOf(entries[index], providers, resolveProvider), entries[index], families.splitByHost);
+          if (family == null) continue;
+          if (!familyLanes.has(family)) familyLanes.set(family, new Set());
+          familyLanes.get(family).add(key);
+          if (!laneFamily.has(lane)) laneFamily.set(lane, family);
+        }
+      }
+      const cap = (lane) => { const family = laneFamily.get(lane); return shared(family) ? families.lanes.get(family) ?? families.lanesDefault : Infinity; };
+      const running = new Map();
+      let finished = null;
+      const nextFinish = () => (finished ??= Promise.withResolvers()).promise;
+      await Promise.all(Array.from({ length: limit }, async () => {
+        while (queue.length) {
+          // The first lane (longest first) whose family has room. None: some lane of each full family is running, so wait for one to end.
+          const at = queue.findIndex((lane) => (running.get(laneFamily.get(lane)) ?? 0) < cap(lane));
+          if (at < 0) { await nextFinish(); continue; }
+          const [lane] = queue.splice(at, 1);
+          const family = laneFamily.get(lane);
+          running.set(family, (running.get(family) ?? 0) + 1);
+          try { for (const index of lane) await fetchEntry(entries[index], index); } finally {
+            running.set(family, running.get(family) - 1);
+            const waiting = finished;
+            finished = null;
+            waiting?.resolve();
+          }
+        }
+      }));
+    }
   } finally { console.error = originalError; }
   return { roles: spoolDir ? [] : rolesByEntry.flat(), partitions, configuredPartitions, ...(spoolDir ? { spooled: true } : {}) };
+}
+
+// Every ctx request method of one entry takes a slot of its family's request budget first (plan v6 r3/r5). Pages,
+// retries (fetchJsonWithRetry calls ctx.fetchJson per attempt) and detail fetches all go through these methods.
+function withRequestBudget(ctx, family, limiter, onWait) {
+  const wrapped = { ...ctx };
+  for (const name of ['fetchJson', 'fetchText', 'fetchResponse']) {
+    if (typeof ctx?.[name] !== 'function') continue;
+    wrapped[name] = async (...args) => {
+      const slot = await limiter.acquire(family);
+      if (slot.waitedMs > 0) onWait(slot.waitedMs);
+      try { return await ctx[name](...args); } finally { slot.release(); }
+    };
+  }
+  return wrapped;
+}
+
+async function providerIdOf(entry, providers, resolveProvider) {
+  try {
+    const resolved = await resolveProvider(entry, providers);
+    let provider = resolved?.provider ?? resolved;
+    if (typeof provider === 'string') provider = providers.get?.(provider) ?? providers[provider];
+    return provider?.id ?? resolved?.id ?? resolved?.providerId ?? null;
+  } catch { return null; }
 }
 
 // The middle hop: runs the worker in a child process and passes each partition event line on to its own
@@ -433,8 +509,10 @@ async function rawWorker(root) {
   providers = await plugins.mergeProviderPlugins(providers, { root: base }) ?? providers;
   // Both are set by CAREER JOURNAL (config careerOps.scanConcurrency; a spool folder it owns and removes).
   const spoolDir = process.env.CAREER_JOURNAL_SCAN_SPOOL || undefined;
+  // careerOps.scanFamilies, checked by CAREER JOURNAL before the scan starts and checked again here.
+  const families = process.env.CAREER_JOURNAL_SCAN_FAMILIES ? parseScanFamilies(JSON.parse(process.env.CAREER_JOURNAL_SCAN_FAMILIES)) : null;
   return collectCareerOpsRaw({ portals, providers, resolveProvider: registry.resolveProvider, makeHttpCtx: http.makeHttpCtx,
-    concurrency: positive(process.env.CAREER_JOURNAL_SCAN_CONCURRENCY) ?? DEFAULT_SCAN_CONCURRENCY, spoolDir,
+    concurrency: positive(process.env.CAREER_JOURNAL_SCAN_CONCURRENCY) ?? DEFAULT_SCAN_CONCURRENCY, spoolDir, families,
     ...(({ known, watermarks, earlyStop, laneWeights }) => ({ knownListings: known, watermarks, earlyStop, laneWeights }))(readIncrementalInput(process.env.CAREER_JOURNAL_KNOWN_LISTINGS)),
     // A spooled entry is announced as soon as its file is written: one complete JSON line per entry, before
     // the result line that main() prints last. The roles stay in the file, so each line is small.

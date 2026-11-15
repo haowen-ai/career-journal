@@ -2,6 +2,7 @@ import { constants } from 'node:fs';
 import { access, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { executeCareerOpsProcess, MAX_RAW_SCAN_BYTES, parseResultLine, partitionEvent, splitLines } from './careerops-process.mjs';
+import { parseScanFamilies } from './scan-families.mjs';
 import { fileURLToPath } from 'node:url';
 
 const MAX_REQUEST_BYTES = 1_000_000;
@@ -113,6 +114,9 @@ export async function detectCareerOpsScan(config = {}) {
 // finished entry before the result line; `dependencies.onPartition(partition)` is called for each of them
 // while the scan runs. If it throws, the scan is stopped and its error is the scan's error.
 export async function runCareerOpsScan(config = {}, dependencies = {}) {
+  // Shared-infrastructure limits (plan v6): a malformed value is a configuration error, never silently ignored.
+  const families = config.scanFamilies ?? null;
+  if (families !== null) parseScanFamilies(families);
   const health = await detectCareerOpsScan(config);
   if (!health.ok) throw new Error(health.detail);
   const execute = dependencies.execute ?? executeProcess;
@@ -136,7 +140,8 @@ export async function runCareerOpsScan(config = {}, dependencies = {}) {
       maxBytes: MAX_RAW_SCAN_BYTES,
       // The built-in bridge writes each entry's roles into the spool folder (so its output stays small)
       // and reads this many hosts at once. Other bridges ignore both.
-      ...(config.scanSpoolDir || config.scanConcurrency || config.knownListingsFile ? { env: { ...process.env,
+      ...(config.scanSpoolDir || config.scanConcurrency || config.knownListingsFile || families ? { env: { ...process.env,
+        ...(families ? { CAREER_JOURNAL_SCAN_FAMILIES: JSON.stringify(families) } : {}),
         ...(config.scanSpoolDir ? { CAREER_JOURNAL_SCAN_SPOOL: String(config.scanSpoolDir) } : {}),
         ...(config.scanConcurrency ? { CAREER_JOURNAL_SCAN_CONCURRENCY: String(config.scanConcurrency) } : {}),
         // Listing ids each baselined list already has (src/funnel/seen.mjs); the built-in bridge passes them to providers.

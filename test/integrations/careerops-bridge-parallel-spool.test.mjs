@@ -196,3 +196,14 @@ test('spool folders left by a killed scan are removed after two days; recent one
   assert.equal(sweepStaleSpools(directory, now), 1);
   assert.deepEqual([existsSync(old), existsSync(fresh), existsSync(other)], [false, true, true]);
 }));
+
+test('runCareerOpsScan passes careerOps.scanFamilies to the bridge as JSON, and a malformed value stops the scan before it starts', async () => withTemp(async (root) => {
+  await scanRoot(root);
+  const calls = [];
+  const execute = async (options) => { calls.push(options); return { exitCode: 0, stdout: JSON.stringify({ ok: true, roles: [] }) }; };
+  const scanFamilies = { splitByHost: ['workday'], lanes: { default: 1, avature: 3 }, requestsPerMinute: { default: 30 } };
+  await runCareerOpsScan({ root, scanFamilies }, { execute });
+  assert.deepEqual(JSON.parse(calls[0].env.CAREER_JOURNAL_SCAN_FAMILIES), scanFamilies);
+  await assert.rejects(runCareerOpsScan({ root, scanFamilies: { lanes: { avature: 0 } } }, { execute }), /careerOps\.scanFamilies: lanes\.avature must be a positive integer/);
+  assert.equal(calls.length, 1, 'the malformed config never reaches the bridge');
+}));
