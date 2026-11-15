@@ -255,3 +255,21 @@ test('scanFamilies config: an explicit null list or map is rejected, not read as
     assert.throws(() => parseScanFamilies(bad), /scanFamilies/, JSON.stringify(bad));
   }
 });
+
+test('lanes: a split provider entry is scheduled under the configured family of the URL it really reads, skipping a foreign api (Codex code review r2-1)', async () => {
+  let running = 0;
+  let peak = 0;
+  const wd = { id: 'wd', fetch: async () => { running += 1; peak = Math.max(peak, running); await new Promise((resolve) => setTimeout(resolve, 5)); running -= 1; return []; } };
+  const entries = [
+    { name: 'A', api: 'https://api.a.example/feed', careers_url: 'https://a.wd1.myworkdayjobs.com/External' },
+    { name: 'B', api: 'https://api.b.example/feed', careers_url: 'https://b.wd1.myworkdayjobs.com/External' },
+  ];
+  const families = parseScanFamilies({ splitByHost: ['wd'], lanes: { 'wd|wd1.myworkdayjobs.com': 1 }, requestsPerMinute: { default: 30 } });
+  const result = await collect(entries, wd, { providers: { wd }, resolveProvider: async () => ({ provider: wd, id: 'wd' }), concurrency: 2, families });
+  assert.equal(peak, 1);
+  assert.deepEqual(result.partitions.map((p) => p.family), ['wd|wd1.myworkdayjobs.com', 'wd|wd1.myworkdayjobs.com']);
+  const known = new Set(['wd|wd1.myworkdayjobs.com']);
+  assert.equal(familyOf('wd', entries[0], new Set(['wd']), known), 'wd|wd1.myworkdayjobs.com');
+  assert.equal(familyOf('wd', { api: 'https://x.wd5.myworkdayjobs.com/wday/cxs/x/y/jobs', careers_url: 'https://x.wd1.myworkdayjobs.com/y' }, new Set(['wd']), new Set(['wd|wd1.myworkdayjobs.com', 'wd|wd5.myworkdayjobs.com'])),
+    'wd|wd5.myworkdayjobs.com', 'api first when both are configured families, as the provider reads it');
+});

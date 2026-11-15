@@ -37,28 +37,31 @@ export function parseScanFamilies(value) {
   if (!Array.isArray(split) || split.some((id) => typeof id !== 'string' || !id)) throw problem('splitByHost must be a list of provider ids');
   const lanes = limits(value.lanes, 'lanes');
   const rate = limits(value.requestsPerMinute, 'requestsPerMinute');
-  return { splitByHost: new Set(split), lanes: lanes.map, lanesDefault: lanes.fallback,
+  return { splitByHost: new Set(split), known: new Set([...lanes.map.keys(), ...rate.map.keys()]), lanes: lanes.map, lanesDefault: lanes.fallback,
     requestsPerMinute: rate.map, requestsPerMinuteDefault: rate.fallback };
 }
 
-// The host a split provider sends its requests to: `api` first, as the providers themselves read it.
-function requestHost(entry = {}) {
+// The hosts a split provider may send its requests to, in the order the providers read them: `api` first.
+function candidateHosts(entry = {}) {
+  const hosts = [];
   for (const key of ['api', 'careers_url', 'url', 'board_url', 'feed_url']) {
-    try { const url = new URL(String(entry[key])); if (/^https?:$/.test(url.protocol)) return url.host.toLowerCase(); } catch { /* not a URL */ }
+    try { const url = new URL(String(entry[key])); if (/^https?:$/.test(url.protocol)) hosts.push(url.host.toLowerCase()); } catch { /* not a URL */ }
   }
-  return null;
+  return hosts;
 }
 
 const hostFamily = (id, host) => { const labels = host.split('.'); return `${id}|${labels.length > 2 ? labels.slice(1).join('.') : host}`; };
 
-// The family an entry is scheduled under. For a split provider this is a guess from the entry's URLs (used for lane
-// caps only); its request budget follows each request's real host (familyOfRequest).
-export function familyOf(providerId, entry, splitByHost = new Set()) {
+// The family an entry is scheduled under (lane caps). For a split provider: the first of its URLs, in the provider's
+// own order, that falls in a configured family (`known`); a provider skips a URL that is not its own (Workday passes
+// over a foreign `api` and reads careers_url, Codex code review r2), and a configured family is one of its own.
+// Without such a URL, the first one. Its request budget always follows each request's real host (familyOfRequest).
+export function familyOf(providerId, entry, splitByHost = new Set(), known = new Set()) {
   if (!providerId) return null;
   const id = String(providerId);
   if (!splitByHost.has(id)) return id;
-  const host = requestHost(entry);
-  return host ? hostFamily(id, host) : id;
+  const candidates = candidateHosts(entry).map((host) => hostFamily(id, host));
+  return candidates.find((family) => known.has(family)) ?? candidates[0] ?? id;
 }
 
 // The family one request is budgeted under: a split provider by the host the request really goes to.

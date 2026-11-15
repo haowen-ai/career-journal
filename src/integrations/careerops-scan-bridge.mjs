@@ -328,7 +328,7 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
       provider = resolved?.provider ?? resolved;
       if (typeof provider === 'string') provider = providers.get?.(provider) ?? providers[provider];
       const providerId = provider?.id ?? resolved?.id ?? resolved?.providerId ?? null;
-      if (families) family = familyOf(providerId, entry, families.splitByHost);
+      if (families) family = familyOf(providerId, entry, families.splitByHost, families.known);
       if (!provider?.fetch) throw new Error('No provider for configured entry');
       partition = `${provider.id ?? resolved.id ?? resolved.providerId ?? 'unknown'}:${entry.name ?? entry.board ?? entry.url ?? ''}`;
       const request = withKeywordDefaults(entry, portals, provider.id ?? resolved.id ?? resolved.providerId ?? null);
@@ -420,7 +420,7 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
       for (const [key, lane] of lanes) {
         const set = new Set();
         for (const index of lane) {
-          const family = familyOf(await providerIdOf(entries[index], providers, resolveProvider), entries[index], families.splitByHost);
+          const family = familyOf(await providerIdOf(entries[index], providers, resolveProvider), entries[index], families.splitByHost, families.known);
           if (family == null) continue;
           set.add(family);
           if (!familyLanes.has(family)) familyLanes.set(family, new Set());
