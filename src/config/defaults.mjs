@@ -3,8 +3,8 @@ export const CONFIG_SCHEMA_VERSION = 1;
 
 // Incremental nightly (plan 2026-11-14 v2/v3.1), config.json `scan.incremental`. A list skips listings it already
 // recorded once a scan has baselined it. earlyStop: the career-ops providers that may stop paging a date-ordered list
-// at a fully known page older than the list's watermark minus marginHours.
-export const DEFAULT_INCREMENTAL = Object.freeze({ enabled: true, earlyStop: Object.freeze({ providers: Object.freeze(['oraclecloud', 'taleo']), marginHours: 72 }) });
+// at a fully known page older than the list's watermark minus marginHours (apple: the verified US whole board only, plan v5).
+export const DEFAULT_INCREMENTAL = Object.freeze({ enabled: true, earlyStop: Object.freeze({ providers: Object.freeze(['oraclecloud', 'taleo', 'apple']), marginHours: 72 }) });
 
 export function defaultConfig(now = new Date().toISOString(), timezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC') {
   return {

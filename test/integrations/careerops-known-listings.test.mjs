@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { collectCareerOpsRaw, earlyStopBound, readIncrementalInput } from '../../src/integrations/careerops-scan-bridge.mjs';
 import { fetchCareerOpsRoles, KNOWN_LISTINGS_FILE } from '../../src/scan/sources/careerops.mjs';
+import { incrementalSettings } from '../../src/funnel/seen.mjs';
 
 const job = (token) => ({ title: `Data Intern ${token}`, url: `https://acme.wd5.myworkdayjobs.com/x/job/Chicago/Data-Intern_${token}`, location: 'Chicago, IL', listingId: token });
 const collect = (entries, provider, extra = {}) => collectCareerOpsRaw({
@@ -51,6 +52,15 @@ test('only a configured provider with known listings and a watermark gets an ear
   assert.equal(earlyStopBound('workday', 'workday:Acme', input), null, 'Workday never stops early');
   assert.equal(earlyStopBound('oraclecloud', 'oraclecloud:Other', input), null, 'no known listings, no stop');
   assert.equal(earlyStopBound('oraclecloud', 'oraclecloud:Acme', { ...input, watermarks: new Map() }), null, 'no watermark, no stop');
+});
+
+test('by default Apple may stop early too (plan v5): its whole-board list gets a bound', () => {
+  const { earlyStop } = incrementalSettings({});
+  assert.deepEqual(earlyStop, { providers: ['oraclecloud', 'taleo', 'apple'], marginHours: 72 });
+  const wm = Date.parse('2026-11-15T03:00:00.000Z');
+  const input = { known: new Map([['apple:Apple', new Set(['200694950-0157'])]]), watermarks: new Map([['apple:Apple', wm]]), earlyStop };
+  assert.equal(earlyStopBound('apple', 'apple:Apple', input), wm - 72 * 3_600_000);
+  assert.equal(earlyStopBound('apple', 'apple:Apple', { ...input, earlyStop: incrementalSettings({ scan: { incremental: { earlyStop: { providers: ['oraclecloud'] } } } }).earlyStop }), null, 'config can turn it off');
 });
 
 test('the bridge passes the bound to the provider and reports its collection status', async () => {

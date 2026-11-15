@@ -231,3 +231,16 @@ test('an early-stopped list is not compared with the count baseline and never fe
   const full = await coScan(db, 'scan-5', at(4), [{ partition: ORC, records: rows(20), collection: 'complete' }]);
   assert.equal(full.sources.find((item) => item.partition === ORC).baseline, 20, 'the baseline median reads full reads only');
 });
+
+// ---- plan v5: Apple whole-board early stop. An unverified read (the board's total changed while paging) is partial and
+// never moves the watermark; complete and early_stopped do. ----
+test('an Apple list: complete sets the watermark, unverified keeps it, early_stopped moves it', async () => {
+  const db = freshDb();
+  const APPLE = 'apple:Apple';
+  await coScan(db, 'scan-1', T0, [{ partition: APPLE, records: [coRow(APPLE, 1)], collection: 'complete' }]);
+  assert.deepEqual(watermarks(db), { [APPLE]: T0 });
+  await coScan(db, 'scan-2', at(1), [{ partition: APPLE, records: [coRow(APPLE, 2)], collection: 'unverified', status: 'partial', truncated: true }]);
+  assert.deepEqual(watermarks(db), { [APPLE]: T0 }, 'a board whose total changed mid-read proves nothing');
+  await coScan(db, 'scan-3', at(2), [{ partition: APPLE, records: [coRow(APPLE, 3)], collection: 'early_stopped' }]);
+  assert.deepEqual(watermarks(db), { [APPLE]: at(2) });
+});

@@ -19,7 +19,7 @@ import { previousLaneWeights } from './lane-weights.mjs';
 // the returned `batches`. Every other batch is returned for the caller to ingest after collection.
 // `knownListings` ({ partition: Set(listing ids) } of baselined CareerOps lists, or null) lets a provider skip the
 // detail requests of listings the journal already has (plan 2026-11-14 v2 step 2).
-// `watermarks` ({ partition: ISO } of baselined lists) and `earlyStop` (config) let Oracle Cloud / Taleo stop early.
+// `watermarks` ({ partition: ISO } of baselined lists) and `earlyStop` (config) let Oracle Cloud / Taleo / Apple stop early.
 export async function collectRoles(profile, { fetchImpl, careerOpsConfig, careerOpsDependencies, timeoutMs, deadlineAt, clock = Date.now, onBatch, knownListings = null, watermarks = null, earlyStop = null, laneWeights = null } = {}) {
   const parts = [];
   const beforeDeadline = () => !deadlineAt || clock() < Date.parse(deadlineAt);
