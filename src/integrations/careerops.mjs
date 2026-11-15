@@ -136,9 +136,11 @@ export async function runCareerOpsScan(config = {}, dependencies = {}) {
       maxBytes: MAX_RAW_SCAN_BYTES,
       // The built-in bridge writes each entry's roles into the spool folder (so its output stays small)
       // and reads this many hosts at once. Other bridges ignore both.
-      ...(config.scanSpoolDir || config.scanConcurrency ? { env: { ...process.env,
+      ...(config.scanSpoolDir || config.scanConcurrency || config.knownListingsFile ? { env: { ...process.env,
         ...(config.scanSpoolDir ? { CAREER_JOURNAL_SCAN_SPOOL: String(config.scanSpoolDir) } : {}),
-        ...(config.scanConcurrency ? { CAREER_JOURNAL_SCAN_CONCURRENCY: String(config.scanConcurrency) } : {}) } } : {}),
+        ...(config.scanConcurrency ? { CAREER_JOURNAL_SCAN_CONCURRENCY: String(config.scanConcurrency) } : {}),
+        // Listing ids each baselined list already has (src/funnel/seen.mjs); the built-in bridge passes them to providers.
+        ...(config.knownListingsFile ? { CAREER_JOURNAL_KNOWN_LISTINGS: String(config.knownListingsFile) } : {}) } } : {}),
       ...live,
     });
   } catch (error) { throw partitionError ?? error; }

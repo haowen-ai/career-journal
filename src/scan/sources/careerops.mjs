@@ -1,16 +1,18 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { detectCareerOpsScan, runCareerOpsScan } from '../../integrations/careerops.mjs';
 import { htmlToText } from '../text.mjs';
 import { httpUrl, isoDate, sourceError, text, uniqueStrings } from './common.mjs';
+import { nativeListingId } from '../listing-key.mjs';
 
 export function parseCareerOpsRoles(result) {
   return (Array.isArray(result?.roles) ? result.roles : []).map((item) => {
     item ??= {};
     const url = httpUrl(item.url);
     return {
-      source: 'careerops', sourceId: text(item.id) || url, partition: item.partition ?? 'all',
+      // listingId: the board's own id for this listing (listing-key.mjs), the seen key of the incremental scan.
+      source: 'careerops', sourceId: text(item.id) || url, listingId: nativeListingId({ ...item, url }), partition: item.partition ?? 'all',
       company: text(item.company), title: text(item.title), url,
       invalid: item.invalid || (!text(item.title) ? 'missing title' : !text(item.company) ? 'missing company' : !url ? 'missing http(s) URL' : null),
       locations: uniqueStrings(Array.isArray(item.locations) ? item.locations : [item.location]), offices: item.offices ?? [],
@@ -93,7 +95,10 @@ function spooledBatch(directory, source, spoolFile) {
 // (user 2026-11-09: a finished company is stored at once, not after the slowest one), and the returned
 // `batches` leave those entries out; `sources` still lists every partition. An error thrown by onBatch
 // stops the fetch and is thrown from here.
-export async function fetchCareerOpsRoles(enabled, careerOpsConfig, dependencies = {}, { onBatch } = {}) {
+// `knownListings` ({ partition: Set(listing ids) }): written to the spool folder for the bridge, whose providers
+// then skip detail requests for those listings (the rows themselves are still listed and delivered).
+export const KNOWN_LISTINGS_FILE = 'known-listings.json';
+export async function fetchCareerOpsRoles(enabled, careerOpsConfig, dependencies = {}, { onBatch, knownListings = null } = {}) {
   const skipped = (detail) => ({ sources: [{ source: 'careerops', partition: 'all', status: 'skipped', count: 0, rawCount: 0, truncated: false, detail }], batches: [], roles: [] });
   if (!enabled) return skipped('not enabled in the profile');
   const health = await (dependencies.detect ?? detectCareerOpsScan)(careerOpsConfig ?? {});
@@ -120,7 +125,12 @@ export async function fetchCareerOpsRoles(enabled, careerOpsConfig, dependencies
     return !count;
   };
   try {
-    const parsed = parseCareerOpsRaw(await runCareerOpsScan({ ...(careerOpsConfig ?? {}), scanSpoolDir: spoolDir }, { ...dependencies, ...live }));
+    let knownListingsFile;
+    if (knownListings && Object.keys(knownListings).length) {
+      knownListingsFile = path.join(spoolDir, KNOWN_LISTINGS_FILE);
+      writeFileSync(knownListingsFile, JSON.stringify(Object.fromEntries(Object.entries(knownListings).map(([partition, ids]) => [partition, [...ids]]))));
+    }
+    const parsed = parseCareerOpsRaw(await (dependencies.run ?? runCareerOpsScan)({ ...(careerOpsConfig ?? {}), scanSpoolDir: spoolDir, ...(knownListingsFile ? { knownListingsFile } : {}) }, { ...dependencies, ...live }));
     if (parsed.spoolFiles) {
       const { spoolFiles, ...rest } = parsed;
       return { ...rest, dispose, batches: parsed.sources.flatMap((source, index) => pending(source.partition) ? [spooledBatch(spoolDir, source, spoolFiles[index])] : []) };

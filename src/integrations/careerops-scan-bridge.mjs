@@ -19,9 +19,11 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { nativeListingId } from '../scan/listing-key.mjs';
 
 export const WIDE_TITLE_FILTER = Object.freeze([
   'word:intern', 'word:interns', 'stem:internship', 'co-op', 'word:coop', 'stem:apprentice',
@@ -32,7 +34,15 @@ export const WIDE_TITLE_FILTER = Object.freeze([
 const REPLACED_SECTIONS = new Set(['title_filter', 'location_filter']);
 const MAX_FIELD_CHARS = 4000;
 const IDENTITY_FIELDS = new Set(['id', 'sourceId', 'source', 'company', 'company_name', 'title', 'url',
-  'applyUrl', 'hostedUrl', 'jobUrl', 'location', 'locations', 'requisitionId', 'jobReqId', 'partition']);
+  'applyUrl', 'hostedUrl', 'jobUrl', 'location', 'locations', 'requisitionId', 'jobReqId', 'partition', 'listingId', 'externalId']);
+
+// The listing ids each baselined list already has (CAREER JOURNAL writes them, src/scan/sources/careerops.mjs):
+// { partition: [ids] } as a Map of Sets. No file, no known listings.
+export function readKnownListings(file) {
+  if (!file) return new Map();
+  const parsed = JSON.parse(readFileSync(file, 'utf8'));
+  return new Map(Object.entries(parsed ?? {}).map(([partition, ids]) => [partition, new Set(Array.isArray(ids) ? ids.map(String) : [])]));
+}
 
 // Rewrites portals.yml text: drops the top-level title_filter and location_filter blocks and
 // appends an internship-only title filter. Every other block, including tracked_companies,
@@ -251,8 +261,11 @@ export function searchMeta(search) {
 // bounded by its largest entry instead of by the whole inventory. `onPartition(meta)` is called with each
 // entry's partition report (the same object the returned `partitions` keeps) as soon as that entry is done
 // and its spool file is written, so the caller can store it while the other entries are still fetched.
+// `knownListings` (Map partition → Set of listing ids, see readKnownListings): a provider of such a list gets
+// `ctx.isKnownListing(job)` and may skip per-listing detail requests for known ones (plan 2026-11-14 v2 step 2).
+// It must still return every listing of the list: the journal skips known rows itself and health counts the list.
 export async function collectCareerOpsRaw({ portals, providers, resolveProvider, makeHttpCtx, sleep = defaultSleep, retryDelaysMs = RETRY_DELAYS_MS,
-  concurrency = 1, spoolDir, onPartition }) {
+  concurrency = 1, spoolDir, onPartition, knownListings = new Map() }) {
   // `enabled: false` turns an entry off (CareerOps's own scan skips it too); it then leaves the
   // configured inventory, so its partition is retired instead of failing every night.
   const entries = [...(portals.tracked_companies ?? []), ...(portals.job_boards ?? [])].filter((entry) => entry?.enabled !== false);
@@ -279,12 +292,15 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
       if (!provider?.fetch) throw new Error('No provider for configured entry');
       partition = `${provider.id ?? resolved.id ?? resolved.providerId ?? 'unknown'}:${entry.name ?? entry.board ?? entry.url ?? ''}`;
       const request = withKeywordDefaults(entry, portals, provider.id ?? resolved.id ?? resolved.providerId ?? null);
+      const known = knownListings.get(partition);
       let jobs;
       for (;;) {
         attempts += 1;
         scope.capDetected = false;
         try {
-          jobs = await provider.fetch(request, withEntryTimeout(await makeHttpCtx(request, portals), request));
+          const ctx = withEntryTimeout(await makeHttpCtx(request, portals), request);
+          if (known?.size) ctx.isKnownListing = (job) => known.has(nativeListingId(job));
+          jobs = await provider.fetch(request, ctx);
           break;
         } catch (error) {
           if (attempts > retryDelaysMs.length || !isTransientError(error)) throw error;
@@ -391,6 +407,7 @@ async function rawWorker(root) {
   const spoolDir = process.env.CAREER_JOURNAL_SCAN_SPOOL || undefined;
   return collectCareerOpsRaw({ portals, providers, resolveProvider: registry.resolveProvider, makeHttpCtx: http.makeHttpCtx,
     concurrency: positive(process.env.CAREER_JOURNAL_SCAN_CONCURRENCY) ?? DEFAULT_SCAN_CONCURRENCY, spoolDir,
+    knownListings: readKnownListings(process.env.CAREER_JOURNAL_KNOWN_LISTINGS),
     // A spooled entry is announced as soon as its file is written: one complete JSON line per entry, before
     // the result line that main() prints last. The roles stay in the file, so each line is small.
     ...(spoolDir ? { onPartition: (partition) => process.stdout.write(`${JSON.stringify({ event: PARTITION_EVENT, partition })}\n`) } : {}) });
