@@ -12,6 +12,7 @@ import { DEFAULT_SIMPLIFY_TIMEOUT_MS, fetchSimplify, simplifyUrls } from './sour
 import { redact } from '../runtime/redact.mjs';
 import { assertScanOwner } from '../funnel/scan-lease.mjs';
 import { advanceWatermarks, baselinedLists, knownListingsOf, listKey, recordBaselines, watermarksOf } from '../funnel/seen.mjs';
+import { previousLaneWeights } from './lane-weights.mjs';
 
 // All configured partitions are collected in order; each starts only before the deadline.
 // `onBatch(batch)` receives CareerOps entries the moment each one is fetched; they are then left out of
@@ -19,7 +20,7 @@ import { advanceWatermarks, baselinedLists, knownListingsOf, listKey, recordBase
 // `knownListings` ({ partition: Set(listing ids) } of baselined CareerOps lists, or null) lets a provider skip the
 // detail requests of listings the journal already has (plan 2026-11-14 v2 step 2).
 // `watermarks` ({ partition: ISO } of baselined lists) and `earlyStop` (config) let Oracle Cloud / Taleo stop early.
-export async function collectRoles(profile, { fetchImpl, careerOpsConfig, careerOpsDependencies, timeoutMs, deadlineAt, clock = Date.now, onBatch, knownListings = null, watermarks = null, earlyStop = null } = {}) {
+export async function collectRoles(profile, { fetchImpl, careerOpsConfig, careerOpsDependencies, timeoutMs, deadlineAt, clock = Date.now, onBatch, knownListings = null, watermarks = null, earlyStop = null, laneWeights = null } = {}) {
   const parts = [];
   const beforeDeadline = () => !deadlineAt || clock() < Date.parse(deadlineAt);
   const options = (defaultTimeoutMs = 30_000) => ({ timeoutMs: deadlineAt ? Math.max(1, Math.min(timeoutMs ?? defaultTimeoutMs, Date.parse(deadlineAt) - clock())) : timeoutMs });
@@ -38,7 +39,7 @@ export async function collectRoles(profile, { fetchImpl, careerOpsConfig, career
   if (beforeDeadline()) {
     const config = { ...careerOpsConfig };
     if (deadlineAt) config.scanTimeoutMs = Math.max(1, Math.min(config.scanTimeoutMs ?? Infinity, Date.parse(deadlineAt) - clock()));
-    parts.push(await fetchCareerOpsRoles(profile.sources.careerOps, config, careerOpsDependencies, { onBatch, knownListings, watermarks, earlyStop }));
+    parts.push(await fetchCareerOpsRoles(profile.sources.careerOps, config, careerOpsDependencies, { onBatch, knownListings, watermarks, earlyStop, laneWeights }));
   }
   const settings = profile.sources.simplify;
   const urls = simplifyUrls(settings);
@@ -156,8 +157,10 @@ export async function runScan(options) {
     };
     const knownListings = baselines.size ? knownListingsOf(db, 'careerops', baselines) : null;
     const watermarks = baselines.size ? watermarksOf(db, 'careerops', baselines) : null;
+    // Read before this run's own receipt exists: the previous finished scan's fetch time per entry (plan v4).
+    const laneWeights = previousLaneWeights(db);
     collected = await (collect ?? collectRoles)(profile, { fetchImpl, careerOpsConfig, careerOpsDependencies, timeoutMs: options.timeoutMs, deadlineAt, clock, onBatch,
-      knownListings, watermarks, earlyStop: incremental?.earlyStop ?? null });
+      knownListings, watermarks, earlyStop: incremental?.earlyStop ?? null, laneWeights });
     if (heartbeatError) throw heartbeatError;
     assertScanOwner(db, runId, owner);
     // Batches the collector returned (boards, Simplify, a CareerOps scan that did not stream) are written now.

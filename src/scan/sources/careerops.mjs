@@ -98,9 +98,10 @@ function spooledBatch(directory, source, spoolFile) {
 // `knownListings` ({ partition: Set(listing ids) }): written to the spool folder for the bridge, whose providers
 // then skip detail requests for those listings (the rows themselves are still listed and delivered). `watermarks`
 // ({ partition: ISO }) and `earlyStop` ({ providers, marginHours }) go in the same file: a listed provider may stop
-// paging a date-ordered list early (plan 2026-11-14 v3.1). File: { known, watermarks, earlyStop }.
+// paging a date-ordered list early (plan 2026-11-14 v3.1). `laneWeights` ({ entry name: ms }, the previous scan's fetch
+// times) lets the bridge start the slowest hosts first (plan v4). File: { known, watermarks, earlyStop, elapsed }.
 export const KNOWN_LISTINGS_FILE = 'known-listings.json';
-export async function fetchCareerOpsRoles(enabled, careerOpsConfig, dependencies = {}, { onBatch, knownListings = null, watermarks = null, earlyStop = null } = {}) {
+export async function fetchCareerOpsRoles(enabled, careerOpsConfig, dependencies = {}, { onBatch, knownListings = null, watermarks = null, earlyStop = null, laneWeights = null } = {}) {
   const skipped = (detail) => ({ sources: [{ source: 'careerops', partition: 'all', status: 'skipped', count: 0, rawCount: 0, truncated: false, detail }], batches: [], roles: [] });
   if (!enabled) return skipped('not enabled in the profile');
   const health = await (dependencies.detect ?? detectCareerOpsScan)(careerOpsConfig ?? {});
@@ -128,11 +129,13 @@ export async function fetchCareerOpsRoles(enabled, careerOpsConfig, dependencies
   };
   try {
     let knownListingsFile;
-    if (knownListings && Object.keys(knownListings).length) {
+    const hasKnown = knownListings && Object.keys(knownListings).length;
+    const hasWeights = laneWeights && Object.keys(laneWeights).length;
+    if (hasKnown || hasWeights) {
       knownListingsFile = path.join(spoolDir, KNOWN_LISTINGS_FILE);
       writeFileSync(knownListingsFile, JSON.stringify({
-        known: Object.fromEntries(Object.entries(knownListings).map(([partition, ids]) => [partition, [...ids]])),
-        watermarks: watermarks ?? {}, ...(earlyStop ? { earlyStop } : {}) }));
+        known: hasKnown ? Object.fromEntries(Object.entries(knownListings).map(([partition, ids]) => [partition, [...ids]])) : {},
+        watermarks: watermarks ?? {}, ...(earlyStop ? { earlyStop } : {}), ...(hasWeights ? { elapsed: laneWeights } : {}) }));
     }
     const parsed = parseCareerOpsRaw(await (dependencies.run ?? runCareerOpsScan)({ ...(careerOpsConfig ?? {}), scanSpoolDir: spoolDir, ...(knownListingsFile ? { knownListingsFile } : {}) }, { ...dependencies, ...live }));
     if (parsed.spoolFiles) {

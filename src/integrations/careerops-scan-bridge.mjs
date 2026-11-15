@@ -37,17 +37,19 @@ const IDENTITY_FIELDS = new Set(['id', 'sourceId', 'source', 'company', 'company
   'applyUrl', 'hostedUrl', 'jobUrl', 'location', 'locations', 'requisitionId', 'jobReqId', 'partition', 'listingId', 'externalId']);
 
 // What CAREER JOURNAL knows about each baselined list (src/scan/sources/careerops.mjs writes it):
-// { known: { partition: [ids] }, watermarks: { partition: ISO }, earlyStop: { providers, marginHours } }.
-// Returns { known: Map(partition → Set), watermarks: Map(partition → ms), earlyStop }. No file, nothing known.
+// { known: { partition: [ids] }, watermarks: { partition: ISO }, earlyStop: { providers, marginHours }, elapsed: { name: ms } }.
+// Returns { known: Map(partition → Set), watermarks: Map(partition → ms), earlyStop, laneWeights: Map(entry name → ms) }.
+// No file, nothing known.
 export function readIncrementalInput(file) {
-  const empty = { known: new Map(), watermarks: new Map(), earlyStop: null };
+  const empty = { known: new Map(), watermarks: new Map(), earlyStop: null, laneWeights: new Map() };
   if (!file) return empty;
   const parsed = JSON.parse(readFileSync(file, 'utf8')) ?? {};
   const known = new Map(Object.entries(parsed.known ?? {}).map(([partition, ids]) => [partition, new Set(Array.isArray(ids) ? ids.map(String) : [])]));
   const watermarks = new Map(Object.entries(parsed.watermarks ?? {}).map(([partition, iso]) => [partition, Date.parse(iso)]).filter(([, ms]) => Number.isFinite(ms)));
   const early = parsed.earlyStop;
   const earlyStop = early && Array.isArray(early.providers) && Number.isFinite(early.marginHours) ? { providers: early.providers.map(String), marginHours: early.marginHours } : null;
-  return { known, watermarks, earlyStop };
+  const laneWeights = new Map(Object.entries(parsed.elapsed ?? {}).filter(([, ms]) => Number.isFinite(ms) && ms >= 0));
+  return { known, watermarks, earlyStop, laneWeights };
 }
 
 // The bound below which a fully known, date-ordered page may end the read of this list, or null.
@@ -280,8 +282,10 @@ export function searchMeta(search) {
 // `watermarks` / `earlyStop` (readIncrementalInput): a configured provider also gets ctx.earlyStopBeforeMs and may stop
 // paging early; its `jobs.collection.status` (complete | early_stopped | page_failed | ceiling | unverified) is reported as the
 // partition's `collection`, with `collectionMode` early_stopped or full.
+// `laneWeights` (Map entry name → elapsed ms of the previous scan): hosts start longest lane first (plan v4), so a slow
+// host does not start last and set the wall time; hosts without a weight follow in configured order. Order only.
 export async function collectCareerOpsRaw({ portals, providers, resolveProvider, makeHttpCtx, sleep = defaultSleep, retryDelaysMs = RETRY_DELAYS_MS,
-  concurrency = 1, spoolDir, onPartition, knownListings = new Map(), watermarks = new Map(), earlyStop = null }) {
+  concurrency = 1, spoolDir, onPartition, knownListings = new Map(), watermarks = new Map(), earlyStop = null, laneWeights = new Map() }) {
   // `enabled: false` turns an entry off (CareerOps's own scan skips it too); it then leaves the
   // configured inventory, so its partition is retired instead of failing every night.
   const entries = [...(portals.tracked_companies ?? []), ...(portals.job_boards ?? [])].filter((entry) => entry?.enabled !== false);
@@ -378,7 +382,9 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
       if (!lanes.has(key)) lanes.set(key, []);
       lanes.get(key).push(index);
     });
-    const queue = [...lanes.values()];
+    const weight = (lane) => lane.reduce((sum, index) => sum + (laneWeights.get(String(entries[index].name ?? entries[index].board ?? entries[index].url ?? '')) ?? 0), 0);
+    // Array.prototype.sort is stable: equal weights (and every unweighted lane) keep the configured order.
+    const queue = [...lanes.values()].map((lane) => [lane, weight(lane)]).sort((a, b) => b[1] - a[1]).map(([lane]) => lane);
     const limit = Math.max(1, Math.min(positive(concurrency) ?? 1, queue.length || 1));
     await Promise.all(Array.from({ length: limit }, async () => {
       for (let lane = queue.shift(); lane; lane = queue.shift()) for (const index of lane) await fetchEntry(entries[index], index);
@@ -429,7 +435,7 @@ async function rawWorker(root) {
   const spoolDir = process.env.CAREER_JOURNAL_SCAN_SPOOL || undefined;
   return collectCareerOpsRaw({ portals, providers, resolveProvider: registry.resolveProvider, makeHttpCtx: http.makeHttpCtx,
     concurrency: positive(process.env.CAREER_JOURNAL_SCAN_CONCURRENCY) ?? DEFAULT_SCAN_CONCURRENCY, spoolDir,
-    ...(({ known, watermarks, earlyStop }) => ({ knownListings: known, watermarks, earlyStop }))(readIncrementalInput(process.env.CAREER_JOURNAL_KNOWN_LISTINGS)),
+    ...(({ known, watermarks, earlyStop, laneWeights }) => ({ knownListings: known, watermarks, earlyStop, laneWeights }))(readIncrementalInput(process.env.CAREER_JOURNAL_KNOWN_LISTINGS)),
     // A spooled entry is announced as soon as its file is written: one complete JSON line per entry, before
     // the result line that main() prints last. The roles stay in the file, so each line is small.
     ...(spoolDir ? { onPartition: (partition) => process.stdout.write(`${JSON.stringify({ event: PARTITION_EVENT, partition })}\n`) } : {}) });
