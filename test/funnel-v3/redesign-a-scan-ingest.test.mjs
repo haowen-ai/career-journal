@@ -119,7 +119,7 @@ test('[A1] an unlisted Simplify listing that matches nothing is counted; one tha
   assert.deepEqual([second.stored, second.countedOnly], [1, 0], 'a known posting seen unlisted keeps today\'s path');
 });
 
-test('[A1] an eligible lead keeps full sightings, even from a record without a student signal, and still closes after two censuses without it', async () => {
+test('[A1] an eligible lead keeps full sightings, even from a record without a student signal; two censuses without it plus a 404 do not close it (plan 2026-11-14 v2 step 4)', async () => {
   const db = freshDb();
   const profile = { ...PROFILE, sources: { expected: ['atsBoards'], atsBoards: [{ ats: 'greenhouse', board: 'examplecorp' }] } };
   const noise = (k) => Array.from({ length: 3 }, (_, i) => role(500 + i, { ...NO_SIGNAL, title: `Staff Engineer ${k}-${i}` }));
@@ -144,7 +144,8 @@ test('[A1] an eligible lead keeps full sightings, even from a record without a s
   const judges = { primary: fakeJudge({ tier: 'primary', answers: () => ({ output: JUDGMENTS.eligible }) }), escalation: fakeJudge({ tier: 'escalation', answers: () => ({ output: JUDGMENTS.eligible }) }) };
   await runReview({ db, runId: 'review-1', owner: 'worker-a', now: at(4), budget: 10, deadlineMs: 600_000, attemptDir: null, sleep: async () => {},
     fetcher: fakeFetcher({ [urlOf(1)]: { ok: false, httpStatus: 404, error: 'not found' } }), judges, inputs: () => reviewInputs(), hooks: {} });
-  assert.equal(db.prepare('SELECT availability FROM postings WHERE id=?').get(lead).availability, 'closed_verified', 'absent from two healthy censuses: closed');
+  assert.equal(db.prepare('SELECT availability FROM postings WHERE id=?').get(lead).availability, 'unavailable', 'absent from two healthy censuses and 404: retried, not closed');
+  assert.notEqual(reviewOf(db, lead).code, 'closed_verified');
 });
 
 test('[A1/A4] the scan receipt conserves every fetched record per source and times each ingest batch', async () => {

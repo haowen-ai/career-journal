@@ -338,7 +338,7 @@ function seedSightingRow(db, { runId, postingId, partition, at: when }) {
     .run(runId, postingId, observationId, 'greenhouse', partition, when);
 }
 
-test('[C] pruning old sightings does not erase the partition membership closure depends on (merged #9)', async () => {
+test('[C] pruning old sightings never turns a 404 into a closure, with or without healthy censuses (merged #9; plan 2026-11-14 v2 step 4)', async () => {
   const { retentionPolicy, prune } = await pruneModule();
   const { runReview } = await workerModule();
   const NOW = '2027-06-01T03:00:00.000Z';
@@ -371,7 +371,9 @@ test('[C] pruning old sightings does not erase the partition membership closure 
     const availability = (id) => db.prepare('SELECT availability FROM postings WHERE id = ?').get(id).availability;
     assert.notEqual(availability('p-two'), 'closed_verified', 'partition A never had two healthy censuses, so closure is not proven');
     assert.notEqual(reviewOf(db, 'p-two').code, 'closed_verified');
-    assert.equal(availability('p-only-b'), 'closed_verified', 'a posting absent from two healthy censuses of its only partition still closes');
+    // Census absence no longer closes anything: a 404 stays unavailable and is retried (then read in a browser).
+    assert.equal(availability('p-only-b'), 'unavailable', 'absent from two healthy censuses of its only partition: still not closed');
+    assert.notEqual(reviewOf(db, 'p-only-b').code, 'closed_verified');
   });
 });
 
@@ -560,11 +562,14 @@ test('[C] retention recovery adopts only recoverable judgments, in the envelope 
 test('[C] raw-log retention keeps the judgment an unchanged page reuses (merged #15)', async () => {
   const { retentionPolicy, prune } = await pruneModule();
   const { runReview } = await workerModule();
-  // Control: without pruning, an unchanged day-16 refresh costs nothing.
+  // Control: without pruning, an unchanged day-16 refresh costs nothing. Runs no longer schedule refreshes (plan
+  // 2026-11-14 v2 step 5), so the refresh is queued by hand, as `review rejudge` or a recheck would.
+  const requeue = (database, postingId) => database.prepare("UPDATE reviews SET state='due', stage='fetch', lane='refresh', next_due=? WHERE posting_id=?").run(at(16), postingId);
   const control = freshDb();
   const cq = queue();
-  cq.add(control);
+  const controlId = cq.add(control);
   await runReview(runOptions(control, { pages: cq.pages }));
+  requeue(control, controlId);
   const controlJudges = eligibleJudges();
   await runReview(runOptions(control, { now: at(16), runId: 'review-16', pages: cq.pages, judges: controlJudges }));
   assert.equal(controlJudges.primary.calls.length, 0, 'control: unchanged content is reused');
@@ -576,6 +581,7 @@ test('[C] raw-log retention keeps the judgment an unchanged page reuses (merged 
     await runReview(runOptions(db, { pages: q.pages, attemptDir }));
     assert.equal(reviewOf(db, id).decision, 'eligible');
     await prune(db, home, { now: at(16), policy: retentionPolicy(REVIEW_POLICY), dryRun: false });
+    requeue(db, id);
     const same = { fetcher: fakeFetcher(q.pages), judges: eligibleJudges() };
     await runReview(runOptions(db, { now: at(16), runId: 'review-16', attemptDir, ...same }));
     assert.equal(same.fetcher.calls.length, 1, 'the active lead is refreshed');

@@ -15,12 +15,11 @@ import { segmentSections } from './clauses.mjs';
 import { decide } from './decide.mjs';
 import { validateSnapshot } from './fetch.mjs';
 import { applyCompanyCap, deliver, deliveryPolicy, heldReleaseBlock, keepHold, logReview, parseJson, requeueSystemFailures, suppressSubmittedDuplicates } from './deliver.mjs';
-import { scheduleRefresh, recheckHolds } from './freshness.mjs';
+import { recheckHolds } from './freshness.mjs';
 import { redact } from '../runtime/redact.mjs';
 import { reviewOwnershipJoins, userDecisionSql } from './ownership.mjs';
 import { createReviewScheduler } from './schedule.mjs';
 import { cachedJudgment, judgmentEnvelope, rememberJudgment } from './judgment-cache.mjs';
-import { postingPartitions } from '../funnel/membership.mjs';
 import { awaitingUserSummary } from './awaiting-user.mjs';
 import { releaseHolds, MODEL_HOLD_CODES, releasedInputsHash } from './release-holds.mjs';
 import { dependencyComparison } from './dependency-compat.mjs';
@@ -223,15 +222,6 @@ export function replan(db, { inputs, now, runtimeDeps, comparison }) {
   return { requeued };
 }
 
-function absentFromCensuses(db, postingId) {
-  const partitions = postingPartitions(db, postingId);
-  return partitions.length > 0 && partitions.every(({ source, partition, lastSeen }) => {
-    const recent = db.prepare(`SELECT s.run_id,r.started_at FROM run_sources s JOIN runs r ON r.run_id=s.run_id
-      WHERE s.source=? AND s.partition=? AND s.status IN ('ok','empty') ORDER BY r.started_at DESC,r.rowid DESC LIMIT 2`).all(source, partition);
-    return recent.length === 2 && recent.every((r) => r.started_at >= lastSeen && !db.prepare('SELECT 1 FROM observation_sightings WHERE run_id=? AND posting_id=? AND source=? AND partition=?').get(r.run_id, postingId, source, partition));
-  });
-}
-
 export async function runReview({ db, runId, parentRunId = null, owner, now, budget, maxFetches = Infinity, concurrency = 1,
   deadlineMs, deadlineAt, clock = Date.now, wallClock = () => new Date().toISOString(), fetcher, judges, secondOpinion, jev, attemptDir, sleep, inputs,
   resolveCompanySizes = null, hooks = {} }) {
@@ -326,7 +316,10 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
   }
   if (!halted) {
   releaseHolds(db, { now, provenance: current.provenance, inputs: current, codes: ['provenance_unknown'] });
-  scheduleRefresh(db, { now, policy: current.policy }); recheckHolds(db, { now, screeningPolicy: current.screeningPolicy }); replan(db, { inputs: current, now, runtimeDeps, comparison });
+  // Plan 2026-11-14 v2 step 5: scheduleRefresh (the seven-day refresh lane and its near-deadline rule) is not called.
+  // The incremental scan never re-reads an old listing, so whether a queued lead is still open is checked when it is
+  // applied to (apply agents and precheck), not on a schedule.
+  recheckHolds(db, { now, screeningPolicy: current.screeningPolicy }); replan(db, { inputs: current, now, runtimeDeps, comparison });
   const currentState = inputState(current);
   // Actual adapter/CLI dependencies are available only after adapter.ready.
   atomic(db, () => {
@@ -544,7 +537,10 @@ export async function runReview({ db, runId, parentRunId = null, owner, now, bud
     atomic(db, () => {
       assertFence(db, id, fence);
       db.prepare('UPDATE reviews SET attempts=attempts+1 WHERE posting_id=?').run(id);
-      if (result.closedWording && (validation.identityOk || validation.reason === 'too_short') || validation.reason === 'not_found' && absentFromCensuses(db, id)) {
+      // Only closure wording on the page closes a posting (plan 2026-11-14 v2 step 4). A 404/410 is never closure
+      // evidence on its own (fetch.mjs reads it before any bot-wall check): it keeps the retry path below and goes
+      // to a browser read after three attempts, however many censuses no longer list the posting.
+      if (result.closedWording && (validation.identityOk || validation.reason === 'too_short')) {
         db.prepare("UPDATE postings SET availability='closed_verified',updated_at=? WHERE id=?").run(now, id);
         deliver(db, { postingId: id, fence, verdict: { decision: 'not_eligible', code: 'closed_verified' }, now, policy: deliveryPolicy(current) });
         markSeen(row); return;

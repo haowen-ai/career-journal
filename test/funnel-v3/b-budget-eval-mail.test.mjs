@@ -818,19 +818,27 @@ test('[B] adding the missing fact does not re-queue a settled missing_fact decis
   assert.equal(reviewOf(db, id).state, 'done');
 });
 
-test('[B] active leads are refreshed automatically and unchanged pages cost nothing', async () => {
+// Plan 2026-11-14 v2 step 5: review runs no longer refresh active leads on a schedule (liveness is checked when a lead
+// is applied to). A refresh queued by hand still costs nothing for an unchanged page and re-judges a changed one.
+test('[B] active leads are not refreshed automatically; a queued refresh of an unchanged page costs nothing', async () => {
   const { runReview } = await workerModule();
   const db = freshDb();
   const q = queue();
   const id = q.add(db);
   await runReview(runOptions(db, { pages: q.pages }));
   assert.ok(applicationOf(db, id));
+  const idle = { fetcher: fakeFetcher(q.pages), judges: eligibleJudges() };
+  await runReview(runOptions(db, { now: at(8), runId: 'review-8', ...idle }));
+  assert.equal(idle.fetcher.calls.length, 0, 'no scheduled refresh');
+  const requeue = (now) => db.prepare("UPDATE reviews SET state='due', stage='fetch', lane='refresh', next_due=? WHERE posting_id=?").run(now, id);
+  requeue(at(9));
   const same = { fetcher: fakeFetcher(q.pages), judges: eligibleJudges() };
-  await runReview(runOptions(db, { now: at(8), runId: 'review-8', ...same }));
-  assert.equal(same.fetcher.calls.length, 1, 'the active lead is re-fetched without manual state edits');
+  await runReview(runOptions(db, { now: at(9), runId: 'review-9', ...same }));
+  assert.equal(same.fetcher.calls.length, 1);
   assert.equal(same.judges.primary.calls.length, 0, 'same content costs nothing');
   const url = Object.keys(q.pages)[0];
   q.pages[url] = page(url, `${SNAPSHOTS.eligible}\nNew: the team now also uses a warehouse tool.\n`);
+  requeue(at(16));
   const changed = { fetcher: fakeFetcher(q.pages), judges: eligibleJudges() };
   await runReview(runOptions(db, { now: at(16), runId: 'review-16', ...changed }));
   assert.equal(changed.judges.primary.calls.length, 1);

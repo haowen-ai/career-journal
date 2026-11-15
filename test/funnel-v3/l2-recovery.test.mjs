@@ -206,7 +206,11 @@ test('[L2] a 404 makes the posting unavailable with rechecks, never closed_verif
   assert.ok(reviewOf(db, 'p-404').next_due > T0);
 });
 
-test('[L2] closed_verified needs detail absent plus two consecutive successful censuses without the posting', async () => {
+// Plan 2026-11-14 v2 step 4: a page that answers 404 never closes a posting, not even when two healthy censuses
+// of its list no longer show it (the incremental scan does not look at old listings, and a 404 can be a bot wall).
+// It stays unavailable, is retried, and after three attempts goes to a browser read. Only closure wording on the
+// page itself closes it.
+test('[L2] a 404 never closes a posting, even absent from two successful censuses; after three attempts it goes to a browser read', async () => {
   const { runReview } = await worker();
   const db = freshDb();
   const one = item(db, 'p-closed');
@@ -217,8 +221,30 @@ test('[L2] closed_verified needs detail absent plus two consecutive successful c
     db.prepare("INSERT INTO runs (run_id, kind, owner, started_at, heartbeat_at, finished_at, status, receipt_json) VALUES (?, 'scan', 'x', ?, ?, ?, 'ok', '{}')").run(runId, T0, T0, T0);
     db.prepare("INSERT INTO run_sources (run_id, source, partition, status, count, errors, truncated, expected, detail) VALUES (?, 'greenhouse', 'greenhouse:examplecorp', 'ok', 10, 0, 0, 1, '')").run(runId);
   }
+  for (const [n, now] of [[1, T0], [2, at(2)], [3, at(6)]]) {
+    db.prepare("UPDATE reviews SET next_due=? WHERE posting_id='p-closed' AND state='due'").run(now);
+    await runReview(options(db, harness([one]), { runId: `review-${n}`, now }));
+    assert.notEqual(db.prepare("SELECT availability FROM postings WHERE id = 'p-closed'").get().availability, 'closed_verified', `attempt ${n}`);
+    assert.notEqual(reviewOf(db, 'p-closed').code, 'closed_verified');
+  }
+  assert.equal(db.prepare("SELECT availability FROM postings WHERE id = 'p-closed'").get().availability, 'unavailable');
+  assert.deepEqual([reviewOf(db, 'p-closed').state, reviewOf(db, 'p-closed').code], ['held', 'browser_review'], 'three failed reads: a browser read, not a closure');
+});
+
+// Plan 2026-11-14 v2 step 5: the seven-day refresh lane (and its near-deadline rule) is off; whether a lead is
+// still open is checked when it is applied to.
+test('[L2] a review run does not re-queue old or near-deadline queued leads for refresh', async () => {
+  const { runReview } = await worker();
+  const db = freshDb();
+  const one = item(db, 'p-lead');
   await runReview(options(db, harness([one])));
-  assert.equal(db.prepare("SELECT availability FROM postings WHERE id = 'p-closed'").get().availability, 'closed_verified');
+  assert.deepEqual([reviewOf(db, 'p-lead').state, reviewOf(db, 'p-lead').decision], ['done', 'eligible']);
+  const near = new Date(Date.parse(at(31)) + 86_400_000).toISOString();
+  db.prepare('UPDATE reviews SET deadline_json=? WHERE posting_id=?').run(JSON.stringify({ kind: 'cutoff', date: near }), 'p-lead');
+  const later = harness([one]);
+  await runReview(options(db, later, { runId: 'review-2', now: at(30) }));
+  assert.deepEqual([reviewOf(db, 'p-lead').state, reviewOf(db, 'p-lead').lane], ['done', 'new']);
+  assert.equal(later.judges.primary.calls.length, 0);
 });
 
 test('[L2] same content hash costs nothing on refresh; a changed JD is re-judged', async () => {
