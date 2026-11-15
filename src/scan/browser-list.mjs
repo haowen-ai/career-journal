@@ -14,6 +14,7 @@ import { aliasesFor, canonicalUrl, identityOptionsOf } from '../funnel/identity.
 import { ingestBatch } from '../funnel/ingest.mjs';
 import { redact } from '../runtime/redact.mjs';
 import { parseCareerOpsRoles } from './sources/careerops.mjs';
+import { knownListingUrls } from '../funnel/seen.mjs';
 
 export const BROWSER_LIST_DETAIL = 'browser read: student titles only';
 // Shown with a partial list: the roles the scan did read are already stored and stay as they are.
@@ -22,6 +23,9 @@ export const PARTIAL_LIST_NOTE = '部分读取，已抓结果保留';
 const RUNNING_FRESH_MS = 600_000;
 const SOURCE = 'careerops';
 const nameOf = (partition) => String(partition).slice(String(partition).indexOf(':') + 1);
+// A career-ops `provider: browser-only` entry never calls an API (bot wall on every route): its list is read in a
+// browser directly (plan 2026-11-14 v2 step 6).
+const BROWSER_ONLY_PREFIX = 'browser-only:';
 // json_valid first: one unreadable receipt must not fail the whole query.
 const isBrowserRun = "(json_valid(r.receipt_json) AND json_extract(r.receipt_json,'$.browserList') IS NOT NULL)";
 const refuse = (message, exitCode = 1) => Object.assign(new Error(message), { exitCode });
@@ -44,6 +48,7 @@ export function failedLists(db, { now = new Date().toISOString() } = {}) {
   let reported = [];
   try { reported = JSON.parse(scan.receipt_json ?? '{}').sources ?? []; } catch { /* a receipt without sources names no URL */ }
   const receipt = new Map(reported.filter((item) => item?.source === SOURCE).map((item) => [item.partition, item]));
+  const knownCount = db.prepare('SELECT COUNT(*) n FROM seen_ids WHERE source=? AND partition=?');
   return {
     scanRunId: scan.run_id,
     scanStartedAt: scan.started_at,
@@ -56,6 +61,9 @@ export function failedLists(db, { now = new Date().toISOString() } = {}) {
       company: receipt.get(row.partition)?.company ?? nameOf(row.partition),
       careersUrl: receipt.get(row.partition)?.careersUrl ?? null,
       error: row.status === 'error' ? row.detail || null : null,
+      ...(String(row.partition).startsWith(BROWSER_ONLY_PREFIX) ? { browserOnly: true } : {}),
+      // Listings this list already has (seen_ids); `scan failed-lists --known <partition>` prints them.
+      knownCount: knownCount.get(SOURCE, row.partition).n,
       // A partial list: read the page for what the scan missed; rows it already stored are kept.
       ...(row.status === 'partial' ? { status: 'partial', note: PARTIAL_LIST_NOTE, ...(row.detail ? { detail: row.detail } : {}) } : {}),
     })),
@@ -136,6 +144,11 @@ export function attachBrowserList(db, { partition, rows, now = new Date().toISOS
     try { db.prepare('UPDATE runs SET receipt_json=? WHERE run_id=?').run(redact(JSON.stringify({ runId, browserList: true, forScanRunId: list.scanRunId, error: error.message })), runId); } catch { /* keep the first error */ }
     throw error;
   }
+}
+
+// The listings a list already has, so a browser read opens only new postings (plan 2026-11-14 v2 step 6).
+export function knownListings(db, partition) {
+  return { partition, known: knownListingUrls(db, { source: SOURCE, partition }) };
 }
 
 // The careers page could not be read in a browser either (sign-in wall, bot wall, CAPTCHA).

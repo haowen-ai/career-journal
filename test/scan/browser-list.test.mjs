@@ -80,7 +80,7 @@ test('failed-lists names the lists of the latest scan that could not be fetched,
   const state = await json(['scan', 'failed-lists', '--home', home]);
   assert.equal(state.scanRunId, 'scan-night-1');
   assert.equal(state.wholeScanFailed, false);
-  assert.deepEqual(state.lists, [{ partition: WALLED, company: 'Walled Co', careersUrl: 'https://careers.walled.example.test/search', error: 'HTTP 403 Forbidden' }]);
+  assert.deepEqual(state.lists, [{ partition: WALLED, company: 'Walled Co', careersUrl: 'https://careers.walled.example.test/search', error: 'HTTP 403 Forbidden', knownCount: 0 }]);
 }));
 
 test('attach ingests the rows read in a browser as a partial list, once, and the list leaves the queue', async () => fixture(async (home) => {
@@ -327,4 +327,31 @@ test('attach accepts a partial list and adds only the postings the scan missed; 
     assert.deepEqual(JSON.parse(after[2].fields_json).locations, ['Boston, MA', 'Chicago, IL']);
   } finally { db.close(); }
   assert.deepEqual((await json(['scan', 'failed-lists', '--home', home])).lists.map((item) => item.partition), [WALLED], 'the partial list leaves the queue');
+}));
+
+// Plan 2026-11-14 v2 step 6: a browser-only entry is marked so the reviewer goes straight to the browser, and every
+// failed list says how many listings the journal already has; `--known` prints them so the browser read can skip
+// opening known postings.
+test('failed lists mark browser-only entries and carry the known listing count; --known prints them', async () => fixture(async (home) => {
+  const ONLY = 'browser-only:Tesla';
+  await scanWithFailure(home, { runId: 'scan-a', now: '2026-11-08T03:00:00.000Z', sources: [
+    { source: 'careerops', partition: HEALTHY, status: 'partial', count: 0, rawCount: 0, truncated: true, detail: 'page cap' },
+  ] });
+  {
+    const { db } = await openHomeDatabase(home);
+    try { db.prepare("INSERT INTO seen_ids (source,partition,listing_id,url,first_seen_at) VALUES ('careerops',?,'h-1','healthy.example.test/jobs/1',?)").run(HEALTHY, '2026-11-08T03:00:00.000Z'); }
+    finally { db.close(); }
+  }
+  await scanWithFailure(home, { runId: 'scan-b', now: '2026-11-09T03:00:00.000Z', sources: [
+    { source: 'careerops', partition: ONLY, status: 'error', count: 0, rawCount: 0, truncated: false, detail: 'browser-only: Tesla: www.tesla.com blocks scripted requests (bot challenge) — needs a browser read', company: 'Tesla', careersUrl: 'https://www.tesla.com/careers/search/?type=intern&site=US' },
+    { source: 'careerops', partition: HEALTHY, status: 'partial', count: 0, rawCount: 0, truncated: true, detail: 'page cap' },
+  ] });
+  const state = await json(['scan', 'failed-lists', '--home', home], '2026-11-09T04:00:00.000Z');
+  const byPartition = Object.fromEntries(state.lists.map((item) => [item.partition, item]));
+  assert.equal(byPartition[ONLY].browserOnly, true);
+  assert.equal(byPartition[ONLY].knownCount, 0);
+  assert.equal(byPartition[HEALTHY].browserOnly, undefined);
+  assert.equal(byPartition[HEALTHY].knownCount, 1);
+  const known = await json(['scan', 'failed-lists', '--home', home, '--known', HEALTHY], '2026-11-09T04:00:00.000Z');
+  assert.deepEqual(known, { partition: HEALTHY, known: [{ id: 'h-1', url: 'healthy.example.test/jobs/1' }] });
 }));

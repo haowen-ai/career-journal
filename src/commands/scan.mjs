@@ -10,10 +10,11 @@ import { runScan } from '../scan/run.mjs';
 import { loadUserOverrides, withOverrides } from '../review/overrides.mjs';
 import { loadDirectionRules } from '../review/direction.mjs';
 import { engagementRules, titleScreenRules } from '../funnel/classify.mjs';
-import { attachBrowserList, failedLists, markListUnreadable } from '../scan/browser-list.mjs';
+import { attachBrowserList, failedLists, knownListings, markListUnreadable } from '../scan/browser-list.mjs';
+import { incrementalSettings } from '../funnel/seen.mjs';
 
 const usage = `Usage: career-journal scan run [--dry-run] [--json] [--profile <path>]
-       career-journal scan failed-lists [--json]
+       career-journal scan failed-lists [--json] [--known <provider:Company>]
        career-journal scan attach --partition <provider:Company> --file <rows.json> [--json]
        career-journal scan attach --partition <provider:Company> --unreadable --reason <text> [--json]`;
 
@@ -83,6 +84,8 @@ export async function scanWithContext(context, profile, runtime = {}, { dryRun =
     policy, runId, parentRunId, deadlineAt,
     careerOpsConfig: context.config.careerOps ?? {},
     careerOpsDependencies: runtime.careerOps ?? {},
+    // config.json scan.incremental (default on): baselined lists skip the listings they already recorded.
+    incremental: incrementalSettings(context.config),
     dryRun,
     now: runtime.now?.() ?? new Date().toISOString(),
   });
@@ -113,6 +116,10 @@ async function browserListCommand(parsed, io, runtime) {
   try {
     const now = runtime.now?.() ?? new Date().toISOString();
     let result;
+    if (parsed.subcommand === 'failed-lists' && typeof parsed.options.known === 'string') {
+      io.out(redact(JSON.stringify(knownListings(context.db, parsed.options.known), null, parsed.options.json ? 2 : 0)));
+      return 0;
+    }
     if (parsed.subcommand === 'failed-lists') result = failedLists(context.db, { now });
     else {
       const partition = parsed.options.partition;
