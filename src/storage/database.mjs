@@ -10,8 +10,9 @@ import { migration006 } from './migrations/006-funnel.mjs';
 import { migration007 } from './migrations/007-posting-merge-index.mjs';
 import { migration008 } from './migrations/008-out-of-direction.mjs';
 import { migration009 } from './migrations/009-review-lookup-indexes.mjs';
+import { migration010 } from './migrations/010-seen-listings.mjs';
 
-export const schemaMigrations = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009];
+export const schemaMigrations = [migration001, migration002, migration003, migration004, migration005, migration006, migration007, migration008, migration009, migration010];
 
 // A writer waits this long for another writer's transaction (a scan batch, a prune) before failing.
 export const BUSY_TIMEOUT_MS = 120_000;

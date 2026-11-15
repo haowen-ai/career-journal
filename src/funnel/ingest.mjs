@@ -7,6 +7,7 @@ import { assertScanOwner } from './scan-lease.mjs';
 import { currentRecordReader, latestSightings, postingEvidenceHash, settledEvidenceHash, storeSettledEvidence } from './membership.mjs';
 import { userDecided, userLoggedPostings } from '../review/ownership.mjs';
 import { autoReopenAllowed } from '../review/reopen-policy.mjs';
+import { listingKeyOf } from '../scan/listing-key.mjs';
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const stable = (value) => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object'
@@ -117,9 +118,13 @@ function countOnly(db, record, classification, context) {
   return { known: id };
 }
 
-export function ingestBatch(db, { runId, source, partition, records, now, policy = {}, profile, runOwner, context }) {
+// `seen` (plan 2026-11-14 v2, incremental nightly): { skip }. Every valid record's listing key (listing-key.mjs) is
+// recorded in seen_ids in this batch's transaction; with `skip`, a record whose key was already recorded for this
+// list is skipped before classification (no observation, sighting or last_seen) and counted as skippedKnown.
+// `new` counts the keys this batch recorded for the first time. Without `seen` nothing is recorded or skipped.
+export function ingestBatch(db, { runId, source, partition, records, now, policy = {}, profile, runOwner, context, seen }) {
   const startedAt = performance.now();
-  const counts = { observed: 0, stored: 0, countedOnly: 0, countedOnlyBy: {}, newPostings: 0, reused: 0, dropped: {}, review: 0, quarantined: 0, elapsedMs: 0 };
+  const counts = { observed: 0, stored: 0, countedOnly: 0, countedOnlyBy: {}, newPostings: 0, reused: 0, dropped: {}, review: 0, quarantined: 0, skippedKnown: 0, new: 0, elapsedMs: 0 };
   db.exec('BEGIN IMMEDIATE');
   try {
     if (runOwner) assertScanOwner(db, runId, runOwner);
@@ -130,11 +135,28 @@ export function ingestBatch(db, { runId, source, partition, records, now, policy
     const reader = currentRecordReader(db);
     const touchPartition = db.prepare(`INSERT INTO posting_partitions(posting_id,source,partition,last_seen) VALUES (?,?,?,?)
       ON CONFLICT(posting_id,source,partition) DO UPDATE SET last_seen=MAX(last_seen,excluded.last_seen)`);
+    // Keys known before this batch, per source of this list (read once).
+    const known = new Map();
+    const knownOf = (recordSource) => {
+      if (!known.has(recordSource)) known.set(recordSource, new Set(db.prepare('SELECT listing_id FROM seen_ids WHERE source=? AND partition=?').all(recordSource, partition).map((row) => row.listing_id)));
+      return known.get(recordSource);
+    };
+    const remember = seen ? db.prepare('INSERT OR IGNORE INTO seen_ids (source,partition,listing_id,url,first_seen_at,first_run_id) VALUES (?,?,?,?,?,?)') : null;
     for (const raw of records) {
       counts.observed += 1;
-      const record = { ...raw, source: raw?.source ?? source, partition };
+      // The listing id is the seen key only: it is not part of the stored record or its content hash, so adding it
+      // changes no observation.
+      const { listingId: ignoredListingId, ...fieldsOnly } = raw ?? {};
+      const record = { ...fieldsOnly, source: raw?.source ?? source, partition };
       const invalid = record.invalid || (!record.title?.trim() ? 'missing title' : !canonicalUrl(record.url) ? 'missing http(s) URL' : null);
       if (invalid) { quarantine(db, record, invalid, now); counts.quarantined += 1; continue; }
+      if (seen) {
+        const key = listingKeyOf(raw ?? {});
+        if (key) {
+          if (seen.skip && knownOf(record.source).has(key)) { counts.skippedKnown += 1; continue; }
+          if (remember.run(record.source, partition, key, canonicalUrl(record.url), now, runId ?? null).changes) counts.new += 1;
+        }
+      }
       const classification = classifyRole(record, { policy, profile });
       const counted = countOnly(db, record, classification, context);
       if (counted) {

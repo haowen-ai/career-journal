@@ -19,6 +19,8 @@ export function defaultConfig(now = new Date().toISOString(), timezone = Intl.Da
       threshold: 0.8,
     },
     careerOps: { root: null, pinnedVersion: CAREER_OPS_PINNED_VERSION, entrypoint: 'career-journal-adapter.mjs' },
+    // Incremental nightly (plan 2026-11-14 v2): a list skips listings it already recorded once a scan has baselined it.
+    scan: { incremental: { enabled: true } },
     materials: { ruleFiles: [] },
     automation: { setupState: 'not-configured' },
   };

@@ -35,6 +35,11 @@
     "pinnedVersion": "1.40.0-cj.1",
     "entrypoint": "career-journal-adapter.mjs"
   },
+  "scan": {
+    "incremental": {
+      "enabled": true
+    }
+  },
   "materials": {
     "ruleFiles": []
   },
