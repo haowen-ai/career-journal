@@ -335,9 +335,9 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
       const capDetected = scope.capDetected;
       const truncationReason = providerTruncation(jobs);
       const collection = typeof jobs.collection?.status === 'string' ? jobs.collection.status : null;
-      // A provider that says it hit a ceiling or a failed page has an incomplete list even without jobs.truncated
+      // A provider that says it hit a ceiling, a failed page or an unverified end has an incomplete list even without jobs.truncated
       // (Codex review 11/15): it must reach failStreak and the browser read like any other partial list.
-      const truncated = capDetected || truncationReason != null || collection === 'ceiling' || collection === 'page_failed';
+      const truncated = capDetected || truncationReason != null || collection === 'ceiling' || collection === 'page_failed' || collection === 'unverified';
       const roles = [];
       for (const job of jobs) {
         const role = { ...job, company: job?.company ?? entry.name, partition,

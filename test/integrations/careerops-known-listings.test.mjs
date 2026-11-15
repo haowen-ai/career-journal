@@ -90,7 +90,7 @@ test('without known listings no file is written', async () => {
   assert.equal(seenConfig.knownListingsFile, undefined);
 });
 
-for (const status of ['ceiling', 'page_failed']) {
+for (const status of ['ceiling', 'page_failed', 'unverified']) {
   test(`a provider collection status of ${status} makes the list partial even without jobs.truncated (Codex review 11/15)`, async () => {
     const provider = { id: 'taleo', fetch: async () => {
       const jobs = [job('A1')];
