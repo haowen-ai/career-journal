@@ -37,3 +37,16 @@ test('scans without CareerOps entries (browser reads, boards) do not hide the la
   assert.deepEqual(previousLaneWeights(db), { Citi: 1234 });
   assert.equal(previousLaneWeights(freshDb()), null);
 });
+
+test('an unreadable previous receipt only loses the hint; it never stops the scan', () => {
+  const db = freshDb();
+  const insert = db.prepare("INSERT INTO runs (run_id,kind,owner,started_at,heartbeat_at,finished_at,status,receipt_json) VALUES (?,?,?,?,?,?,?,?)");
+  insert.run('scan-a', 'scan', 'o', T0, T0, T0, 'ok', JSON.stringify({ sources: ['odd', null, { source: 'careerops', partition: 'workday:Citi', elapsedMs: 77 }] }));
+  assert.deepEqual(previousLaneWeights(db), { Citi: 77 });
+  insert.run('scan-b', 'scan', 'o', at(1), at(1), at(1), 'ok', '{"sources":[{"source":"careerops","partition":"x:Y","elapsedMs":1}');
+  assert.deepEqual(previousLaneWeights(db), { Citi: 77 }, 'a cut-off newer receipt is passed over');
+  const only = freshDb();
+  only.prepare("INSERT INTO runs (run_id,kind,owner,started_at,heartbeat_at,finished_at,status,receipt_json) VALUES (?,?,?,?,?,?,?,?)")
+    .run('scan-x', 'scan', 'o', T0, T0, T0, 'ok', '{"sources":"careerops"}');
+  assert.equal(previousLaneWeights(only), null);
+});
