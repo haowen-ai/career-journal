@@ -37,7 +37,11 @@
   },
   "scan": {
     "incremental": {
-      "enabled": true
+      "enabled": true,
+      "earlyStop": {
+        "providers": ["oraclecloud", "taleo"],
+        "marginHours": 72
+      }
     }
   },
   "materials": {

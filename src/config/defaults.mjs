@@ -1,6 +1,11 @@
 import { CAREER_OPS_PINNED_VERSION } from './careerops-version.mjs';
 export const CONFIG_SCHEMA_VERSION = 1;
 
+// Incremental nightly (plan 2026-11-14 v2/v3.1), config.json `scan.incremental`. A list skips listings it already
+// recorded once a scan has baselined it. earlyStop: the career-ops providers that may stop paging a date-ordered list
+// at a fully known page older than the list's watermark minus marginHours.
+export const DEFAULT_INCREMENTAL = Object.freeze({ enabled: true, earlyStop: Object.freeze({ providers: Object.freeze(['oraclecloud', 'taleo']), marginHours: 72 }) });
+
 export function defaultConfig(now = new Date().toISOString(), timezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC') {
   return {
     schemaVersion: CONFIG_SCHEMA_VERSION,
@@ -20,7 +25,7 @@ export function defaultConfig(now = new Date().toISOString(), timezone = Intl.Da
     },
     careerOps: { root: null, pinnedVersion: CAREER_OPS_PINNED_VERSION, entrypoint: 'career-journal-adapter.mjs' },
     // Incremental nightly (plan 2026-11-14 v2): a list skips listings it already recorded once a scan has baselined it.
-    scan: { incremental: { enabled: true } },
+    scan: { incremental: { enabled: DEFAULT_INCREMENTAL.enabled, earlyStop: { providers: [...DEFAULT_INCREMENTAL.earlyStop.providers], marginHours: DEFAULT_INCREMENTAL.earlyStop.marginHours } } },
     materials: { ruleFiles: [] },
     automation: { setupState: 'not-configured' },
   };

@@ -36,12 +36,25 @@ const MAX_FIELD_CHARS = 4000;
 const IDENTITY_FIELDS = new Set(['id', 'sourceId', 'source', 'company', 'company_name', 'title', 'url',
   'applyUrl', 'hostedUrl', 'jobUrl', 'location', 'locations', 'requisitionId', 'jobReqId', 'partition', 'listingId', 'externalId']);
 
-// The listing ids each baselined list already has (CAREER JOURNAL writes them, src/scan/sources/careerops.mjs):
-// { partition: [ids] } as a Map of Sets. No file, no known listings.
-export function readKnownListings(file) {
-  if (!file) return new Map();
-  const parsed = JSON.parse(readFileSync(file, 'utf8'));
-  return new Map(Object.entries(parsed ?? {}).map(([partition, ids]) => [partition, new Set(Array.isArray(ids) ? ids.map(String) : [])]));
+// What CAREER JOURNAL knows about each baselined list (src/scan/sources/careerops.mjs writes it):
+// { known: { partition: [ids] }, watermarks: { partition: ISO }, earlyStop: { providers, marginHours } }.
+// Returns { known: Map(partition → Set), watermarks: Map(partition → ms), earlyStop }. No file, nothing known.
+export function readIncrementalInput(file) {
+  const empty = { known: new Map(), watermarks: new Map(), earlyStop: null };
+  if (!file) return empty;
+  const parsed = JSON.parse(readFileSync(file, 'utf8')) ?? {};
+  const known = new Map(Object.entries(parsed.known ?? {}).map(([partition, ids]) => [partition, new Set(Array.isArray(ids) ? ids.map(String) : [])]));
+  const watermarks = new Map(Object.entries(parsed.watermarks ?? {}).map(([partition, iso]) => [partition, Date.parse(iso)]).filter(([, ms]) => Number.isFinite(ms)));
+  const early = parsed.earlyStop;
+  const earlyStop = early && Array.isArray(early.providers) && Number.isFinite(early.marginHours) ? { providers: early.providers.map(String), marginHours: early.marginHours } : null;
+  return { known, watermarks, earlyStop };
+}
+
+// The bound below which a fully known, date-ordered page may end the read of this list, or null.
+export function earlyStopBound(providerId, partition, { known, watermarks, earlyStop }) {
+  if (!earlyStop || !earlyStop.providers.includes(providerId) || !known.get(partition)?.size) return null;
+  const watermark = watermarks.get(partition);
+  return Number.isFinite(watermark) ? watermark - earlyStop.marginHours * 3_600_000 : null;
 }
 
 // Rewrites portals.yml text: drops the top-level title_filter and location_filter blocks and
@@ -264,8 +277,11 @@ export function searchMeta(search) {
 // `knownListings` (Map partition → Set of listing ids, see readKnownListings): a provider of such a list gets
 // `ctx.isKnownListing(job)` and may skip per-listing detail requests for known ones (plan 2026-11-14 v2 step 2).
 // It must still return every listing of the list: the journal skips known rows itself and health counts the list.
+// `watermarks` / `earlyStop` (readIncrementalInput): a configured provider also gets ctx.earlyStopBeforeMs and may stop
+// paging early; its `jobs.collection.status` (complete | early_stopped | page_failed | ceiling) is reported as the
+// partition's `collection`, with `collectionMode` early_stopped or full.
 export async function collectCareerOpsRaw({ portals, providers, resolveProvider, makeHttpCtx, sleep = defaultSleep, retryDelaysMs = RETRY_DELAYS_MS,
-  concurrency = 1, spoolDir, onPartition, knownListings = new Map() }) {
+  concurrency = 1, spoolDir, onPartition, knownListings = new Map(), watermarks = new Map(), earlyStop = null }) {
   // `enabled: false` turns an entry off (CareerOps's own scan skips it too); it then leaves the
   // configured inventory, so its partition is retired instead of failing every night.
   const entries = [...(portals.tracked_companies ?? []), ...(portals.job_boards ?? [])].filter((entry) => entry?.enabled !== false);
@@ -300,6 +316,8 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
         try {
           const ctx = withEntryTimeout(await makeHttpCtx(request, portals), request);
           if (known?.size) ctx.isKnownListing = (job) => known.has(nativeListingId(job));
+          const bound = earlyStopBound(provider.id ?? resolved.id ?? null, partition, { known: knownListings, watermarks, earlyStop });
+          if (bound != null) ctx.earlyStopBeforeMs = bound;
           jobs = await provider.fetch(request, ctx);
           break;
         } catch (error) {
@@ -316,6 +334,7 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
       if (ceiling != null && jobs.length >= ceiling) scope.capDetected = true;
       const capDetected = scope.capDetected;
       const truncationReason = providerTruncation(jobs);
+      const collection = typeof jobs.collection?.status === 'string' ? jobs.collection.status : null;
       const truncated = capDetected || truncationReason != null;
       const roles = [];
       for (const job of jobs) {
@@ -340,7 +359,8 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
         ...(truncated && entry.name ? { company: String(entry.name) } : {}), ...(truncated && entryUrl(entry) ? { careersUrl: entryUrl(entry) } : {}),
         ...(capDetected && ceiling != null && jobs.length >= ceiling ? { ceiling } : {}), ...(spoolFile ? { spoolFile } : {}),
         // Source health keeps keyword counts and whole-board counts apart by this detail prefix.
-        ...(search ? searchMeta(search) : {}) };
+        ...(search ? searchMeta(search) : {}),
+        ...(collection ? { collection, collectionMode: collection === 'early_stopped' ? 'early_stopped' : 'full' } : {}) };
     } catch (error) {
       // The company and its careers page travel with a failed list, for the browser read that follows it.
       partitions[index] = { partition, status: 'error', count: 0, rawCount: 0, error: error.message, truncated: scope.capDetected, capDetected: scope.capDetected, attempts, elapsedMs: elapsed(),
@@ -407,7 +427,7 @@ async function rawWorker(root) {
   const spoolDir = process.env.CAREER_JOURNAL_SCAN_SPOOL || undefined;
   return collectCareerOpsRaw({ portals, providers, resolveProvider: registry.resolveProvider, makeHttpCtx: http.makeHttpCtx,
     concurrency: positive(process.env.CAREER_JOURNAL_SCAN_CONCURRENCY) ?? DEFAULT_SCAN_CONCURRENCY, spoolDir,
-    knownListings: readKnownListings(process.env.CAREER_JOURNAL_KNOWN_LISTINGS),
+    ...(({ known, watermarks, earlyStop }) => ({ knownListings: known, watermarks, earlyStop }))(readIncrementalInput(process.env.CAREER_JOURNAL_KNOWN_LISTINGS)),
     // A spooled entry is announced as soon as its file is written: one complete JSON line per entry, before
     // the result line that main() prints last. The roles stay in the file, so each line is small.
     ...(spoolDir ? { onPartition: (partition) => process.stdout.write(`${JSON.stringify({ event: PARTITION_EVENT, partition })}\n`) } : {}) });

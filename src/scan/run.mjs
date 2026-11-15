@@ -11,14 +11,15 @@ import { fetchCareerOpsRoles } from './sources/careerops.mjs';
 import { DEFAULT_SIMPLIFY_TIMEOUT_MS, fetchSimplify, simplifyUrls } from './sources/simplify.mjs';
 import { redact } from '../runtime/redact.mjs';
 import { assertScanOwner } from '../funnel/scan-lease.mjs';
-import { baselinedLists, knownListingsOf, listKey, recordBaselines } from '../funnel/seen.mjs';
+import { advanceWatermarks, baselinedLists, knownListingsOf, listKey, recordBaselines, watermarksOf } from '../funnel/seen.mjs';
 
 // All configured partitions are collected in order; each starts only before the deadline.
 // `onBatch(batch)` receives CareerOps entries the moment each one is fetched; they are then left out of
 // the returned `batches`. Every other batch is returned for the caller to ingest after collection.
 // `knownListings` ({ partition: Set(listing ids) } of baselined CareerOps lists, or null) lets a provider skip the
 // detail requests of listings the journal already has (plan 2026-11-14 v2 step 2).
-export async function collectRoles(profile, { fetchImpl, careerOpsConfig, careerOpsDependencies, timeoutMs, deadlineAt, clock = Date.now, onBatch, knownListings = null } = {}) {
+// `watermarks` ({ partition: ISO } of baselined lists) and `earlyStop` (config) let Oracle Cloud / Taleo stop early.
+export async function collectRoles(profile, { fetchImpl, careerOpsConfig, careerOpsDependencies, timeoutMs, deadlineAt, clock = Date.now, onBatch, knownListings = null, watermarks = null, earlyStop = null } = {}) {
   const parts = [];
   const beforeDeadline = () => !deadlineAt || clock() < Date.parse(deadlineAt);
   const options = (defaultTimeoutMs = 30_000) => ({ timeoutMs: deadlineAt ? Math.max(1, Math.min(timeoutMs ?? defaultTimeoutMs, Date.parse(deadlineAt) - clock())) : timeoutMs });
@@ -37,7 +38,7 @@ export async function collectRoles(profile, { fetchImpl, careerOpsConfig, career
   if (beforeDeadline()) {
     const config = { ...careerOpsConfig };
     if (deadlineAt) config.scanTimeoutMs = Math.max(1, Math.min(config.scanTimeoutMs ?? Infinity, Date.parse(deadlineAt) - clock()));
-    parts.push(await fetchCareerOpsRoles(profile.sources.careerOps, config, careerOpsDependencies, { onBatch, knownListings }));
+    parts.push(await fetchCareerOpsRoles(profile.sources.careerOps, config, careerOpsDependencies, { onBatch, knownListings, watermarks, earlyStop }));
   }
   const settings = profile.sources.simplify;
   const urls = simplifyUrls(settings);
@@ -154,7 +155,9 @@ export async function runScan(options) {
       ingestOne(batch);
     };
     const knownListings = baselines.size ? knownListingsOf(db, 'careerops', baselines) : null;
-    collected = await (collect ?? collectRoles)(profile, { fetchImpl, careerOpsConfig, careerOpsDependencies, timeoutMs: options.timeoutMs, deadlineAt, clock, onBatch, knownListings });
+    const watermarks = baselines.size ? watermarksOf(db, 'careerops', baselines) : null;
+    collected = await (collect ?? collectRoles)(profile, { fetchImpl, careerOpsConfig, careerOpsDependencies, timeoutMs: options.timeoutMs, deadlineAt, clock, onBatch,
+      knownListings, watermarks, earlyStop: incremental?.earlyStop ?? null });
     if (heartbeatError) throw heartbeatError;
     assertScanOwner(db, runId, owner);
     // Batches the collector returned (boards, Simplify, a CareerOps scan that did not stream) are written now.
@@ -204,6 +207,8 @@ export async function runScan(options) {
         : sources.some((item) => item.alert && expectedKeys.has(`${item.source}\0${item.partition}`)) ? 'partial' : 'ok';
       // Lists read in full by this finished run are baselined; from the next run on they skip known listings.
       recordBaselines(db, { runId, now: finishedAt, sources, ingested: ingestedLists });
+      // Watermarks move to this run's start: rows posted while it ran are read again by the next one.
+      advanceWatermarks(db, { runId, startedAt: now, sources, ingested: ingestedLists });
       const summary = { runId, status, dryRun: false, sources, alerts, counts, ingest, ...(warnings.length ? { warnings } : {}) };
       db.prepare("UPDATE runs SET status=?,heartbeat_at=?,finished_at=?,receipt_json=? WHERE run_id=? AND owner=? AND status='running'").run(status, finishedAt, finishedAt, redact(JSON.stringify(summary)), runId, owner);
       db.exec('COMMIT');

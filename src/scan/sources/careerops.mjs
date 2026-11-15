@@ -96,9 +96,11 @@ function spooledBatch(directory, source, spoolFile) {
 // `batches` leave those entries out; `sources` still lists every partition. An error thrown by onBatch
 // stops the fetch and is thrown from here.
 // `knownListings` ({ partition: Set(listing ids) }): written to the spool folder for the bridge, whose providers
-// then skip detail requests for those listings (the rows themselves are still listed and delivered).
+// then skip detail requests for those listings (the rows themselves are still listed and delivered). `watermarks`
+// ({ partition: ISO }) and `earlyStop` ({ providers, marginHours }) go in the same file: a listed provider may stop
+// paging a date-ordered list early (plan 2026-11-14 v3.1). File: { known, watermarks, earlyStop }.
 export const KNOWN_LISTINGS_FILE = 'known-listings.json';
-export async function fetchCareerOpsRoles(enabled, careerOpsConfig, dependencies = {}, { onBatch, knownListings = null } = {}) {
+export async function fetchCareerOpsRoles(enabled, careerOpsConfig, dependencies = {}, { onBatch, knownListings = null, watermarks = null, earlyStop = null } = {}) {
   const skipped = (detail) => ({ sources: [{ source: 'careerops', partition: 'all', status: 'skipped', count: 0, rawCount: 0, truncated: false, detail }], batches: [], roles: [] });
   if (!enabled) return skipped('not enabled in the profile');
   const health = await (dependencies.detect ?? detectCareerOpsScan)(careerOpsConfig ?? {});
@@ -128,7 +130,9 @@ export async function fetchCareerOpsRoles(enabled, careerOpsConfig, dependencies
     let knownListingsFile;
     if (knownListings && Object.keys(knownListings).length) {
       knownListingsFile = path.join(spoolDir, KNOWN_LISTINGS_FILE);
-      writeFileSync(knownListingsFile, JSON.stringify(Object.fromEntries(Object.entries(knownListings).map(([partition, ids]) => [partition, [...ids]]))));
+      writeFileSync(knownListingsFile, JSON.stringify({
+        known: Object.fromEntries(Object.entries(knownListings).map(([partition, ids]) => [partition, [...ids]])),
+        watermarks: watermarks ?? {}, ...(earlyStop ? { earlyStop } : {}) }));
     }
     const parsed = parseCareerOpsRaw(await (dependencies.run ?? runCareerOpsScan)({ ...(careerOpsConfig ?? {}), scanSpoolDir: spoolDir, ...(knownListingsFile ? { knownListingsFile } : {}) }, { ...dependencies, ...live }));
     if (parsed.spoolFiles) {

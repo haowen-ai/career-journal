@@ -45,7 +45,9 @@ export function assessSourceHealth(db, { runId, now, manifest, reported, baselin
     // A keyword search of a big board (detail "keyword search …") counts student hits, a whole-board
     // read counts every job: only censuses of the same kind form this one's baseline.
     const sameKind = (row) => KEYWORD_SEARCH.test(row.detail ?? '') === KEYWORD_SEARCH.test(item.detail ?? '');
-    const counts = history.filter((row) => ['ok', 'empty'].includes(row.status) && sameKind(row) && Date.parse(row.started_at) >= Date.parse(now) - baselineDays * 86_400_000).map((row) => row.count).sort((a, b) => a - b);
+    // An early-stopped read (plan 2026-11-14 v3.1) counts only the newest rows: it never feeds the baseline.
+    const counts = history.filter((row) => ['ok', 'empty'].includes(row.status) && sameKind(row) && (row.collection_mode ?? 'full') === 'full' && Date.parse(row.started_at) >= Date.parse(now) - baselineDays * 86_400_000).map((row) => row.count).sort((a, b) => a - b);
+    const earlyStopped = item.collectionMode === 'early_stopped';
     const baseline = counts.length ? Math.round((counts[Math.floor((counts.length - 1) / 2)] + counts[Math.ceil((counts.length - 1) / 2)]) / 2) : null;
     let status = item.status;
     let alert = item.alert ?? null;
@@ -56,6 +58,10 @@ export function assessSourceHealth(db, { runId, now, manifest, reported, baselin
     else if (status === 'partial') alert = 'partial';
     else if (['disabled', 'skipped'].includes(status)) { if (isExpected) { status = 'disabled'; alert = 'disabled'; } }
     else if (status === 'stale') alert = history.some((row) => ['ok', 'empty'].includes(row.status)) ? 'missing' : 'never_reported';
+    else if (['ok', 'empty'].includes(status) && earlyStopped) {
+      // Read successfully up to a proven early stop: no zero/drop/sample comparison tonight.
+      status = count === 0 ? 'empty' : 'ok';
+    }
     else if (['ok', 'empty'].includes(status)) {
       status = count === 0 ? 'empty' : 'ok';
       // A big board can truly have no student roles; a keyword search reports zero without alarm
@@ -75,11 +81,12 @@ export function assessSourceHealth(db, { runId, now, manifest, reported, baselin
     }
     const result = { ...item, status, count, rawCount: item.rawCount ?? count, baseline, alert, coldStart, failStreak };
     if (result.detail) result.detail = redact(result.detail);
-    db.prepare(`INSERT INTO run_sources (run_id,source,partition,status,count,errors,truncated,expected,detail,baseline,alert,raw_count,quarantined)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id,source,partition) DO UPDATE SET status=excluded.status,count=excluded.count,
+    db.prepare(`INSERT INTO run_sources (run_id,source,partition,status,count,errors,truncated,expected,detail,baseline,alert,raw_count,quarantined,collection_mode)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id,source,partition) DO UPDATE SET status=excluded.status,count=excluded.count,
       errors=excluded.errors,truncated=excluded.truncated,expected=excluded.expected,detail=excluded.detail,baseline=excluded.baseline,
-      alert=excluded.alert,raw_count=excluded.raw_count,quarantined=excluded.quarantined`)
-      .run(runId, item.source, item.partition, status, count, Number(status === 'error'), Number(Boolean(item.truncated || item.capDetected)), Number(isExpected), result.detail ?? '', baseline, alert, result.rawCount, item.quarantined ?? 0);
+      alert=excluded.alert,raw_count=excluded.raw_count,quarantined=excluded.quarantined,collection_mode=excluded.collection_mode`)
+      .run(runId, item.source, item.partition, status, count, Number(status === 'error'), Number(Boolean(item.truncated || item.capDetected)), Number(isExpected), result.detail ?? '', baseline, alert, result.rawCount, item.quarantined ?? 0,
+        earlyStopped && ['ok', 'empty'].includes(status) ? 'early_stopped' : 'full');
     results.push(result);
   }
   return results;
@@ -94,7 +101,7 @@ export async function sampleOfficialBoards(db, { now, partitions, fetchImpl, sam
     const last = db.prepare('SELECT sampled_at FROM source_samples WHERE partition=? ORDER BY sampled_at DESC LIMIT 1').get(entry.partition);
     if (last && Date.parse(now) - Date.parse(last.sampled_at) < everyDays * 86_400_000) continue;
     const census = db.prepare(`SELECT rs.count FROM run_sources rs JOIN runs r ON rs.run_id=r.run_id
-      WHERE rs.partition=? AND rs.status IN ('ok','empty','partial') AND r.started_at<=? ORDER BY r.started_at DESC LIMIT 1`).get(entry.partition, now);
+      WHERE rs.partition=? AND rs.status IN ('ok','empty','partial') AND rs.collection_mode='full' AND r.started_at<=? ORDER BY r.started_at DESC LIMIT 1`).get(entry.partition, now);
     let boardCount = null;
     let status = 'error';
     try {

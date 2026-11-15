@@ -171,3 +171,63 @@ test('a Workday posting read by two keyword searches carries one listing id thro
   const [gh] = parseCareerOpsRoles({ roles: [{ id: 'https://job-boards.greenhouse.io/a/jobs/1', url: 'https://job-boards.greenhouse.io/a/jobs/1', company: 'A', title: 'Intern', listingIdentity: { ats_provider: 'greenhouse', board_slug: 'a', posting_id: '1' }, externalId: '1' }] });
   assert.equal(gh.listingId, '1');
 });
+
+// ---- v3.1 step 8': early stop for Oracle Cloud and Taleo, with list watermarks ----
+const CO_PROFILE = { ...PROFILE, sources: { expected: ['careerops'], atsBoards: [], careerOps: true } };
+const ORC = 'oraclecloud:Acme';
+const TAL = 'taleo:Bank';
+const coRow = (partition, n) => record({ source: 'careerops', partition, sourceId: `https://acme.example.test/job/${n}`, url: `https://acme.example.test/job/${n}` });
+const coScan = (db, runId, now, lists, { fail, seenArgs = [] } = {}) => runScan({ db, profile: CO_PROFILE, runId, now, policy: SCREENING_POLICY, incremental: ON,
+  collect: async (_profile, args) => {
+    seenArgs.push(args);
+    if (fail) throw new Error('collector died');
+    return { careerOpsPartitions: lists.map((list) => list.partition),
+      sources: lists.map(({ partition, records, status = 'ok', collection, truncated = false }) => ({ source: 'careerops', partition, status, count: records.length, rawCount: records.length, truncated,
+        ...(collection ? { collection, collectionMode: collection === 'early_stopped' ? 'early_stopped' : 'full' } : {}) })),
+      batches: lists.filter((list) => (list.status ?? 'ok') !== 'error').map(({ partition, records }) => ({ source: 'careerops', partition, records, rawCount: records.length })) };
+  } });
+const watermarks = (db) => Object.fromEntries(db.prepare('SELECT partition,completed_at FROM list_watermarks').all().map((row) => [row.partition, row.completed_at]));
+
+test('a list read complete or early-stopped advances its watermark to the run start; page_failed, ceiling and errors do not', async () => {
+  const db = freshDb();
+  await coScan(db, 'scan-1', T0, [
+    { partition: ORC, records: [coRow(ORC, 1)], collection: 'complete' },
+    { partition: TAL, records: [coRow(TAL, 1)], collection: 'page_failed', status: 'partial', truncated: true },
+    { partition: 'oraclecloud:Capped', records: [coRow('oraclecloud:Capped', 1)], collection: 'ceiling', status: 'partial', truncated: true },
+    { partition: 'oraclecloud:Down', records: [], status: 'error' },
+    { partition: 'workday:NoStatus', records: [coRow('workday:NoStatus', 1)] },
+  ]);
+  assert.deepEqual(watermarks(db), { [ORC]: T0 });
+  await coScan(db, 'scan-2', at(1), [{ partition: ORC, records: [coRow(ORC, 2)], collection: 'early_stopped' }]);
+  assert.deepEqual(watermarks(db), { [ORC]: at(1) });
+});
+
+test('a run that dies keeps the old watermark', async () => {
+  const db = freshDb();
+  await coScan(db, 'scan-1', T0, [{ partition: ORC, records: [coRow(ORC, 1)], collection: 'complete' }]);
+  await assert.rejects(coScan(db, 'scan-2', at(1), [], { fail: true }));
+  assert.deepEqual(watermarks(db), { [ORC]: T0 });
+});
+
+test('the collector gets the watermarks of baselined lists only', async () => {
+  const db = freshDb();
+  const seenArgs = [];
+  await coScan(db, 'scan-1', T0, [{ partition: ORC, records: [coRow(ORC, 1)], collection: 'complete' }], { seenArgs });
+  assert.equal(seenArgs[0].watermarks, null);
+  await coScan(db, 'scan-2', at(1), [{ partition: ORC, records: [coRow(ORC, 1)], collection: 'complete' }], { seenArgs });
+  assert.deepEqual(seenArgs[1].watermarks, { [ORC]: T0 });
+});
+
+test('an early-stopped list is not compared with the count baseline and never feeds it', async () => {
+  const db = freshDb();
+  const rows = (n) => Array.from({ length: n }, (_, i) => coRow(ORC, i + 1));
+  await coScan(db, 'scan-1', T0, [{ partition: ORC, records: rows(20), collection: 'complete' }]);
+  await coScan(db, 'scan-2', at(1), [{ partition: ORC, records: rows(20), collection: 'complete' }]);
+  const stopped = await coScan(db, 'scan-3', at(2), [{ partition: ORC, records: rows(2), collection: 'early_stopped' }]);
+  const source = stopped.sources.find((item) => item.partition === ORC);
+  assert.equal(source.alert, null, 'two rows of an early-stopped read are not a drop');
+  assert.equal(db.prepare("SELECT collection_mode FROM run_sources WHERE run_id='scan-3' AND partition=?").get(ORC).collection_mode, 'early_stopped');
+  await coScan(db, 'scan-4', at(3), [{ partition: ORC, records: rows(2), collection: 'early_stopped' }]);
+  const full = await coScan(db, 'scan-5', at(4), [{ partition: ORC, records: rows(20), collection: 'complete' }]);
+  assert.equal(full.sources.find((item) => item.partition === ORC).baseline, 20, 'the baseline median reads full reads only');
+});

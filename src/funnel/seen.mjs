@@ -8,11 +8,18 @@
 const keyOf = (source, partition) => `${source}\0${partition}`;
 const BASELINE_STATUSES = new Set(['ok', 'empty', 'partial']);
 
-// config.json `scan.incremental.enabled` (default true: a fresh home starts baseline-pending, see above).
+import { DEFAULT_INCREMENTAL } from '../config/defaults.mjs';
+
+// config.json `scan.incremental` (defaults: DEFAULT_INCREMENTAL; enabled, so a fresh home starts baseline-pending).
 export function incrementalSettings(config = {}) {
   const settings = config?.scan?.incremental ?? {};
   if (settings.enabled != null && typeof settings.enabled !== 'boolean') throw new Error('config scan.incremental.enabled must be true or false');
-  return { enabled: settings.enabled !== false };
+  const early = settings.earlyStop ?? {};
+  const providers = early.providers ?? DEFAULT_INCREMENTAL.earlyStop.providers;
+  const marginHours = early.marginHours ?? DEFAULT_INCREMENTAL.earlyStop.marginHours;
+  if (!Array.isArray(providers) || !providers.every((id) => typeof id === 'string')) throw new Error('config scan.incremental.earlyStop.providers must be a list of provider ids');
+  if (!(Number.isFinite(marginHours) && marginHours >= 0)) throw new Error('config scan.incremental.earlyStop.marginHours must be a number of hours >= 0');
+  return { enabled: settings.enabled !== false, earlyStop: { providers: [...providers], marginHours } };
 }
 
 export function baselinedLists(db) {
@@ -42,6 +49,30 @@ export function recordBaselines(db, { runId, now, sources, ingested }) {
     recorded += 1;
   }
   return recorded;
+}
+
+// Watermarks (plan v3.1 step 8'): { partition: ISO } of one source's baselined lists, or null when there are none.
+export function watermarksOf(db, source, baselines) {
+  const rows = db.prepare('SELECT partition,completed_at FROM list_watermarks WHERE source=?').all(source)
+    .filter((row) => baselines.has(keyOf(source, row.partition)));
+  return rows.length ? Object.fromEntries(rows.map((row) => [row.partition, row.completed_at])) : null;
+}
+
+const WATERMARK_COLLECTIONS = new Set(['complete', 'early_stopped']);
+// Inside the scan's final transaction, after every batch of the run was committed with its seen ids: a list whose
+// provider reported complete or early_stopped for every search stream (and that is neither failed nor truncated)
+// moves its watermark to the run's start. page_failed, ceiling, an error or a missing status keep the old one.
+export function advanceWatermarks(db, { runId, startedAt, sources, ingested }) {
+  const write = db.prepare(`INSERT INTO list_watermarks (source,partition,completed_at,run_id) VALUES (?,?,?,?)
+    ON CONFLICT(source,partition) DO UPDATE SET completed_at=excluded.completed_at,run_id=excluded.run_id`);
+  let advanced = 0;
+  for (const item of sources) {
+    if (!WATERMARK_COLLECTIONS.has(item.collection) || item.truncated || item.capDetected || !['ok', 'empty'].includes(item.status)) continue;
+    if (!ingested.has(keyOf(item.source, item.partition)) && Number(item.rawCount ?? item.count ?? 0) > 0) continue;
+    write.run(item.source, item.partition, startedAt, runId);
+    advanced += 1;
+  }
+  return advanced;
 }
 
 // The listing urls a list has recorded, for a browser read that wants to skip opening known postings.
