@@ -2,16 +2,17 @@
 //
 // A "family" is the pool of hosts that may share one rate limit: the provider id, and for a provider listed in
 // `splitByHost` the provider plus its request host without the first label (Workday rate-limits per cluster:
-// `workday|wd5.myworkdayjobs.com`). The bridge gives each family at most `lanes` lanes at once and at most
-// `requestsPerMinute` requests in any 60 seconds, so a higher overall concurrency never sends a shared pool more
-// than the configured budget. Limits only delay work; they never stop or shorten a list.
+// `workday|wd5.myworkdayjobs.com`). The bridge gives each family at most `lanes` lanes at once and, for every window in
+// `requestBudgets`, at most that many requests in any window of that length (a WAF may count over 5 minutes, not 1:
+// Eightfold blocked this machine after a 300 s burst, plan v6 r6), so a higher overall concurrency never sends a shared
+// pool more than the configured budgets. Limits only delay work; they never stop or shorten a list.
 //
 // Config (careerOps.scanFamilies), every value a positive integer; unset means no limit at all:
-//   { "splitByHost": ["workday"], "lanes": { "default": 1, "<family>": n }, "requestsPerMinute": { "default": 30, "<family>": n } }
+//   { "splitByHost": ["workday"], "lanes": { "default": 1, "<family>": n },
+//     "requestBudgets": { "<window seconds>": { "default": n, "<family>": n }, ... } }
 // A family with a single lane is never limited: its one lane reads its hosts one request after another, as before.
 
-export const RATE_WINDOW_MS = 60_000;
-const KEYS = new Set(['splitByHost', 'lanes', 'requestsPerMinute']);
+const KEYS = new Set(['splitByHost', 'lanes', 'requestBudgets']);
 
 const problem = (detail) => new Error(`careerOps.scanFamilies: ${detail}`);
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -36,9 +37,15 @@ export function parseScanFamilies(value) {
   const split = value.splitByHost === undefined ? [] : value.splitByHost;
   if (!Array.isArray(split) || split.some((id) => typeof id !== 'string' || !id)) throw problem('splitByHost must be a list of provider ids');
   const lanes = limits(value.lanes, 'lanes');
-  const rate = limits(value.requestsPerMinute, 'requestsPerMinute');
-  return { splitByHost: new Set(split), known: new Set([...lanes.map.keys(), ...rate.map.keys()]), lanes: lanes.map, lanesDefault: lanes.fallback,
-    requestsPerMinute: rate.map, requestsPerMinuteDefault: rate.fallback };
+  const windows = value.requestBudgets === undefined ? {} : value.requestBudgets;
+  if (!isPlainObject(windows)) throw problem('requestBudgets must be an object keyed by window seconds');
+  const budgets = Object.entries(windows).map(([seconds, budget]) => {
+    if (!/^[1-9]\d*$/.test(seconds)) throw problem(`requestBudgets window ${seconds} must be a whole number of seconds`);
+    if (budget === undefined) throw problem(`requestBudgets.${seconds} must be an object of positive integers`);
+    return { windowMs: Number(seconds) * 1000, ...limits(budget, `requestBudgets.${seconds}`) };
+  }).sort((a, b) => a.windowMs - b.windowMs);
+  return { splitByHost: new Set(split), known: new Set([...lanes.map.keys(), ...budgets.flatMap((budget) => [...budget.map.keys()])]),
+    lanes: lanes.map, lanesDefault: lanes.fallback, budgets };
 }
 
 // The hosts a split provider may send its requests to, in the order the providers read them: `api` first.
@@ -71,11 +78,11 @@ export function familyOfRequest(providerId, url, splitByHost, fallback) {
   try { return hostFamily(id, new URL(String(url)).host.toLowerCase()); } catch { return fallback; }
 }
 
-// Sliding-window request budget per family. A slot is held from the moment it is granted until the call that
-// used it has ended, and then for RATE_WINDOW_MS more (Codex plan review r4/r5): every request that really goes
-// out inside any 60-second window still holds its slot at the end of that window, so no window sees more than
-// the budget, whatever the caller awaits between taking the slot and sending. Grants are first come, first served.
-export function createFamilyLimiter({ requestsPerMinute, now = Date.now, delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
+// Sliding-window request budget per family, for one window length. A slot is held from the moment it is granted
+// until the call that used it has ended, and then for `windowMs` more (Codex plan review r4/r5): every request that
+// really goes out inside any window still holds its slot at the end of that window, so no window sees more than the
+// budget, whatever the caller awaits between taking the slot and sending. Grants are first come, first served.
+export function createFamilyLimiter({ windowMs, limitOf, now = Date.now, delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
   const pools = new Map();
   const pool = (family) => {
     if (!pools.has(family)) pools.set(family, { held: 0, expiries: [], queue: Promise.resolve(), wake: null });
@@ -94,7 +101,7 @@ export function createFamilyLimiter({ requestsPerMinute, now = Date.now, delay =
   };
   return {
     async acquire(family) {
-      const limit = requestsPerMinute(family);
+      const limit = limitOf(family);
       const started = now();
       if (!Number.isFinite(limit)) return { waitedMs: 0, release() {} };
       const state = pool(family);
@@ -107,7 +114,7 @@ export function createFamilyLimiter({ requestsPerMinute, now = Date.now, delay =
         if (released) return;
         released = true;
         state.held -= 1;
-        const at = now() + RATE_WINDOW_MS;
+        const at = now() + windowMs;
         // Kept in order; a later release never expires earlier.
         state.expiries.push(Math.max(at, state.expiries.at(-1) ?? at));
         state.wake?.();

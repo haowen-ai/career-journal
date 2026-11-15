@@ -286,7 +286,7 @@ export function searchMeta(search) {
 // `laneWeights` (Map entry name → elapsed ms of the previous scan): hosts start longest lane first (plan v4), so a slow
 // host does not start last and set the wall time; hosts without a weight follow in configured order. Order only.
 // `families` (parseScanFamilies, plan v6): hosts of one provider (Workday: one cluster) share a pool; a pool with more than one
-// lane runs at most `lanes` lanes at once and sends at most `requestsPerMinute` requests in any 60 s (src/integrations/scan-families.mjs).
+// lane runs at most `lanes` lanes at once and sends at most `requestBudgets[window]` requests in every window (src/integrations/scan-families.mjs).
 // Limits only delay: every lane still runs, and every failure is still reported. Each partition then also reports its
 // `family`, `startedMs` (since the scan began) and `rateWaitMs`. Without `families` nothing changes.
 export async function collectCareerOpsRaw({ portals, providers, resolveProvider, makeHttpCtx, sleep = defaultSleep, retryDelaysMs = RETRY_DELAYS_MS,
@@ -305,8 +305,9 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
   // A split provider's request family comes from the real request host, which the lane count cannot know in advance:
   // it is always budgeted. Any other family only when it has more than one lane.
   const splitFamily = (family) => family != null && family.includes('|') && families.splitByHost.has(family.slice(0, family.indexOf('|')));
-  const limiter = families ? createFamilyLimiter({ now, delay,
-    requestsPerMinute: (family) => (splitFamily(family) || shared(family) ? families.requestsPerMinute.get(family) ?? families.requestsPerMinuteDefault : Infinity) }) : null;
+  // One limiter per window, shortest first; a request takes a slot in each, always in that order.
+  const limiters = families?.budgets.length ? families.budgets.map(({ windowMs, map, fallback }) => createFamilyLimiter({ windowMs, now, delay,
+    limitOf: (family) => (splitFamily(family) || shared(family) ? map.get(family) ?? fallback : Infinity) })) : null;
   const originalError = console.error;
   console.error = (...args) => {
     const scope = entryScope.getStore();
@@ -340,8 +341,8 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
         try {
           // The request budget wraps the timed methods: a wait for a slot never counts against the request timeout.
           const timed = withEntryTimeout(await makeHttpCtx(request, portals), request);
-          const ctx = limiter && (shared(family) || families.splitByHost.has(String(providerId)))
-            ? withRequestBudget(timed, (url) => familyOfRequest(providerId, url, families.splitByHost, family), limiter, (ms) => { rateWaitMs += ms; }) : timed;
+          const ctx = limiters && (shared(family) || families.splitByHost.has(String(providerId)))
+            ? withRequestBudget(timed, (url) => familyOfRequest(providerId, url, families.splitByHost, family), limiters, (ms) => { rateWaitMs += ms; }) : timed;
           if (known?.size) ctx.isKnownListing = (job) => known.has(nativeListingId(job));
           const bound = earlyStopBound(provider.id ?? resolved.id ?? null, partition, { known: knownListings, watermarks, earlyStop });
           if (bound != null) ctx.earlyStopBeforeMs = bound;
@@ -454,16 +455,24 @@ export async function collectCareerOpsRaw({ portals, providers, resolveProvider,
   return { roles: spoolDir ? [] : rolesByEntry.flat(), partitions, configuredPartitions, ...(spoolDir ? { spooled: true } : {}) };
 }
 
-// Every ctx request method of one entry takes a slot of its family's request budget first (plan v6 r3/r5). Pages,
-// retries (fetchJsonWithRetry calls ctx.fetchJson per attempt) and detail fetches all go through these methods.
-function withRequestBudget(ctx, familyFor, limiter, onWait) {
+// Every ctx request method of one entry takes a slot of its family's budget in every window first (plan v6 r3/r5/r6).
+// Pages, retries (fetchJsonWithRetry calls ctx.fetchJson per attempt) and detail fetches all go through these methods.
+// Slots are taken in window order and all released when the call ends, so waits never form a cycle.
+function withRequestBudget(ctx, familyFor, limiters, onWait) {
   const wrapped = { ...ctx };
   for (const name of ['fetchJson', 'fetchText', 'fetchResponse']) {
     if (typeof ctx?.[name] !== 'function') continue;
     wrapped[name] = async (...args) => {
-      const slot = await limiter.acquire(familyFor(args[0]));
-      if (slot.waitedMs > 0) onWait(slot.waitedMs);
-      try { return await ctx[name](...args); } finally { slot.release(); }
+      const family = familyFor(args[0]);
+      const slots = [];
+      try {
+        for (const limiter of limiters) {
+          const slot = await limiter.acquire(family);
+          slots.push(slot);
+          if (slot.waitedMs > 0) onWait(slot.waitedMs);
+        }
+        return await ctx[name](...args);
+      } finally { for (const slot of slots) slot.release(); }
     };
   }
   return wrapped;

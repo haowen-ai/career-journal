@@ -1,5 +1,5 @@
 // Plan 2026-11-14 v6 (r2-r5): hosts that share infrastructure ("families": the provider, Workday split by
-// cluster) get at most `lanes` lanes at once and at most `requestsPerMinute` requests in any 60 seconds,
+// cluster) get at most `lanes` lanes at once and at most `requestBudgets[window]` requests in every window (60 s, 300 s, ...),
 // so a higher overall concurrency never sends any shared pool more than it got before. Synthetic data only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -44,24 +44,30 @@ test('families: the provider id, and a split provider by its request host withou
 test('scanFamilies config: unset is null, valid values parse, anything else is a configuration error', () => {
   assert.equal(parseScanFamilies(undefined), null);
   assert.equal(parseScanFamilies(null), null);
-  const parsed = parseScanFamilies({ splitByHost: ['workday'], lanes: { default: 1, avature: 3 }, requestsPerMinute: { default: 30, avature: 119 } });
+  const parsed = parseScanFamilies({ splitByHost: ['workday'], lanes: { default: 1, avature: 3 },
+    requestBudgets: { 300: { default: 150, avature: 430 }, 60: { default: 30, avature: 119 } } });
   assert.deepEqual([...parsed.splitByHost], ['workday']);
   assert.equal(parsed.lanes.get('avature'), 3);
   assert.equal(parsed.lanesDefault, 1);
-  assert.equal(parsed.requestsPerMinute.get('avature'), 119);
-  assert.equal(parsed.requestsPerMinuteDefault, 30);
+  assert.deepEqual(parsed.budgets.map((b) => b.windowMs), [60_000, 300_000], 'windows in ascending order');
+  assert.equal(parsed.budgets[0].map.get('avature'), 119);
+  assert.equal(parsed.budgets[0].fallback, 30);
+  assert.equal(parsed.budgets[1].map.get('avature'), 430);
+  assert.equal(parsed.budgets[1].fallback, 150);
   const none = parseScanFamilies({});
   assert.equal(none.lanesDefault, Infinity);
-  assert.equal(none.requestsPerMinuteDefault, Infinity);
-  for (const bad of ['x', 3, [], { lanes: { avature: 0 } }, { lanes: { default: 1.5 } }, { requestsPerMinute: { a: '5' } },
-    { requestsPerMinute: [] }, { splitByHost: 'workday' }, { splitByHost: [3] }, { other: 1 }]) {
+  assert.deepEqual(none.budgets, []);
+  for (const bad of ['x', 3, [], { lanes: { avature: 0 } }, { lanes: { default: 1.5 } }, { requestBudgets: { 60: { a: '5' } } },
+    { requestBudgets: [] }, { requestBudgets: { 60: [] } }, { requestBudgets: { '0': { a: 1 } } }, { requestBudgets: { '1.5': { a: 1 } } },
+    { requestBudgets: { x: { a: 1 } } }, { requestBudgets: { 60: null } }, { requestsPerMinute: { a: 5 } },
+    { splitByHost: 'workday' }, { splitByHost: [3] }, { other: 1 }]) {
     assert.throws(() => parseScanFamilies(bad), /scanFamilies/, JSON.stringify(bad));
   }
 });
 
 test('limiter: a held slot frees only 60 s after its call ends; the 7th of 6 waits for that (Codex r4 counterexample)', async () => {
   const time = fakeTime();
-  const limiter = createFamilyLimiter({ requestsPerMinute: () => 6, now: time.now, delay: time.delay });
+  const limiter = createFamilyLimiter({ windowMs: 60_000, limitOf: () => 6, now: time.now, delay: time.delay });
   const slots = [];
   // Slots at 0, 500, ..., 2500 ms. The first call really goes out at 100 ms and ends at 500 ms; the
   // others end the moment they are granted. Counting from the grant would free the first slot at 60,000 ms
@@ -82,7 +88,7 @@ test('limiter: a held slot frees only 60 s after its call ends; the 7th of 6 wai
 
 test('limiter: a failed call holds its slot for 60 s too; other families never wait; no limit means no wait', async () => {
   const time = fakeTime();
-  const limiter = createFamilyLimiter({ requestsPerMinute: (family) => (family === 'a' ? 1 : Infinity), now: time.now, delay: time.delay });
+  const limiter = createFamilyLimiter({ windowMs: 60_000, limitOf: (family) => (family === 'a' ? 1 : Infinity), now: time.now, delay: time.delay });
   const first = await limiter.acquire('a');
   first.release();
   let second = null;
@@ -151,7 +157,7 @@ test('requests: every ctx fetch of a multi-lane family takes a slot (retries too
     return [{ title: `Intern ${item.name}`, url: `https://x.test/${item.name}` }];
   } };
   const makeHttpCtx = async () => ({ fetchJson: async (url, opts) => { calls.push({ url, at: time.now(), timeoutMs: opts?.timeoutMs }); return {}; } });
-  const families = parseScanFamilies({ lanes: { default: 2 }, requestsPerMinute: { demo: 4 } });
+  const families = parseScanFamilies({ lanes: { default: 2 }, requestBudgets: { 60: { demo: 4 } } });
   const pending = collect([entry('A'), entry('B')], provider, { makeHttpCtx, concurrency: 2, families, now: time.now, delay: time.delay });
   await time.advance(10);
   assert.equal(calls.length, 4, 'four of six calls in the first minute');
@@ -168,7 +174,7 @@ test('requests: a single-lane family and a scan without the config are never lim
   let calls = 0;
   const provider = { id: 'demo', fetch: async (item, ctx) => { for (let i = 0; i < 10; i += 1) await ctx.fetchJson(`https://${item.name}/${i}`); return []; } };
   const makeHttpCtx = async () => ({ fetchJson: async () => { calls += 1; return {}; } });
-  await collect([entry('A')], provider, { makeHttpCtx, families: parseScanFamilies({ requestsPerMinute: { default: 1 } }), now: time.now, delay: time.delay });
+  await collect([entry('A')], provider, { makeHttpCtx, families: parseScanFamilies({ requestBudgets: { 60: { default: 1 } } }), now: time.now, delay: time.delay });
   assert.equal(calls, 10);
   calls = 0;
   await collect([entry('A'), entry('B')], provider, { makeHttpCtx, concurrency: 2, now: time.now, delay: time.delay });
@@ -187,7 +193,7 @@ test('requests: a provider retry is another request and takes another slot', asy
   let failures = 2;
   const makeHttpCtx = async () => ({ fetchJson: async (url) => { calls.push(time.now()); if (failures-- > 0) throw Object.assign(new Error('HTTP 429'), { status: 429 }); return {}; } });
   const pending = collect([entry('A'), entry('B')], provider, { makeHttpCtx, concurrency: 1,
-    families: parseScanFamilies({ requestsPerMinute: { demo: 2 } }), now: time.now, delay: time.delay });
+    families: parseScanFamilies({ requestBudgets: { 60: { demo: 2 } } }), now: time.now, delay: time.delay });
   await time.advance(10);
   assert.equal(calls.length, 2, 'A\'s first try and its retry use the budget of two');
   await time.advance(120_000);
@@ -227,7 +233,7 @@ test('requests: a split provider is budgeted by the host it really requests, not
   ];
   const makeHttpCtx = async () => ({ fetchJson: async (url) => { calls.push([url, time.now()]); return {}; } });
   const pending = collect(entries, wd, { providers: { wd }, resolveProvider: async () => ({ provider: wd, id: 'wd' }), makeHttpCtx, concurrency: 2,
-    families: parseScanFamilies({ splitByHost: ['wd'], requestsPerMinute: { 'wd|wd1.myworkdayjobs.com': 1 } }), now: time.now, delay: time.delay });
+    families: parseScanFamilies({ splitByHost: ['wd'], requestBudgets: { 60: { 'wd|wd1.myworkdayjobs.com': 1 } } }), now: time.now, delay: time.delay });
   await time.advance(10);
   assert.equal(calls.length, 1, 'both tenants are on wd1: one request in the first minute');
   await time.advance(60_000);
@@ -242,7 +248,7 @@ test('requests: a split provider family missing from the config gets the default
   const wd = { id: 'wd', fetch: async (item, ctx) => { for (let i = 0; i < 3; i += 1) await ctx.fetchJson(`https://t.wd9.myworkdayjobs.com/p${i}`); return []; } };
   const pending = collect([entry('A')], wd, { providers: { wd }, resolveProvider: async () => ({ provider: wd, id: 'wd' }),
     makeHttpCtx: async () => ({ fetchJson: async () => { calls += 1; return {}; } }),
-    families: parseScanFamilies({ splitByHost: ['wd'], requestsPerMinute: { default: 2 } }), now: time.now, delay: time.delay });
+    families: parseScanFamilies({ splitByHost: ['wd'], requestBudgets: { 60: { default: 2 } } }), now: time.now, delay: time.delay });
   await time.advance(10);
   assert.equal(calls, 2);
   await time.advance(60_000);
@@ -251,7 +257,7 @@ test('requests: a split provider family missing from the config gets the default
 });
 
 test('scanFamilies config: an explicit null list or map is rejected, not read as empty (Codex code review r1-3)', () => {
-  for (const bad of [{ splitByHost: null }, { lanes: null }, { requestsPerMinute: null }]) {
+  for (const bad of [{ splitByHost: null }, { lanes: null }, { requestBudgets: null }]) {
     assert.throws(() => parseScanFamilies(bad), /scanFamilies/, JSON.stringify(bad));
   }
 });
@@ -264,7 +270,7 @@ test('lanes: a split provider entry is scheduled under the configured family of 
     { name: 'A', api: 'https://api.a.example/feed', careers_url: 'https://a.wd1.myworkdayjobs.com/External' },
     { name: 'B', api: 'https://api.b.example/feed', careers_url: 'https://b.wd1.myworkdayjobs.com/External' },
   ];
-  const families = parseScanFamilies({ splitByHost: ['wd'], lanes: { 'wd|wd1.myworkdayjobs.com': 1 }, requestsPerMinute: { default: 30 } });
+  const families = parseScanFamilies({ splitByHost: ['wd'], lanes: { 'wd|wd1.myworkdayjobs.com': 1 }, requestBudgets: { 60: { default: 30 } } });
   const result = await collect(entries, wd, { providers: { wd }, resolveProvider: async () => ({ provider: wd, id: 'wd' }), concurrency: 2, families });
   assert.equal(peak, 1);
   assert.deepEqual(result.partitions.map((p) => p.family), ['wd|wd1.myworkdayjobs.com', 'wd|wd1.myworkdayjobs.com']);
@@ -272,4 +278,28 @@ test('lanes: a split provider entry is scheduled under the configured family of 
   assert.equal(familyOf('wd', entries[0], new Set(['wd']), known), 'wd|wd1.myworkdayjobs.com');
   assert.equal(familyOf('wd', { api: 'https://x.wd5.myworkdayjobs.com/wday/cxs/x/y/jobs', careers_url: 'https://x.wd1.myworkdayjobs.com/y' }, new Set(['wd']), new Set(['wd|wd1.myworkdayjobs.com', 'wd|wd5.myworkdayjobs.com'])),
     'wd|wd5.myworkdayjobs.com', 'api first when both are configured families, as the provider reads it');
+});
+
+test('requests: every window must have room; a 300 s budget holds a request the 60 s budget would let out (plan v6 r6)', async () => {
+  const time = fakeTime();
+  const calls = [];
+  const provider = { id: 'demo', fetch: async (item, ctx) => { for (let i = 0; i < 4; i += 1) await ctx.fetchJson(`https://${item.name}/${i}`); return []; } };
+  const makeHttpCtx = async () => ({ fetchJson: async () => { calls.push(time.now()); return {}; } });
+  const families = parseScanFamilies({ lanes: { default: 2 }, requestBudgets: { 60: { demo: 2 }, 300: { demo: 3 } } });
+  const pending = collect([entry('A'), entry('B')], provider, { makeHttpCtx, concurrency: 2, families, now: time.now, delay: time.delay });
+  await time.advance(10);
+  assert.equal(calls.length, 2, '60 s window: two');
+  await time.advance(60_000);
+  assert.equal(calls.length, 3, 'next minute: only one more, the 300 s window is full');
+  await time.advance(180_000);
+  assert.equal(calls.length, 3, 'still full until the first slots are 300 s past their calls');
+  await time.advance(60_000);
+  assert.ok(calls.length >= 4);
+  await time.advance(900_000);
+  await pending;
+  assert.equal(calls.length, 8);
+  // No 300 s window ever holds more than three calls, no 60 s window more than two.
+  for (const [windowMs, budget] of [[60_000, 2], [300_000, 3]]) {
+    for (const start of calls) assert.ok(calls.filter((at) => at >= start && at < start + windowMs).length <= budget, `${windowMs} from ${start}: ${calls}`);
+  }
 });
